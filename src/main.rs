@@ -423,8 +423,8 @@ struct TerminalSessionTab {
     git_commit_busy: bool,
     /// 正在推送中：禁用按钮，避免重复点击。
     git_push_busy: bool,
-    /// 只读代码查看器视图句柄（仅 CodeViewer tab 持有；复用 Warp CodeEditorView）。
-    code_viewer: Option<warpui::ViewHandle<warp::CodeEditorView>>,
+    /// 只读代码查看器视图句柄（仅 CodeViewer tab 持有；本地化 code_editor::CodeEditorView）。
+    code_viewer: Option<warpui::ViewHandle<nexshell::code_editor::CodeEditorView>>,
     /// 查看器当前展示的本地文件绝对路径（复用判断 + 重载用）。
     code_viewer_path: Option<String>,
     /// 是否有未保存改动（= 当前 text != 已保存基线）；驱动标签脏圆点 + 关闭/换文件确认。
@@ -621,12 +621,12 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
             warpui_extras::user_preferences::in_memory::InMemoryPreferences,
         >::default())
     });
-    ctx.add_singleton_model(|_| warp::settings::manager::SettingsManager::default());
+    ctx.add_singleton_model(|_| settings::manager::SettingsManager::default());
 
-    warp::settings::AppEditorSettings::register(ctx);
-    // 只读代码查看器复用的 CodeEditorView::new 依赖 FontSettings 单例（ADR 0002）。
-    warp::settings::FontSettings::register(ctx);
-    warp::settings::SelectionSettings::register(ctx);
+    nexshell::text_editor::settings::AppEditorSettings::register(ctx);
+    // 代码查看器复用的 CodeEditorView::new 依赖 FontSettings 单例（ADR 0002）。
+    nexshell::text_editor::settings::FontSettings::register(ctx);
+    nexshell::text_editor::settings::SelectionSettings::register(ctx);
     warp_core::semantic_selection::SemanticSelection::register(ctx);
     register_warp_appearance(ctx);
     ctx.add_singleton_model(|_| nexshell::util::bindings::KeybindingChangedNotifier::new());
@@ -634,13 +634,7 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
     nexshell::text_editor::init(ctx);
     // CodeEditorView 自己的 action 键绑定（方向键/退格/删除/选择等）；可编辑后必需，
     // 单行 editor::init 不含（ADR 0003）。否则只有 IME 字符输入可用、方向键/功能键全失效。
-    warp::init_code_editor_view(ctx);
-
-    // 只读 CodeEditorView::new 无条件构造 active_comment_editor，经 RTE 子树读这三个单例（ADR 0002）。
-    // 均为内存态、不触网/不登录；KeybindingChangedNotifier 已在上方注册（NotebookKeybindings 会订阅它）。
-    ctx.add_singleton_model(warp::NotebookKeybindings::new);
-    ctx.add_singleton_model(|_| warp::workspace::ActiveSession::default());
-    ctx.add_singleton_model(|_| warp::CloudModel::new(None, Vec::new(), None));
+    nexshell::code_editor::init_code_editor_view(ctx);
 }
 
 fn register_warp_appearance(ctx: &mut AppContext) {

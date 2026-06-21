@@ -25,6 +25,8 @@ pub struct ReferencePolicy {
     pub adopt_warp_blocks: bool,
 }
 
+#[cfg(feature = "warpui-app")]
+pub mod code_editor;
 pub mod actions;
 pub mod file_drop_target;
 #[cfg(feature = "warpui-app")]
