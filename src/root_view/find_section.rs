@@ -5,7 +5,7 @@
 // 分发；render_find_bar 由 mod.rs impl View::render 调用——均用 pub(in crate::root_view)。
 // 仅本文件内调用的 handle_find_editor_event 保持私有。find_match_label 已于 step 10 归 terminal_view_helpers。
 
-use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, neutral_3, neutral_4};
 use warpui::color::ColorU;
 use warpui::elements::{

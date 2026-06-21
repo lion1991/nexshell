@@ -15,7 +15,7 @@ use nexshell::terminal_runtime::LocalTerminalRuntime;
 use nexshell::warp_tab_context_menu::{
     custom_title_from_editor, selected_tab_color_after_toggle,
 };
-use warp::editor::Event as EditorEvent;
+use nexshell::text_editor::Event as EditorEvent;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::ViewContext;
 

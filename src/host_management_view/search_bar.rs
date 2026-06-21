@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use warp_core::ui::appearance::Appearance;
-use warp::editor::EditorView;
+use nexshell::text_editor::EditorView;
 use warpui::{
     color::ColorU,
     elements::{

@@ -13,7 +13,7 @@ use crate::{
     ICON_PATH_REFRESH, ICON_PATH_UPLOAD,
 };
 use nexshell::git_panel::GitRequest;
-use warp::editor::Event as EditorEvent;
+use nexshell::text_editor::Event as EditorEvent;
 use warpui::elements::{
     Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Fill, Flex,
     Hoverable, Icon, ParentElement, Radius, Text,

@@ -14,7 +14,7 @@ use nexshell::remote_edit_io::{
 };
 use nexshell::ssh_session::SshHandle;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
-use warp::editor::InteractionState;
+use nexshell::text_editor::InteractionState;
 use warp::{CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::element::VerticalExpansionBehavior;

@@ -8,7 +8,7 @@ publish = false
 default = ["warpui-app"]
 # 实际运行的应用 feature：拉入 warpui + warpui_core（皆 MIT），在 macOS 上
 # 同时把 warp 的整个平台层 (cocoa/metal/font-kit/objc) 间接拉入。
-warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value"]
+warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim"]
 
 [dependencies]
 alacritty_terminal = "0.25"
@@ -84,6 +84,8 @@ warp_core = { path = "../warp/crates/warp_core", optional = true }
 # themes 本地化：ThemeKind/CustomTheme 的 schemars::JsonSchema + settings_value::SettingsValue derive。
 schemars = { version = "1", optional = true }
 settings_value = { path = "../warp/crates/settings_value", features = ["derive"], default-features = false, optional = true }
+# editor 本地化：text_editor 的 vim_model 依赖纯净的 vim crate（无 ai/app/网络）。
+vim = { path = "../warp/crates/vim", optional = true }
 
 [[bin]]
 name = "nexshell"

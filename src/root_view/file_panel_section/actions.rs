@@ -17,7 +17,7 @@ use nexshell::file_panel::{
 };
 use nexshell::sftp_ops::EntryKind;
 use warp_core::ui::appearance::Appearance;
-use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::clipboard::ClipboardContent;
 use warpui::{SingletonEntity as _, ViewContext};
 

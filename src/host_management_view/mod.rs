@@ -18,7 +18,7 @@ use warpui::{
 use crate::terminal_grid_element::TerminalGridAction;
 
 use warp_core::ui::appearance::Appearance;
-use warp::editor::EditorView;
+use nexshell::text_editor::EditorView;
 
 use nexshell::host_management::{
     HostManagementState, HostViewMode, RecentHostSnapshot,

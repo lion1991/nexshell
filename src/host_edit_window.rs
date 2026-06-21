@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use warp_core::ui::appearance::Appearance;
-use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_editor::editor::NavigationKey;
 use warpui::{
     color::ColorU,
@@ -519,7 +519,7 @@ impl View for HostEditView {
 
     fn active_cursor_position(&self, ctx: &ViewContext<Self>) -> Option<CursorInfo> {
         let editor = self.editor_for_field(self.current_editor_field(ctx));
-        let cursor_id = warp::editor::position_id_for_cursor(editor.id());
+        let cursor_id = nexshell::text_editor::position_id_for_cursor(editor.id());
         let font_size = Appearance::as_ref(ctx).ui_font_size();
         ctx.element_position_by_id(cursor_id)
             .map(|position| CursorInfo {

@@ -13,7 +13,7 @@ use warpui::{
     fonts, Element, ViewHandle,
 };
 
-use warp::editor::EditorView;
+use nexshell::text_editor::EditorView;
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::ui_components::text_input::TextInput;
 

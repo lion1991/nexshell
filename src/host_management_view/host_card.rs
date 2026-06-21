@@ -12,7 +12,7 @@ use warpui::{
 
 use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
-use warp::editor::EditorView;
+use nexshell::text_editor::EditorView;
 use warpui::elements::Expanded;
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::ui_components::text_input::TextInput;

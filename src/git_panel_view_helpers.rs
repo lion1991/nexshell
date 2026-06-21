@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use warp::editor::{EditorOptions, TextOptions};
+use nexshell::text_editor::{EditorOptions, TextOptions};
 use warpui::color::ColorU;
 use warpui::elements::{
     Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Expanded, Flex,

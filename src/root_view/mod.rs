@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use warp_core::ui::appearance::Appearance;
-use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::{
     clipboard::ClipboardContent,
@@ -1406,7 +1406,7 @@ impl View for RootView {
         if self.app_page == AppPage::HostManagement {
             let focused = ctx.focused_view_id(ctx.window_id());
             if focused == Some(self.host_search_editor.id()) {
-                let cursor_id = warp::editor::position_id_for_cursor(self.host_search_editor.id());
+                let cursor_id = nexshell::text_editor::position_id_for_cursor(self.host_search_editor.id());
                 let font_size = Appearance::as_ref(ctx).ui_font_size();
                 return ctx
                     .element_position_by_id(cursor_id)

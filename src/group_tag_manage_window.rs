@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use warp_core::ui::appearance::Appearance;
-use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::{
     elements::{
         Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
@@ -313,7 +313,7 @@ impl View for GroupTagManageView {
         } else {
             &self.tag_input_editor
         };
-        let cursor_id = warp::editor::position_id_for_cursor(editor.id());
+        let cursor_id = nexshell::text_editor::position_id_for_cursor(editor.id());
         let font_size = Appearance::as_ref(ctx).ui_font_size();
         ctx.element_position_by_id(cursor_id)
             .map(|position| CursorInfo {
