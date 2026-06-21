@@ -1,0 +1,417 @@
+# === App ===
+app_name: NexShell
+copyright: "© 2025-2026 Matt"
+about_app: 关于 NexShell
+quit_app: 退出 NexShell
+
+# === Tab types ===
+tab_local: 本地
+tab_remote: 远程
+tab_serial: 串口
+tab_direct: 终端
+tab_process_list: 进程
+process_list_placeholder: 进程列表加载中…
+process_list_error: 进程列表采集失败
+process_list_empty: 暂无进程数据
+process_ctx_kill: 终止进程
+process_ctx_copy_pid: 复制PID
+process_ctx_copy_name: 复制名称
+process_ctx_copy_args: 复制命令行
+process_ctx_copy_path: 复制位置
+tab_network_list: 网络
+network_list_placeholder: 网络列表加载中…
+network_list_error: 网络列表采集失败
+network_list_empty: 暂无网络连接
+tab_system_info: 系统信息
+tab_git_diff: Diff
+tab_code_viewer: 内置编辑器
+code_viewer_loading: 文件加载中…
+code_viewer_read_error: "读取文件失败：%{error}"
+code_viewer_saved: 已保存
+code_viewer_save_error: "保存失败：%{error}"
+code_viewer_unsaved_title: 未保存的更改
+code_viewer_unsaved_message: "%{name} 有未保存的更改，是否保存？"
+code_viewer_unsaved_save: 保存
+code_viewer_unsaved_save_all: 全部保存
+code_viewer_unsaved_discard: 不保存
+code_viewer_unsaved_batch_message: "有 %{count} 个标签未保存，关闭将丢失这些更改。"
+code_viewer_remote_download_first: 该远程文件是二进制或过大，无法在编辑器中打开，请先下载后再编辑。
+code_viewer_remote_not_ready: SSH 连接尚未就绪，无法打开远程文件。
+code_viewer_remote_conflict_title: 远程文件已被改动
+code_viewer_remote_conflict_message: "%{name} 在远程已被改动，是否覆盖？"
+code_viewer_remote_conflict_overwrite: 覆盖
+code_viewer_reconnect_banner: 连接已断开。点此重连
+code_viewer_reconnect_banner_dirty: 连接已断开，未保存的修改暂时存不回。点此重连后再保存
+system_info_placeholder: 系统信息加载中…
+system_info_error: 系统信息采集失败
+
+# === Host overview sidebar ===
+host_overview_fallback_title: 主机信息
+host_overview_subtitle_placeholder: 连接 SSH 主机后显示概览
+host_overview_not_connected: 未连接
+host_overview_status_waiting: 等待 SSH 连接
+host_overview_status_updating: 正在更新主机信息
+host_overview_status_collecting: 正在采集主机信息
+host_overview_status_empty: 未采集到可展示的主机信息
+host_overview_status_ready: 主机信息已更新
+host_overview_status_error: "主机信息暂不可用：%{error}"
+host_overview_section_system: 系统信息
+host_overview_section_process: 进程
+host_overview_section_network: 网络
+host_overview_section_disk: 磁盘
+host_overview_load: 负载
+host_overview_memory: 内存
+host_overview_swap: 交换
+host_overview_col_memory: 内存
+host_overview_col_cpu: CPU
+host_overview_col_command: 命令
+host_overview_col_mount: 路径
+host_overview_col_disk_usage: 可用/大小
+host_overview_no_process: 暂无进程数据
+host_overview_no_network: 暂无网卡数据
+host_overview_no_disk: 暂无磁盘数据
+host_overview_latency: SSH 延迟
+host_overview_peak: "峰值 %{rate}"
+host_overview_uptime_days: "运行 %{n} 天"
+host_overview_uptime_hours: "运行 %{n} 小时"
+host_overview_uptime_minutes: "运行 %{n} 分钟"
+
+# === Sidebar ===
+sidebar: 侧边栏
+
+# === Menu: new tab ===
+menu_terminal: 终端
+menu_new_tab: 新建标签页
+menu_close_tab: 关闭标签页
+menu_copy: 复制
+menu_find: 查找…
+menu_paste: 粘贴
+menu_clear_screen: 清屏
+
+# === Menu: gear ===
+menu_whats_new: 新功能
+menu_settings: 设置
+menu_keyboard_shortcuts: 键盘快捷键
+menu_documentation: 文档
+menu_feedback: 反馈
+menu_view_logs: 查看日志
+
+# === Context menu ===
+ctx_split_right: 右侧分屏
+ctx_split_left: 左侧分屏
+ctx_split_down: 下方分屏
+ctx_split_up: 上方分屏
+ctx_maximize_pane: 最大化窗口
+ctx_restore_pane: 恢复窗口
+ctx_close_pane: 关闭窗口
+file_panel_ctx_download_as: 下载到…
+file_panel_ctx_delete: 删除
+file_panel_ctx_delete_many: "删除 %{count} 项"
+file_panel_ctx_rename: 重命名
+file_panel_ctx_new_dir: 新建目录
+file_panel_ctx_new_file: 新建文件
+file_panel_ctx_copy_path: 复制路径
+file_panel_ctx_sync_terminal_cwd: 切换到终端目录
+file_panel_ctx_cd_to_directory: cd 到目录
+file_panel_ctx_open_new_tab: 在新标签页中打开
+file_panel_ctx_reveal_finder: 在 Finder 中显示
+file_panel_ctx_reveal_explorer: 在资源管理器中显示
+file_panel_ctx_reveal_file_manager: 在文件管理器中显示
+file_panel_ctx_copy_relative_path: 复制相对路径
+file_panel_ctx_open: 打开
+file_panel_ctx_edit: 编辑
+file_panel_ctx_open_with_viewer: 用编辑器打开
+host_ctx_connect: 连接
+host_ctx_edit: 编辑
+host_ctx_rename: 重命名
+host_ctx_copy: 复制
+host_ctx_cut: 剪切
+host_ctx_paste: 粘贴
+host_ctx_delete: 删除
+host_ctx_restore: 恢复
+host_ctx_copy_address: 复制地址
+host_ctx_new_host: 新建主机
+host_ctx_sort: 排序
+file_panel_input_new_dir: 新目录名
+file_panel_input_new_file: 新文件名
+file_panel_input_rename: "重命名 %{name}"
+file_panel_path_copied: 已复制路径
+
+# === Git Panel ===
+git_panel_empty: Git
+git_panel_remote_unsupported: 远程会话不支持 git 面板
+git_panel_no_repo: 不在 git 仓库中
+git_panel_not_in_repo: 当前目录不在 git 仓库中
+git_panel_detached: HEAD（detached）
+git_panel_loading: 读取仓库状态中...
+git_panel_clean: 工作区干净
+git_panel_section_staged: 已暂存
+git_panel_section_changes: 未暂存
+git_panel_section_untracked: 未跟踪
+git_panel_section_unmerged: 冲突
+git_panel_section_diff: Diff
+git_panel_section_history: 历史
+git_panel_diff_select_file: 选择文件预览 diff
+git_panel_diff_loading: 正在加载 diff...
+git_panel_diff_binary: 二进制文件不显示 diff
+git_panel_diff_too_large: "Diff 过大，无法预览（%{size}）"
+git_panel_diff_empty: 没有可显示的 diff
+git_panel_commit_files: 文件
+git_panel_ctx_stage: 暂存
+git_panel_ctx_unstage: 取消暂存
+git_panel_ctx_discard_changes: 丢弃改动
+git_panel_ctx_add_gitignore: 添加到 .gitignore
+git_panel_discard_title: 丢弃文件改动？
+git_panel_discard_message: "将丢弃 %{path} 的未暂存改动。此操作无法撤销。"
+git_panel_discard_confirm: 丢弃改动
+git_panel_delete_untracked_title: 删除未跟踪文件？
+git_panel_delete_untracked_message: "将从磁盘永久删除 %{path}，此操作不可逆。"
+git_panel_delete_untracked_confirm: 删除
+git_panel_no_commits: 暂无提交
+git_panel_history_loading_more: 正在加载更多提交...
+git_panel_stage_all: 全部暂存
+git_panel_commit_placeholder: 提交信息
+git_panel_commit_button: 提交…
+git_panel_commit_busy: 正在提交…
+git_panel_push_ready_one: 1 个提交待推送到 %{upstream}
+git_panel_push_ready_many: "%{count} 个提交待推送到 %{upstream}"
+git_panel_push_synced: 已同步到 %{upstream}
+git_panel_push_no_upstream: 未设置上游分支
+git_panel_push_button: 推送
+git_panel_push_busy: 正在推送…
+git_panel_ssh_host_key_title: 是否信任 SSH 主机密钥？
+git_panel_ssh_host_key_title_host: 是否信任 %{host} 的 SSH 主机密钥？
+git_panel_ssh_host_key_message: Git 推送正在首次连接这个 SSH 主机。继续前请核对指纹。
+git_panel_ssh_host_key_fingerprint: "指纹：%{fingerprint}"
+git_panel_ssh_host_key_warning: 继续后，NexShell 会让 OpenSSH 添加这个新的主机密钥并重新推送。已变化的主机密钥不会被自动接受。
+git_panel_ssh_host_key_confirm: 信任并推送
+git_panel_ssh_host_key_cancel: 取消
+
+# === Settings ===
+settings_title: 设置
+settings_appearance: 外观
+settings_keybindings: 键盘快捷键
+
+# === Appearance page ===
+appearance_title: 外观
+appearance_theme: 主题
+appearance_themes: 主题
+appearance_window: 窗口
+appearance_window_opacity: "窗口不透明度：%{value}"
+appearance_text: 文本
+appearance_terminal_font: 终端字体
+appearance_view_all_fonts: 查看所有可用的系统字体
+appearance_font_weight: 字体粗细
+appearance_font_size: 字体大小（px）
+appearance_line_height: 行高
+appearance_reset_default: 恢复默认值
+appearance_cursor: 光标
+appearance_cursor_type: 光标样式
+appearance_language: 语言
+appearance_language_auto: 自动（跟随系统）
+appearance_language_en: English
+appearance_language_zh: 简体中文
+settings_editor_section: 编辑器
+settings_open_file_editor: 打开文件用
+settings_editor_system_default: 系统默认
+settings_reuse_view_tab: diff 与代码查看器复用单标签
+
+# === Cursor styles ===
+cursor_block: 方块
+cursor_beam: 竖线
+cursor_underline: 下划线
+
+# === Keybindings page ===
+key_clear_screen: 清屏
+key_find: 查找
+key_copy: 复制
+key_paste: 粘贴
+key_new_tab: 新建标签页
+key_close_tab: 关闭标签页
+key_prev_tab: 上一个标签页
+key_next_tab: 下一个标签页
+key_split_right: 右侧分屏
+key_split_down: 下方分屏
+key_close_pane: 关闭窗口
+key_nav_left: 导航到左侧窗格
+key_nav_right: 导航到右侧窗格
+key_nav_up: 导航到上方窗格
+key_nav_down: 导航到下方窗格
+key_maximize_pane: 最大化窗口
+key_increase_font: 放大字体
+key_decrease_font: 缩小字体
+key_reset_font: 重置字体
+
+# === Dialogs ===
+dialog_close_window: 关闭窗口？
+dialog_close_window_msg: "你有 %{count} 个进程正在运行，关闭窗口将终止这些进程。"
+dialog_close_window_unsaved: "有未保存的更改，关闭窗口将丢失。确认关闭？"
+dialog_confirm_close: 确认关闭
+dialog_quit_app: 退出 NexShell？
+dialog_quit_app_msg: "你有 %{count} 个进程正在运行，退出将终止这些进程。"
+dialog_quit_app_unsaved: "有未保存的更改，退出将丢失。确认退出？"
+dialog_confirm_quit: 确认退出
+dialog_cancel: 取消
+
+# === Toast / Notice ===
+toast_form_required: 名称、地址、端口、用户不能为空
+toast_host_saved: 已保存主机设置
+toast_host_created: 已保存新主机
+host_copy_suffix: 副本
+toast_host_copied: 已复制主机
+toast_host_cut: 已剪切主机
+toast_host_pasted: 已粘贴主机
+toast_host_restored: 已恢复主机
+toast_paste_failed: "粘贴主机失败：%{error}"
+toast_restore_failed: "恢复主机失败：%{error}"
+toast_rename_failed: "重命名主机失败：%{error}"
+toast_hosts_refreshed: 已刷新主机库
+toast_hosts_deleted: "已删除 %{count} 台主机"
+toast_hosts_deleted_refresh_fail: "已删除 %{count} 台主机，但刷新失败：%{error}"
+toast_save_failed: "保存主机失败：%{error}"
+toast_delete_failed: "删除主机失败：%{error}"
+toast_refresh_failed: "刷新主机库失败：%{error}"
+toast_db_read_failed: "读取主机数据库失败：%{error}"
+toast_db_path_unavailable: 无法解析 NexShell 主机数据库路径
+toast_host_library_unavailable_delete: 主机库不可用，无法删除主机
+toast_host_library_unavailable_save: 主机库不可用，无法保存主机设置
+toast_saved_refresh_fail: "已保存，但刷新失败：%{error}"
+toast_feature_wip: 功能开发中...
+toast_move_wip: 移动功能开发中...
+toast_connecting: "正在连接 %{title}"
+toast_connect_failed: "%{title}：%{reason}"
+
+# === Host management ===
+host_empty: 暂无主机
+host_empty_hint: 点击右上角「+ 新建主机」添加
+host_new: 新建主机
+host_edit: 编辑
+host_select_all: 全选
+host_selected_count: "已选择 %{count} 台"
+host_selected_hosts: "已选择 %{count} 台主机"
+host_connect: 连接
+host_move: 移动
+host_delete: 删除
+host_cancel: 取消
+host_privacy: 隐私
+host_import: 导入
+host_export: 导出
+host_cloud_sync: 云同步
+host_export_password_prompt: 设置导出文件密码（用于解密导入）
+host_export_password_placeholder: 输入密码…
+host_export_confirm: 加密导出
+host_export_cancel: 取消
+toast_export_no_hosts: 当前没有主机可导出
+toast_export_success: "已导出 %{count} 台主机到加密文件"
+toast_export_password_required: 请输入密码
+toast_export_failed: "导出失败：%{error}"
+host_import_password_prompt: 输入导出文件的密码以解密导入
+host_import_confirm: 解密并导入
+host_export_busy: 正在加密
+host_import_busy: 正在解密并导入
+toast_import_password_required: 请输入密码
+toast_import_read_failed: "读取文件失败：%{error}"
+toast_import_success: "已导入 %{count}/%{total} 台主机"
+toast_import_failed: "导入失败：%{error}"
+host_search_placeholder: 搜索主机...
+host_group_all: 所有主机
+host_group_nav: 分组
+host_tag_filter: 标签筛选
+host_manage_groups_tags: 管理分组与标签
+host_protocol_all: 所有协议
+
+# === Host edit form ===
+form_new_host: 新建主机
+form_edit_host: 编辑主机
+form_protocol: 协议
+form_name: 名称
+form_host_address: 主机地址
+form_port: 端口
+form_username: 用户名
+form_auth_method: 认证方式
+form_password_auth: 密码认证
+form_key_auth: 密钥认证
+form_key_passphrase: 密钥密码
+form_certificate: 证书文件
+form_password: 密码
+form_serial_device: 串口设备
+form_baud_rate: 波特率
+form_description: 描述
+form_group: 分组
+form_tags: 标签
+form_no_group: 无分组
+form_no_tags: 无标签
+form_no_serial: 未检测到串口设备
+form_save: 保存
+form_create: 创建
+form_cancel: 取消
+form_advanced: 高级设置
+form_keep_alive_enabled: 已启用
+form_keep_alive_disabled: 已停用
+form_heartbeat_interval: 心跳间隔
+form_max_failures: 最大失败次数
+form_connection_timeout: 连接超时
+form_tcp_timeout: TCP 连接超时
+form_auth_timeout: 认证超时
+form_terminal_encoding: 终端编码
+form_encoding_hint: 连接旧系统时可能需要修改编码
+form_serial_params: 串口参数
+form_data_bits: 数据位
+form_stop_bits: 停止位
+form_parity: 校验位
+form_flow_control: 流控
+form_placeholder_host_name: 输入主机名称...
+form_placeholder_password: 输入密码
+form_placeholder_key_path: 例如 ~/.ssh/id_rsa
+form_placeholder_key_passphrase: 可选
+form_placeholder_cert: 拖入或填写 OpenSSH 证书文件
+form_placeholder_description: 可选描述...
+form_placeholder_host_ssh: 例如 192.168.1.1
+form_placeholder_host_serial: /dev/cu.xxx
+
+# === Group / Tag management ===
+manage_title: 管理分组与标签
+manage_groups: 分组
+manage_tags: 标签
+manage_add_group: 添加分组
+manage_add_tag: 添加标签
+manage_done: 完成
+manage_group_placeholder: "分组名称..."
+manage_tag_placeholder: "标签名称..."
+manage_delete_confirm: "确认删除「%{name}」？"
+manage_group_deleted: "已删除分组「%{name}」"
+manage_tag_deleted: "已从所有主机移除标签「%{name}」"
+
+# === Shell chrome ===
+shell_last_login: "Last login: Mon May  4 07:30 on native-shell"
+shell_ready: NexShell native terminal host is ready
+shell_detached: 终端渲染器已与此标签页分离
+shell_background: "会话 %{session} 在后台保持活跃"
+shell_reattach: 选择终端标签页以重新连接渲染器
+
+# === Tab context menu ===
+host_reorder_hint: "拖拽卡片调整顺序"
+host_reorder_done: 完成
+
+# === Tab context menu ===
+tab_ctx_rename: 重命名标签页
+tab_ctx_reset_name: 重置标签页名称
+tab_ctx_duplicate: 复制标签页
+tab_ctx_move_right: 向右移动标签页
+tab_ctx_move_left: 向左移动标签页
+tab_ctx_close: 关闭标签页
+tab_ctx_close_others: 关闭其他标签页
+tab_ctx_close_right: 关闭右侧标签页
+tab_ctx_reconnect: 重新连接
+tab_ctx_disconnect: 断开连接
+tab_ctx_save_config: 保存为新配置
+tab_ctx_record_start: 开始录制
+tab_ctx_record_stop: 停止录制
+
+# === Terminal recording ===
+log_banner_start: 日志开始
+log_banner_end: 日志结束
+log_banner_truncated: 超出上限已截断
+toast_recording_started: 已开始录制日志
+toast_recording_saved: "日志已保存：%{path}"
+toast_recording_save_failed: "日志保存失败：%{error}"

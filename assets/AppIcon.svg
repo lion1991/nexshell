@@ -1,0 +1,46 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2636"/>
+      <stop offset="100%" stop-color="#0d1520"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0.3" y1="0.2" x2="0.8" y2="0.9">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#0891b2" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="chevron" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="cursor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(100, 100) scale(0.8046875)">
+    <!-- 背景 -->
+    <rect width="1024" height="1024" rx="228" ry="228" fill="url(#bg)"/>
+
+    <!-- 微光 -->
+    <ellipse cx="420" cy="400" rx="360" ry="300" fill="url(#glow)"/>
+
+    <!-- 大号提示符 ❯_ -->
+    <path d="M280 340 L460 512 L280 684" fill="none" stroke="url(#chevron)"
+          stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 光标 -->
+    <rect x="540" y="420" width="16" height="184" rx="8" fill="url(#cursor)" opacity="0.9"/>
+
+    <!-- 连接弧线 -->
+    <path d="M680 320 A180 180 0 0 1 680 704" fill="none"
+          stroke="#22d3ee" stroke-width="6" stroke-linecap="round"
+          stroke-dasharray="24 16" opacity="0.35"/>
+    <path d="M740 370 A140 140 0 0 1 740 654" fill="none"
+          stroke="#22d3ee" stroke-width="4" stroke-linecap="round"
+          stroke-dasharray="18 14" opacity="0.22"/>
+    <path d="M796 416 A100 100 0 0 1 796 608" fill="none"
+          stroke="#22d3ee" stroke-width="3" stroke-linecap="round"
+          stroke-dasharray="12 12" opacity="0.15"/>
+  </g>
+</svg>

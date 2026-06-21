@@ -1,0 +1,417 @@
+# === App ===
+app_name: NexShell
+copyright: "© 2025-2026 Matt"
+about_app: About NexShell
+quit_app: Quit NexShell
+
+# === Tab types ===
+tab_local: Local
+tab_remote: Remote
+tab_serial: Serial
+tab_direct: Terminal
+tab_process_list: Processes
+process_list_placeholder: "Loading processes…"
+process_list_error: "Failed to collect process list"
+process_list_empty: "No process data"
+process_ctx_kill: Kill process
+process_ctx_copy_pid: Copy PID
+process_ctx_copy_name: Copy name
+process_ctx_copy_args: Copy command line
+process_ctx_copy_path: Copy path
+tab_network_list: Network
+network_list_placeholder: "Loading network connections…"
+network_list_error: "Failed to collect network list"
+network_list_empty: "No network connections"
+tab_system_info: System Info
+tab_git_diff: Diff
+tab_code_viewer: Built-in Editor
+code_viewer_loading: "Loading file…"
+code_viewer_read_error: "Failed to read file: %{error}"
+code_viewer_saved: Saved
+code_viewer_save_error: "Save failed: %{error}"
+code_viewer_unsaved_title: Unsaved changes
+code_viewer_unsaved_message: "%{name} has unsaved changes. Save before continuing?"
+code_viewer_unsaved_save: Save
+code_viewer_unsaved_save_all: Save All
+code_viewer_unsaved_discard: "Don't Save"
+code_viewer_unsaved_batch_message: "%{count} tabs have unsaved changes. Closing will discard them."
+code_viewer_remote_download_first: "This remote file is binary or too large to open in the editor. Download it first to edit."
+code_viewer_remote_not_ready: "SSH connection is not ready yet; cannot open the remote file."
+code_viewer_remote_conflict_title: Remote file changed
+code_viewer_remote_conflict_message: "%{name} was changed on the remote. Overwrite?"
+code_viewer_remote_conflict_overwrite: Overwrite
+code_viewer_reconnect_banner: "Connection lost. Click to reconnect."
+code_viewer_reconnect_banner_dirty: "Connection lost — unsaved changes can't be saved yet. Reconnect, then save."
+system_info_placeholder: "Loading system info…"
+system_info_error: "Failed to collect system info"
+
+# === Host overview sidebar ===
+host_overview_fallback_title: Host Info
+host_overview_subtitle_placeholder: Connect to an SSH host to see its overview
+host_overview_not_connected: Not connected
+host_overview_status_waiting: Waiting for SSH connection
+host_overview_status_updating: Updating host info
+host_overview_status_collecting: Collecting host info
+host_overview_status_empty: No host info collected yet
+host_overview_status_ready: Host info updated
+host_overview_status_error: "Host info unavailable: %{error}"
+host_overview_section_system: System
+host_overview_section_process: Processes
+host_overview_section_network: Network
+host_overview_section_disk: Disks
+host_overview_load: Load
+host_overview_memory: Memory
+host_overview_swap: Swap
+host_overview_col_memory: Mem
+host_overview_col_cpu: CPU
+host_overview_col_command: Command
+host_overview_col_mount: Mount
+host_overview_col_disk_usage: Free/Total
+host_overview_no_process: No process data
+host_overview_no_network: No network data
+host_overview_no_disk: No disk data
+host_overview_latency: SSH latency
+host_overview_peak: "Peak %{rate}"
+host_overview_uptime_days: "Up %{n}d"
+host_overview_uptime_hours: "Up %{n}h"
+host_overview_uptime_minutes: "Up %{n}m"
+
+# === Sidebar ===
+sidebar: Sidebar
+
+# === Menu: new tab ===
+menu_terminal: Terminal
+menu_new_tab: New tab
+menu_close_tab: Close tab
+menu_copy: Copy
+menu_find: "Find…"
+menu_paste: Paste
+menu_clear_screen: Clear Screen
+
+# === Menu: gear ===
+menu_whats_new: "What's new"
+menu_settings: Settings
+menu_keyboard_shortcuts: Keyboard shortcuts
+menu_documentation: Documentation
+menu_feedback: Feedback
+menu_view_logs: View logs
+
+# === Context menu ===
+ctx_split_right: Split Pane Right
+ctx_split_left: Split Pane Left
+ctx_split_down: Split Pane Down
+ctx_split_up: Split Pane Up
+ctx_maximize_pane: Maximize Pane
+ctx_restore_pane: Restore Pane
+ctx_close_pane: Close Pane
+file_panel_ctx_download_as: Download to…
+file_panel_ctx_delete: Delete
+file_panel_ctx_delete_many: "Delete %{count} items"
+file_panel_ctx_rename: Rename
+file_panel_ctx_new_dir: New folder
+file_panel_ctx_new_file: New file
+file_panel_ctx_copy_path: Copy path
+file_panel_ctx_sync_terminal_cwd: Go to terminal directory
+file_panel_ctx_cd_to_directory: cd to directory
+file_panel_ctx_open_new_tab: Open in new tab
+file_panel_ctx_reveal_finder: Reveal in Finder
+file_panel_ctx_reveal_explorer: Reveal in Explorer
+file_panel_ctx_reveal_file_manager: Reveal in file manager
+file_panel_ctx_copy_relative_path: Copy relative path
+file_panel_ctx_open: Open
+file_panel_ctx_edit: Edit
+file_panel_ctx_open_with_viewer: Open in editor
+host_ctx_connect: Connect
+host_ctx_edit: Edit
+host_ctx_rename: Rename
+host_ctx_copy: Copy
+host_ctx_cut: Cut
+host_ctx_paste: Paste
+host_ctx_delete: Delete
+host_ctx_restore: Restore
+host_ctx_copy_address: Copy address
+host_ctx_new_host: New host
+host_ctx_sort: Sort
+file_panel_input_new_dir: New folder name
+file_panel_input_new_file: New file name
+file_panel_input_rename: "Rename %{name}"
+file_panel_path_copied: Path copied
+
+# === Git Panel ===
+git_panel_empty: Git
+git_panel_remote_unsupported: Git panel not available for remote sessions
+git_panel_no_repo: Not in a git repository
+git_panel_not_in_repo: Current directory is not inside a git repository
+git_panel_detached: HEAD (detached)
+git_panel_loading: Loading repository status...
+git_panel_clean: Working tree clean
+git_panel_section_staged: Staged
+git_panel_section_changes: Changes
+git_panel_section_untracked: Untracked
+git_panel_section_unmerged: Conflicts
+git_panel_section_diff: Diff
+git_panel_section_history: History
+git_panel_diff_select_file: Select a file to preview its diff
+git_panel_diff_loading: Loading diff...
+git_panel_diff_binary: Binary file diff is not shown
+git_panel_diff_too_large: "Diff is too large to preview (%{size})"
+git_panel_diff_empty: No diff to show
+git_panel_commit_files: Files
+git_panel_ctx_stage: Stage
+git_panel_ctx_unstage: Unstage
+git_panel_ctx_discard_changes: Discard Changes
+git_panel_ctx_add_gitignore: Add to .gitignore
+git_panel_discard_title: Discard file changes?
+git_panel_discard_message: "Discard unstaged changes in %{path}. This cannot be undone."
+git_panel_discard_confirm: Discard Changes
+git_panel_delete_untracked_title: Delete untracked file?
+git_panel_delete_untracked_message: "Permanently delete %{path} from disk. This is irreversible."
+git_panel_delete_untracked_confirm: Delete
+git_panel_no_commits: No commits yet
+git_panel_history_loading_more: Loading more commits...
+git_panel_stage_all: Stage All
+git_panel_commit_placeholder: Commit message
+git_panel_commit_button: Commit…
+git_panel_commit_busy: Committing…
+git_panel_push_ready_one: 1 commit ready to push to %{upstream}
+git_panel_push_ready_many: "%{count} commits ready to push to %{upstream}"
+git_panel_push_synced: Synced with %{upstream}
+git_panel_push_no_upstream: No upstream branch
+git_panel_push_button: Push
+git_panel_push_busy: Pushing…
+git_panel_ssh_host_key_title: Trust SSH host key?
+git_panel_ssh_host_key_title_host: Trust SSH host key for %{host}?
+git_panel_ssh_host_key_message: Git push is connecting to this SSH host for the first time. Verify the fingerprint before continuing.
+git_panel_ssh_host_key_fingerprint: "Fingerprint: %{fingerprint}"
+git_panel_ssh_host_key_warning: If you continue, NexShell will ask OpenSSH to add this new host key and retry the push. Changed host keys are not accepted automatically.
+git_panel_ssh_host_key_confirm: Trust and Push
+git_panel_ssh_host_key_cancel: Cancel
+
+# === Settings ===
+settings_title: Settings
+settings_appearance: Appearance
+settings_keybindings: Keyboard shortcuts
+
+# === Appearance page ===
+appearance_title: Appearance
+appearance_theme: Theme
+appearance_themes: Themes
+appearance_window: Window
+appearance_window_opacity: "Window Opacity: %{value}"
+appearance_text: Text
+appearance_terminal_font: Terminal font
+appearance_view_all_fonts: View all available system fonts
+appearance_font_weight: Font weight
+appearance_font_size: Font size (px)
+appearance_line_height: Line height
+appearance_reset_default: Reset to default
+appearance_cursor: Cursor
+appearance_cursor_type: Cursor type
+appearance_language: Language
+appearance_language_auto: "Auto (System)"
+appearance_language_en: English
+appearance_language_zh: 简体中文
+settings_editor_section: Editor
+settings_open_file_editor: Open files with
+settings_editor_system_default: System default
+settings_reuse_view_tab: Reuse one tab for diff & code viewer
+
+# === Cursor styles ===
+cursor_block: Block
+cursor_beam: Beam
+cursor_underline: Underline
+
+# === Keybindings page ===
+key_clear_screen: Clear screen
+key_find: Find
+key_copy: Copy
+key_paste: Paste
+key_new_tab: New tab
+key_close_tab: Close tab
+key_prev_tab: Previous tab
+key_next_tab: Next tab
+key_split_right: Split right
+key_split_down: Split down
+key_close_pane: Close pane
+key_nav_left: Navigate pane left
+key_nav_right: Navigate pane right
+key_nav_up: Navigate pane up
+key_nav_down: Navigate pane down
+key_maximize_pane: Maximize pane
+key_increase_font: Increase font
+key_decrease_font: Decrease font
+key_reset_font: Reset font
+
+# === Dialogs ===
+dialog_close_window: "Close window?"
+dialog_close_window_msg: "You have %{count} running processes. Closing the window will terminate them."
+dialog_close_window_unsaved: "There are unsaved changes. Closing the window will discard them. Close anyway?"
+dialog_confirm_close: Confirm close
+dialog_quit_app: "Quit NexShell?"
+dialog_quit_app_msg: "You have %{count} running processes. Quitting will terminate them."
+dialog_quit_app_unsaved: "There are unsaved changes. Quitting will discard them. Quit anyway?"
+dialog_confirm_quit: Confirm quit
+dialog_cancel: Cancel
+
+# === Toast / Notice ===
+toast_form_required: "Name, address, port, and username cannot be empty"
+toast_host_saved: Host settings saved
+toast_host_created: New host saved
+host_copy_suffix: Copy
+toast_host_copied: Host copied
+toast_host_cut: Host cut
+toast_host_pasted: Host pasted
+toast_host_restored: Host restored
+toast_paste_failed: "Paste host failed: %{error}"
+toast_restore_failed: "Restore host failed: %{error}"
+toast_rename_failed: "Rename host failed: %{error}"
+toast_hosts_refreshed: Host library refreshed
+toast_hosts_deleted: "%{count} host(s) deleted"
+toast_hosts_deleted_refresh_fail: "%{count} host(s) deleted, but refresh failed: %{error}"
+toast_save_failed: "Save host failed: %{error}"
+toast_delete_failed: "Delete host failed: %{error}"
+toast_refresh_failed: "Refresh host library failed: %{error}"
+toast_db_read_failed: "Failed to read host database: %{error}"
+toast_db_path_unavailable: Cannot resolve NexShell host database path
+toast_host_library_unavailable_delete: Host library unavailable, cannot delete hosts
+toast_host_library_unavailable_save: Host library unavailable, cannot save host settings
+toast_saved_refresh_fail: "Saved, but refresh failed: %{error}"
+toast_feature_wip: Feature in development...
+toast_move_wip: Move feature in development...
+toast_connecting: "Connecting to %{title}"
+toast_connect_failed: "%{title}: %{reason}"
+
+# === Host management ===
+host_empty: No hosts
+host_empty_hint: "Click \"+\" at top right to add a new host"
+host_new: New host
+host_edit: Edit
+host_select_all: Select all
+host_selected_count: "%{count} selected"
+host_selected_hosts: "%{count} host(s) selected"
+host_connect: Connect
+host_move: Move
+host_delete: Delete
+host_cancel: Cancel
+host_privacy: Privacy
+host_import: Import
+host_export: Export
+host_cloud_sync: Cloud sync
+host_export_password_prompt: "Set a password for the export file (used to decrypt on import)"
+host_export_password_placeholder: "Enter password…"
+host_export_confirm: Export
+host_export_cancel: Cancel
+toast_export_no_hosts: "No hosts to export"
+toast_export_success: "Exported %{count} host(s) to encrypted file"
+toast_export_password_required: "Please enter a password"
+toast_export_failed: "Export failed: %{error}"
+host_import_password_prompt: "Enter the password used when this file was exported"
+host_import_confirm: "Decrypt & Import"
+host_export_busy: "Encrypting"
+host_import_busy: "Decrypting & importing"
+toast_import_password_required: "Please enter a password"
+toast_import_read_failed: "Failed to read file: %{error}"
+toast_import_success: "Imported %{count}/%{total} host(s)"
+toast_import_failed: "Import failed: %{error}"
+host_search_placeholder: "Search hosts..."
+host_group_all: All hosts
+host_group_nav: Groups
+host_tag_filter: Tag filtering
+host_manage_groups_tags: Manage groups and tags
+host_protocol_all: All protocols
+
+# === Host edit form ===
+form_new_host: New host
+form_edit_host: Edit host
+form_protocol: Protocol
+form_name: Name
+form_host_address: Host address
+form_port: Port
+form_username: Username
+form_auth_method: Authentication method
+form_password_auth: Password authentication
+form_key_auth: Key authentication
+form_key_passphrase: Key passphrase
+form_certificate: Certificate file
+form_password: Password
+form_serial_device: Serial device
+form_baud_rate: Baud rate
+form_description: Description
+form_group: Group
+form_tags: Tags
+form_no_group: No group
+form_no_tags: No tags
+form_no_serial: No serial device detected
+form_save: Save
+form_create: Create
+form_cancel: Cancel
+form_advanced: Advanced settings
+form_keep_alive_enabled: Enabled
+form_keep_alive_disabled: Disabled
+form_heartbeat_interval: Heartbeat interval
+form_max_failures: Max failures
+form_connection_timeout: Connection timeout
+form_tcp_timeout: TCP connect timeout
+form_auth_timeout: Auth timeout
+form_terminal_encoding: Terminal encoding
+form_encoding_hint: May need to change encoding for old systems
+form_serial_params: Serial parameters
+form_data_bits: Data bits
+form_stop_bits: Stop bits
+form_parity: Parity
+form_flow_control: Flow control
+form_placeholder_host_name: "Enter host name..."
+form_placeholder_password: Enter password
+form_placeholder_key_path: "e.g. ~/.ssh/id_rsa"
+form_placeholder_key_passphrase: Optional
+form_placeholder_cert: Drag or enter OpenSSH certificate file
+form_placeholder_description: "Optional description..."
+form_placeholder_host_ssh: "e.g. 192.168.1.1"
+form_placeholder_host_serial: /dev/cu.xxx
+
+# === Group / Tag management ===
+manage_title: Manage Groups & Tags
+manage_groups: Groups
+manage_tags: Tags
+manage_add_group: Add group
+manage_add_tag: Add tag
+manage_done: Done
+manage_group_placeholder: "Group name..."
+manage_tag_placeholder: "Tag name..."
+manage_delete_confirm: "Delete \"%{name}\"?"
+manage_group_deleted: "Group \"%{name}\" deleted"
+manage_tag_deleted: "Tag \"%{name}\" removed from all hosts"
+
+# === Shell chrome ===
+shell_last_login: "Last login: Mon May  4 07:30 on native-shell"
+shell_ready: NexShell native terminal host is ready
+shell_detached: terminal renderer detached for this tab
+shell_background: "session %{session} stays alive in the background"
+shell_reattach: select the terminal tab to reattach the renderer
+
+# === Tab context menu ===
+host_reorder_hint: "Drag cards to reorder"
+host_reorder_done: Done
+
+# === Tab context menu ===
+tab_ctx_rename: Rename tab
+tab_ctx_reset_name: Reset tab name
+tab_ctx_duplicate: Duplicate Tab
+tab_ctx_move_right: Move Tab Right
+tab_ctx_move_left: Move Tab Left
+tab_ctx_close: Close tab
+tab_ctx_close_others: Close other tabs
+tab_ctx_close_right: Close Tabs to the Right
+tab_ctx_reconnect: Reconnect
+tab_ctx_disconnect: Disconnect
+tab_ctx_save_config: Save as new config
+tab_ctx_record_start: Start Recording
+tab_ctx_record_stop: Stop Recording
+
+# === Terminal recording ===
+log_banner_start: Log Start
+log_banner_end: Log End
+log_banner_truncated: truncated at size cap
+toast_recording_started: Recording started
+toast_recording_saved: "Recording saved: %{path}"
+toast_recording_save_failed: "Failed to save recording: %{error}"

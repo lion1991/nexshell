@@ -1,0 +1,107 @@
+[package]
+name = "nexshell"
+version = "0.4.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["warpui-app"]
+# 实际运行的应用 feature：拉入 warpui + warpui_core（皆 MIT），在 macOS 上
+# 同时把 warp 的整个平台层 (cocoa/metal/font-kit/objc) 间接拉入。
+warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core"]
+
+[dependencies]
+alacritty_terminal = "0.25"
+anyhow = "1.0"
+bitflags = "=2.9.4"
+portable-pty = "0.8"
+rusqlite = "0.35"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+encoding_rs = "0.8"
+# 用于判断 IME marked text 字符的列宽（CJK 占 2 cell），与 Warp
+# `grid_renderer.rs:653` 调 `width()` 的语义一致。
+unicode-width = "0.2"
+# PTY event loop 完全按 Warp 来：mio 接 master fd + signal_hook_mio 接 SIGCHLD
+# + parking_lot::FairMutex 让 PTY 写线程主动让锁、main 线程读 snapshot 不卡。
+# 版本与 warp/app/Cargo.toml 完全对齐。
+mio = { version = "1.1.1", features = ["os-poll", "os-ext"] }
+parking_lot = "0.12.1"
+async-channel = "2.3.1"
+futures-lite = "1.13.0"
+log = "0.4"
+rust-i18n = "4"
+sys-locale = "0.3"
+async-trait = "0.1"
+russh = "0.46"
+russh-sftp = "2.1"
+ssh-key = "0.6"
+tokio = { version = "1", features = ["net", "rt", "sync", "time", "io-util", "fs"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# 加密导出（主机库导出文件）：AES-256-GCM + PBKDF2-HMAC-SHA256
+aes-gcm = "0.10"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+serialport = "4.9.0"
+# git 面板用：监听仓库 .git/ 与工作区变化触发自动刷新。Warp 同款思路，
+# 用 upstream crates.io 版本即可，不引入 fork。
+notify-debouncer-full = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "=0.26.0"
+objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
+core-text = "21.0.0"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+font-kit = { git = "https://github.com/warpdotdev/font-kit", rev = "a04b225ecb639bb850f21d05212cfdc7465000f3", default-features = false, features = ["source"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+signal-hook = "0.3.17"
+signal-hook-mio = { version = "0.2.4", features = ["support-v1_0"] }
+
+[target.'cfg(any(unix, windows))'.dependencies]
+# Warp UI crates are consumed as path dependencies so the Warp workspace does
+# not need to include this spike as a member.
+settings = { path = "../warp/crates/settings", optional = true }
+warpui = { path = "../warp/crates/warpui", optional = true }
+warpui_core = { path = "../warp/crates/warpui_core", optional = true }
+warpui_extras = { path = "../warp/crates/warpui_extras", optional = true, default-features = false }
+warp = { path = "../warp/app", optional = true }
+warp_editor = { path = "../warp/crates/editor", optional = true }
+warp_terminal = { path = "../warp/crates/warp_terminal", optional = true }
+warp_util = { path = "../warp/crates/warp_util", optional = true }
+# pathfinder_color / pathfinder_geometry 是 warpui scene API（Vector2F、RectF、ColorU）
+# 的来源；warpui 内部用，我们写自定义 Element 时也直接需要它们。
+pathfinder_color = { version = "0.5", optional = true }
+pathfinder_geometry = { version = "0.5.1", optional = true }
+warp_core = { path = "../warp/crates/warp_core", optional = true }
+
+[[bin]]
+name = "nexshell"
+path = "src/main.rs"
+required-features = ["warpui-app"]
+
+[dev-dependencies]
+tempfile = "3"
+
+[build-dependencies]
+cc = "1"
+embed-resource = "3"
+
+[patch.crates-io]
+# Keep Warp's patched CoreText/CoreGraphics stack active even though this
+# spike is intentionally outside the Warp workspace. Without this, font-kit
+# sees CGFont from two core-graphics versions and fails with E0308.
+core-foundation = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
+core-foundation-sys = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
+core-graphics = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
+core-text = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
+objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
+yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
+
+tink-core = { git = "https://github.com/warpdotdev/tink-rust", branch = "warpdotdev/main" }
+tink-proto = { git = "https://github.com/warpdotdev/tink-rust", branch = "warpdotdev/main" }
+tink-hybrid = { git = "https://github.com/warpdotdev/tink-rust", branch = "warpdotdev/main" }

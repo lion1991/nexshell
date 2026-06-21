@@ -1,0 +1,5 @@
+[env]
+# Keep this in sync with warp/.cargo/config.toml. The nexshell crate
+# lives outside warp/, so Cargo does not inherit Warp's config when
+# commands are launched from sshtool/ or nexshell/.
+MACOSX_DEPLOYMENT_TARGET = "10.14"
