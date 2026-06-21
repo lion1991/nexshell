@@ -14,7 +14,7 @@ use super::display_map::{DisplayMap, ToDisplayPoint};
 use super::{DisplayPoint, ReplicaId};
 use crate::text_editor::soft_wrap::{ClampDirection, DisplayPointAndClampDirection};
 use crate::text_editor::{CursorColors, RangeExt};
-use warp::ui_components::avatar::Avatar;
+use crate::ui_components::avatar::Avatar;
 
 /// This type encapsulates enough information about a selection to be able to
 /// draw it. Compared to the `Selection` type, the points are converted based on

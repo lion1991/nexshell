@@ -31,7 +31,7 @@ use super::{
 use crate::text_editor::soft_wrap::FrameLayouts;
 #[cfg(feature = "voice_input")]
 use crate::text_editor::view::voice::VoiceInputState;
-use warp::terminal::grid_size_util::grid_compute_baseline_position_fn;
+use crate::util::grid::grid_compute_baseline_position_fn;
 
 /// Ratio to calculate font size of cursor avatar.
 /// Found experimentally to scale the best proportionally with

@@ -11,9 +11,9 @@ use warpui::ui_components::components::UiComponent;
 use warpui::{Entity, SingletonEntity, TypedActionView, View, ViewContext};
 
 use super::EditorElement;
-use warp::appearance::Appearance;
-use warp::ui_components::blended_colors;
-use warp::ui_components::icons::Icon;
+use warp_core::ui::appearance::Appearance;
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
 
 pub const AUTOSUGGESTION_IGNORE_MINIMUM_HEIGHT: f32 = 12.;
 

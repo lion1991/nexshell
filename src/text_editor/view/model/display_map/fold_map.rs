@@ -11,7 +11,7 @@ use warpui::{AppContext, ModelHandle};
 use super::super::buffer::{AnchorRangeExt, TextSummary};
 use super::buffer::StylizedChar;
 use super::{buffer, Anchor, Buffer, DisplayPoint, Edit, Point, ToCharOffset};
-use warp::util::extensions::SliceExt as _;
+use warp_core::util::extensions::SliceExt as _;
 
 pub struct FoldMap {
     buffer: ModelHandle<Buffer>,

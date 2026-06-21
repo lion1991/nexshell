@@ -8,7 +8,7 @@ publish = false
 default = ["warpui-app"]
 # 实际运行的应用 feature：拉入 warpui + warpui_core（皆 MIT），在 macOS 上
 # 同时把 warp 的整个平台层 (cocoa/metal/font-kit/objc) 间接拉入。
-warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim"]
+warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim", "dep:sum_tree", "dep:string-offset", "dep:vec1", "dep:arrayvec", "dep:smallvec", "dep:num-traits", "dep:itertools", "dep:instant", "dep:bounded-vec-deque", "dep:uuid", "dep:rayon"]
 
 [dependencies]
 alacritty_terminal = "0.25"
@@ -51,6 +51,16 @@ serialport = "4.9.0"
 # git 面板用：监听仓库 .git/ 与工作区变化触发自动刷新。Warp 同款思路，
 # 用 upstream crates.io 版本即可，不引入 fork。
 notify-debouncer-full = "0.3"
+# text_editor 核心数据结构依赖（CRDT buffer / display_map，砍 ai/image/voice 后仍需要），版本对齐 Cargo.lock。
+vec1 = { version = "1.12", features = ["serde"], optional = true }
+arrayvec = { version = "0.7", optional = true }
+smallvec = { version = "1", optional = true }
+num-traits = { version = "0.2", optional = true }
+itertools = { version = "0.10", optional = true }
+instant = { version = "0.1", features = ["wasm-bindgen"], optional = true }
+bounded-vec-deque = { version = "0.1", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+rayon = { version = "1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "=0.26.0"
@@ -86,6 +96,8 @@ schemars = { version = "1", optional = true }
 settings_value = { path = "../warp/crates/settings_value", features = ["derive"], default-features = false, optional = true }
 # editor 本地化：text_editor 的 vim_model 依赖纯净的 vim crate（无 ai/app/网络）。
 vim = { path = "../warp/crates/vim", optional = true }
+sum_tree = { path = "../warp/crates/sum_tree", optional = true }
+string-offset = { path = "../warp/crates/string-offset", features = ["serde"], optional = true }
 
 [[bin]]
 name = "nexshell"

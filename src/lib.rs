@@ -26,8 +26,6 @@ pub struct ReferencePolicy {
 }
 
 pub mod actions;
-#[cfg(feature = "warpui-app")]
-pub mod code_editor;
 pub mod file_drop_target;
 #[cfg(feature = "warpui-app")]
 pub mod features;
@@ -75,6 +73,10 @@ pub mod time_format;
 pub mod ui_components;
 #[cfg(feature = "warpui-app")]
 pub mod util;
+#[cfg(feature = "warpui-app")]
+pub mod telemetry;
+#[cfg(feature = "warpui-app")]
+pub mod view_components;
 pub mod view_model;
 pub mod warp_horizontal_tabs;
 pub mod warp_source_plan;

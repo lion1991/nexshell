@@ -15,14 +15,14 @@ use warpui::ui_components::keyboard_shortcut::KeyboardShortcut;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
 use super::EditorElement;
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use crate::text_editor::ACCEPT_AUTOSUGGESTION_KEYBINDING_NAME;
-use warp::menu::{Menu, MenuItemFields};
+use crate::menu::{Menu, MenuItemFields};
 use warp::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
 use warp::terminal::input::OPEN_COMPLETIONS_KEYBINDING_NAME;
-use warp::ui_components::blended_colors;
-use warp::ui_components::icons::Icon;
-use warp::util::bindings::{
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
+use crate::util::bindings::{
     keybinding_name_to_keystroke, reset_keybinding_to_default, set_custom_keybinding,
 };
 use warp::workspace::WorkspaceAction;
@@ -71,7 +71,7 @@ impl AcceptAutosuggestionKeybinding {
         let right_arrow = Keystroke::parse("right").expect("can parse keystroke");
         let tab = Keystroke::parse("tab").expect("can parse keystroke");
         let shift_right_arrow = Keystroke::parse("shift-right").expect("can parse keystroke");
-        let menu_items: Vec<warp::menu::MenuItem<AcceptAutosuggestionKeybindingAction>> = vec![
+        let menu_items: Vec<crate::menu::MenuItem<AcceptAutosuggestionKeybindingAction>> = vec![
             MenuItemFields::new(right_arrow.displayed())
                 .with_on_select_action(
                     AcceptAutosuggestionKeybindingAction::SetAcceptAutosuggestionKeybinding {
@@ -103,7 +103,7 @@ impl AcceptAutosuggestionKeybinding {
             menu.set_items(menu_items, ctx);
         });
         ctx.subscribe_to_view(&select_keybinding_menu, |me, _, event, ctx| {
-            if let warp::menu::Event::Close { .. } = event {
+            if let crate::menu::Event::Close { .. } = event {
                 me.close_menu(ctx);
             }
         });
