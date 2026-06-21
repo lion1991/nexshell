@@ -2,8 +2,8 @@
 use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
-        Align, Container, CrossAxisAlignment, Element, Flex, MainAxisSize, ParentElement,
-        Shrinkable, Text,
+        Align, Border, Container, CrossAxisAlignment, Element, Empty, Flex, MainAxisSize,
+        ParentElement, Shrinkable, Text,
     },
     fonts::{Properties, Weight},
 };
@@ -81,4 +81,12 @@ pub fn render_setting_row(label: Box<dyn Element>, control: Box<dyn Element>) ->
     )
     .with_padding_bottom(HEADER_PADDING)
     .finish()
+}
+
+// warp settings_page.rs:380-385 — 分隔线
+pub fn render_separator(appearance: &Appearance) -> Box<dyn Element> {
+    Container::new(Empty::new().finish())
+        .with_border(Border::bottom(2.).with_border_fill(appearance.theme().outline()))
+        .with_margin_bottom(HEADER_PADDING)
+        .finish()
 }

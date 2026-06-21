@@ -1071,8 +1071,8 @@ impl ThemeChoice {
         }
     }
 
-    pub fn to_theme_kind(self) -> warp::themes::theme::ThemeKind {
-        use warp::themes::theme::ThemeKind;
+    pub fn to_theme_kind(self) -> nexshell::themes::theme::ThemeKind {
+        use nexshell::themes::theme::ThemeKind;
         match self {
             Self::Dark => ThemeKind::Dark,
             Self::Light => ThemeKind::Light,
@@ -1089,7 +1089,7 @@ impl ThemeChoice {
     }
 
     pub fn to_warp_theme(self) -> warp_core::ui::theme::WarpTheme {
-        warp::themes::theme::WarpThemeConfig::new().theme(&self.to_theme_kind())
+        nexshell::themes::theme::WarpThemeConfig::new().theme(&self.to_theme_kind())
     }
 }
 

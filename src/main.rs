@@ -664,7 +664,7 @@ fn register_warp_appearance(ctx: &mut AppContext) {
 
     ctx.add_singleton_model(move |_| {
         warp_core::ui::appearance::Appearance::new(
-            warp::themes::default_themes::dark_theme(),
+            nexshell::themes::default_themes::dark_theme(),
             monospace_font,
             ui_settings.font_size,
             ui_settings.font_weight,

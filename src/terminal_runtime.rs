@@ -4500,7 +4500,7 @@ impl TerminalPalette {
 
 impl Default for TerminalPalette {
     fn default() -> Self {
-        Self::from_theme(&warp::themes::default_themes::dark_theme())
+        Self::from_theme(&crate::themes::default_themes::dark_theme())
     }
 }
 

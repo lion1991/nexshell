@@ -129,7 +129,7 @@ pub fn render_appearance_page(
         ui_font,
         theme,
     ));
-    col.add_child(warp::settings_view::render_separator(appearance));
+    col.add_child(crate::settings_view::render_helpers::render_separator(appearance));
 
     // --- Window ---
     col.add_child(render_category_header(
@@ -166,7 +166,7 @@ pub fn render_appearance_page(
         .finish();
 
     col.add_child(render_setting_row(opacity_label, opacity_slider));
-    col.add_child(warp::settings_view::render_separator(appearance));
+    col.add_child(crate::settings_view::render_helpers::render_separator(appearance));
 
     // --- Text --- warp: appearance_page.rs:3909-4054
     col.add_child(render_category_header(
@@ -184,7 +184,7 @@ pub fn render_appearance_page(
         font_weight_dropdown,
         appearance,
     ));
-    col.add_child(warp::settings_view::render_separator(appearance));
+    col.add_child(crate::settings_view::render_helpers::render_separator(appearance));
 
     // --- Cursor ---
     col.add_child(render_category_header(
@@ -224,7 +224,7 @@ pub fn render_appearance_page(
         .finish();
 
     col.add_child(render_setting_row(cursor_label, cursor_radio));
-    col.add_child(warp::settings_view::render_separator(appearance));
+    col.add_child(crate::settings_view::render_helpers::render_separator(appearance));
 
     // --- Language ---
     col.add_child(render_category_header(
@@ -273,7 +273,7 @@ pub fn render_appearance_page(
         .build()
         .finish();
     col.add_child(render_setting_row(lang_label, lang_radio));
-    col.add_child(warp::settings_view::render_separator(appearance));
+    col.add_child(crate::settings_view::render_helpers::render_separator(appearance));
 
     // --- 编辑器（文件面板「编辑」用）---
     col.add_child(render_category_header(
@@ -646,7 +646,7 @@ fn render_current_theme_row(
             };
 
             let preview =
-                warp::themes::theme::render_preview(&card_theme, monospace_font, Some(0.6));
+                nexshell::themes::theme::render_preview(&card_theme, monospace_font, Some(0.6));
 
             let mut container = Container::new(
                 Flex::row()

@@ -64,6 +64,8 @@ pub mod terminal_mount;
 pub mod terminal_recorder;
 pub mod terminal_runtime;
 #[cfg(feature = "warpui-app")]
+pub mod themes;
+#[cfg(feature = "warpui-app")]
 pub mod time_format;
 #[cfg(feature = "warpui-app")]
 pub mod ui_components;
