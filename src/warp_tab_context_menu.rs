@@ -8,7 +8,7 @@
 //! empty sections rather than re-shaped into a custom menu.
 
 use pathfinder_geometry::vector::Vector2F;
-use warp::menu::{MenuItem, MenuItemFields};
+use crate::menu::{MenuItem, MenuItemFields};
 use warp_core::ui::theme::{AnsiColorIdentifier, AnsiColors};
 use warpui::Action;
 

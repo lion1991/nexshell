@@ -39,6 +39,8 @@ pub mod host_overview;
 pub mod host_overview_fleet;
 pub mod ipc_dispatcher;
 pub mod layout;
+#[cfg(feature = "warpui-app")]
+pub mod menu;
 pub mod native_adapter;
 pub mod native_shell_adapter;
 pub mod native_shell_host;
@@ -50,6 +52,8 @@ pub mod pty_event_loop;
 pub mod remote_edit_io;
 pub mod renderer_ipc;
 pub mod runtime_settings;
+#[cfg(feature = "warpui-app")]
+pub mod safe_triangle;
 pub mod sftp_ops;
 pub mod shell_chrome;
 pub mod shell_integration;
@@ -59,6 +63,10 @@ pub mod terminal_lifecycle;
 pub mod terminal_mount;
 pub mod terminal_recorder;
 pub mod terminal_runtime;
+#[cfg(feature = "warpui-app")]
+pub mod time_format;
+#[cfg(feature = "warpui-app")]
+pub mod ui_components;
 pub mod view_model;
 pub mod warp_horizontal_tabs;
 pub mod warp_source_plan;
@@ -799,7 +807,7 @@ Inter-|   Receive                                                |  Transmit
     #[test]
     fn warp_tab_context_menu_matches_horizontal_warp_sections() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use crate::menu::MenuItem;
         use warp_tab_context_menu::{
             horizontal_tab_context_menu_items, HorizontalTabContextMenuActions,
         };
@@ -866,7 +874,7 @@ Inter-|   Receive                                                |  Transmit
     #[test]
     fn warp_tab_context_menu_omits_irrelevant_edge_actions() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use crate::menu::MenuItem;
         use warp_tab_context_menu::{
             horizontal_tab_context_menu_items, HorizontalTabContextMenuActions,
         };
@@ -929,7 +937,7 @@ Inter-|   Receive                                                |  Transmit
     #[test]
     fn warp_tab_context_menu_content_tab_drops_rename_duplicate_reconnect() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use crate::menu::MenuItem;
         use warp_tab_context_menu::{
             horizontal_tab_context_menu_items, HorizontalTabContextMenuActions,
         };
@@ -1005,7 +1013,7 @@ Inter-|   Receive                                                |  Transmit
     #[cfg(feature = "warpui-app")]
     #[test]
     fn warp_tab_context_menu_keeps_warp_legacy_color_row_shape() {
-        use warp::menu::MenuItem;
+        use crate::menu::MenuItem;
         use warp_core::ui::theme::{AnsiColor, AnsiColorIdentifier, AnsiColors};
         use warp_tab_context_menu::{
             horizontal_tab_context_menu_items, HorizontalTabColorOptions,

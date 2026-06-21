@@ -277,8 +277,8 @@ pub(crate) fn git_panel_context_menu_items(
     kind: GitDiffKind,
     paths: GitPanelContextPaths,
     discard_enabled: bool,
-) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
-    use warp::menu::{MenuItem, MenuItemFields};
+) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+    use nexshell::menu::{MenuItem, MenuItemFields};
 
     let mut items = Vec::new();
     match kind {

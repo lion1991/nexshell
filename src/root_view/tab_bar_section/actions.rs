@@ -57,7 +57,7 @@ impl RootView {
         if self.new_session_menu_open {
             self.new_session_menu_open = false;
         } else {
-            use warp::menu::MenuItemFields;
+            use nexshell::menu::MenuItemFields;
             let items = vec![MenuItemFields::new(rust_i18n::t!("menu_terminal"))
                 .with_on_select_action(TerminalGridAction::NewTab)
                 .with_icon(warp_core::ui::icons::Icon::Terminal)

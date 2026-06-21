@@ -188,20 +188,20 @@ pub(crate) struct RootView {
     file_panel_button_state: MouseStateHandle,
 
     // === 菜单 / 右键菜单（tab_bar / context_menus_section）===
-    settings_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    settings_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     new_session_menu_open: bool,
-    new_session_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
-    tab_right_click_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    new_session_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
+    tab_right_click_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_tab_right_click_menu: Option<(usize, TabContextMenuAnchor)>,
-    terminal_context_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    terminal_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_terminal_context_menu: Option<Vector2F>,
-    file_panel_context_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    file_panel_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_file_panel_context_menu: Option<Vector2F>,
-    git_panel_context_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    git_panel_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_git_panel_context_menu: Option<Vector2F>,
-    process_list_context_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    process_list_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_process_list_context_menu: Option<Vector2F>,
-    host_card_context_menu: warpui::ViewHandle<warp::menu::Menu<TerminalGridAction>>,
+    host_card_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_host_card_context_menu: Option<Vector2F>,
 
     // === 标签页（tab_bar_section）===
@@ -496,14 +496,14 @@ impl RootView {
             settings_menu: {
                 let menu = ctx.add_typed_action_view(|ctx| {
                     let theme = warp_core::ui::appearance::Appearance::as_ref(ctx).theme();
-                    warp::menu::Menu::new()
+                    nexshell::menu::Menu::new()
                         .with_width(220.)
                         .with_border(Border::all(1.).with_border_color(theme.outline().into()))
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.settings_menu_open = false;
                         ctx.notify();
                     }
@@ -514,14 +514,14 @@ impl RootView {
             new_session_menu: {
                 let menu = ctx.add_typed_action_view(|ctx| {
                     let theme = warp_core::ui::appearance::Appearance::as_ref(ctx).theme();
-                    warp::menu::Menu::new()
+                    nexshell::menu::Menu::new()
                         .with_width(200.)
                         .with_border(Border::all(1.).with_border_color(theme.outline().into()))
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.new_session_menu_open = false;
                         ctx.notify();
                     }
@@ -530,9 +530,9 @@ impl RootView {
             },
             tab_right_click_menu: {
                 // warp/app/src/workspace/view.rs:1744-1750.
-                let menu = ctx.add_typed_action_view(|_| warp::menu::Menu::new());
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                let menu = ctx.add_typed_action_view(|_| nexshell::menu::Menu::new());
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_tab_right_click_menu = None;
                         ctx.notify();
                     }
@@ -543,12 +543,12 @@ impl RootView {
             terminal_context_menu: {
                 // warp: view.rs:3696-3702
                 let menu = ctx.add_typed_action_view(|_| {
-                    warp::menu::Menu::new()
+                    nexshell::menu::Menu::new()
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_terminal_context_menu = None;
                         ctx.notify();
                     }
@@ -560,9 +560,9 @@ impl RootView {
                 // 不加 prevent_interaction_with_other_elements：菜单打开时，对其他 entry
                 // 右键仍能冒泡到 entry handler → 重新 dispatch ShowContextMenu 替换菜单
                 let menu =
-                    ctx.add_typed_action_view(|_| warp::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_file_panel_context_menu = None;
                         ctx.notify();
                     }
@@ -572,9 +572,9 @@ impl RootView {
             show_file_panel_context_menu: None,
             git_panel_context_menu: {
                 let menu =
-                    ctx.add_typed_action_view(|_| warp::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_git_panel_context_menu = None;
                         ctx.notify();
                     }
@@ -584,9 +584,9 @@ impl RootView {
             show_git_panel_context_menu: None,
             process_list_context_menu: {
                 let menu =
-                    ctx.add_typed_action_view(|_| warp::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_process_list_context_menu = None;
                         if let Some(tab) = me.terminal_tabs.get_mut(me.active_tab_index) {
                             tab.process_list_selected_pid = None;
@@ -599,9 +599,9 @@ impl RootView {
             show_process_list_context_menu: None,
             host_card_context_menu: {
                 let menu =
-                    ctx.add_typed_action_view(|_| warp::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &warp::menu::Event, ctx| {
-                    if matches!(event, warp::menu::Event::Close { .. }) {
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_host_card_context_menu = None;
                         me.host_state.context_menu_target = None;
                         ctx.notify();

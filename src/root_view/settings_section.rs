@@ -57,7 +57,7 @@ impl RootView {
         if self.settings_menu_open {
             self.settings_menu_open = false;
         } else {
-            use warp::menu::{MenuItem, MenuItemFields};
+            use nexshell::menu::{MenuItem, MenuItemFields};
             // warp/app/src/workspace/view.rs:8282-8413 user_menu_items
             let items = vec![
                 MenuItemFields::new(rust_i18n::t!("menu_whats_new"))

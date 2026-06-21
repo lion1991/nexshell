@@ -56,7 +56,7 @@ impl RootView {
         &self,
         index: usize,
         ctx: &ViewContext<Self>,
-    ) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
         let terminal_colors = Appearance::as_ref(ctx).theme().terminal_colors().normal;
         let selected_color = self.tab_selected_colors.get(index).copied().flatten();
         // 内容标签（编辑器 / diff）无重命名 / 复制 / 重连语义，仅留移动 / 关闭 / 染色。
@@ -180,8 +180,8 @@ impl RootView {
     fn terminal_context_menu_items(
         &self,
         has_selection: bool,
-    ) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
-        use warp::menu::{MenuItem, MenuItemFields};
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+        use nexshell::menu::{MenuItem, MenuItemFields};
 
         let mut items = vec![];
 
@@ -404,8 +404,8 @@ impl RootView {
     fn host_card_context_menu_items(
         &self,
         host_id: &str,
-    ) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
-        use warp::menu::{MenuItem, MenuItemFields};
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+        use nexshell::menu::{MenuItem, MenuItemFields};
         let endpoint = self
             .host_state
             .host_by_id(host_id)
@@ -466,7 +466,7 @@ impl RootView {
         position: Vector2F,
         ctx: &mut ViewContext<Self>,
     ) {
-        use warp::menu::{MenuItem, MenuItemFields};
+        use nexshell::menu::{MenuItem, MenuItemFields};
         let label = if command.is_empty() {
             format!("pid {pid}")
         } else {
@@ -524,7 +524,7 @@ impl RootView {
         &self,
         name: Option<String>,
         is_dir: bool,
-    ) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
         let Some(tab) = self.file_panel_tab() else {
             return Vec::new();
         };
@@ -545,7 +545,7 @@ impl RootView {
 mod tests {
     #[test]
     fn git_panel_context_menu_uses_section_appropriate_batch_actions() {
-        use warp::menu::MenuItem;
+        use nexshell::menu::MenuItem;
 
         let items = super::git_panel_context_menu_items(
             "tab-1",
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn local_file_panel_context_menu_matches_warp_project_explorer_order() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use nexshell::menu::MenuItem;
 
         let items = super::local_file_panel_context_menu_items(
             Some("/Users/example/.codex".to_string()),
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn local_file_panel_context_menu_prepends_open_edit_for_files() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use nexshell::menu::MenuItem;
 
         let items = super::local_file_panel_context_menu_items(
             Some("/Users/example/notes.txt".to_string()),
@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn remote_file_panel_context_menu_keeps_sftp_actions() {
         rust_i18n::set_locale("en");
-        use warp::menu::MenuItem;
+        use nexshell::menu::MenuItem;
 
         let items = super::remote_file_panel_context_menu_items(
             Some("logs".to_string()),

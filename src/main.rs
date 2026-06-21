@@ -630,6 +630,7 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
     warp_core::semantic_selection::SemanticSelection::register(ctx);
     register_warp_appearance(ctx);
     ctx.add_singleton_model(|_| warp::settings_view::keybindings::KeybindingChangedNotifier::new());
+    nexshell::menu::init(ctx);
     warp::editor::init(ctx);
     // CodeEditorView 自己的 action 键绑定（方向键/退格/删除/选择等）；可编辑后必需，
     // 单行 editor::init 不含（ADR 0003）。否则只有 IME 字符输入可用、方向键/功能键全失效。

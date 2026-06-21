@@ -140,8 +140,8 @@ pub(crate) fn remote_file_panel_context_menu_items(
     cwd: &str,
     is_dir: bool,
     multi_count: Option<usize>,
-) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
-    use warp::menu::{MenuItem, MenuItemFields};
+) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+    use nexshell::menu::{MenuItem, MenuItemFields};
 
     let has_target = name.is_some();
     let placeholder_name = name.unwrap_or_default();
@@ -204,8 +204,8 @@ pub(crate) fn local_file_panel_context_menu_items(
     target_path: Option<String>,
     root_path: &str,
     is_dir: bool,
-) -> Vec<warp::menu::MenuItem<TerminalGridAction>> {
-    use warp::menu::{MenuItem, MenuItemFields};
+) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+    use nexshell::menu::{MenuItem, MenuItemFields};
 
     let has_target = target_path.is_some();
     let path = target_path.unwrap_or_else(|| root_path.to_string());
