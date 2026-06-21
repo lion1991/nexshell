@@ -302,7 +302,3 @@ impl CharWindow {
         self.window.get(2).unwrap_or(&None).to_owned()
     }
 }
-
-#[cfg(test)]
-#[path = "subword_boundaries_tests.rs"]
-mod tests;

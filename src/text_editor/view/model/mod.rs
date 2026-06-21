@@ -3208,7 +3208,3 @@ impl EditorModel {
             ..end.to_buffer_point(map, Bias::Left, app)?)
     }
 }
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;

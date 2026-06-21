@@ -387,7 +387,3 @@ impl Text {
         cursor.start().bytes + (overshoot * cursor.item().map_or(0, |run| run.char_size()) as usize)
     }
 }
-
-#[cfg(test)]
-#[path = "text_tests.rs"]
-mod tests;

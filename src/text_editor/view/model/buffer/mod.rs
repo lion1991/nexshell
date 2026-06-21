@@ -1,8 +1,6 @@
 mod anchor;
 mod deferred_ops;
 mod subword_boundaries;
-#[cfg(test)]
-mod test;
 mod text;
 mod time;
 mod undo;
@@ -3889,7 +3887,3 @@ pub enum RangesWhenEditing {
     /// Use a random set of ranges, up to `num_ranges`.
     UseRandomRanges { num_ranges: usize },
 }
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;

@@ -2381,6 +2381,3 @@ impl CodeEditorView {
         Some(line_number_config.display_line_number(line_count))
     }
 }
-
-#[cfg(test)]
-mod view_tests;

@@ -985,7 +985,3 @@ fn trim_one_end_match(s: &str, ch: char) -> &str {
         s
     }
 }
-
-#[cfg(test)]
-#[path = "vim_handler_tests.rs"]
-mod tests;

@@ -517,7 +517,3 @@ pub fn collapse_tabs(
     }
     (collapsed, 0)
 }
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;

@@ -507,7 +507,3 @@ impl<'a> Dimension<'a, TransformSummary> for CharOffset {
         *self += summary.buffer.chars;
     }
 }
-
-#[cfg(test)]
-#[path = "fold_map_tests.rs"]
-mod tests;

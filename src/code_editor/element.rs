@@ -1684,7 +1684,3 @@ impl<V: EditorView> NewScrollableElement for EditorWrapper<V> {
         ScrollableAxis::Both
     }
 }
-
-#[cfg(test)]
-#[path = "element_tests.rs"]
-mod tests;

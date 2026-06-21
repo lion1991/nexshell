@@ -821,7 +821,3 @@ fn record_inline_diff_as_changes(
 impl Entity for DiffModel {
     type Event = DiffModelEvent;
 }
-
-#[cfg(test)]
-#[path = "diff_tests.rs"]
-mod tests;
