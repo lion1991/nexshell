@@ -3,6 +3,7 @@ pub mod autosuggestion_ignore_view;
 mod soft_wrap;
 mod view;
 pub mod editor_support;
+pub mod flags;
 pub mod settings;
 pub mod vim_registers;
 

@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use rayon::prelude::*;
 use string_offset::ByteOffset;
-use warp_completer::completer::Description;
+use crate::text_editor::editor_support::Description;
 use warpui::fonts::{Cache as FontCache, FamilyId, Properties};
 use warpui::platform::LineStyle;
 use warpui::text::point::Point;

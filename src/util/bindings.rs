@@ -3,8 +3,10 @@ use std::collections::HashMap;
 
 use enum_iterator::{all, Sequence};
 use lazy_static::lazy_static;
-use warpui::keymap::{CustomTag, Keystroke};
+use warpui::actions::StandardAction;
+use warpui::keymap::{CustomTag, Keystroke, Trigger};
 use warpui::platform::OperatingSystem;
+use warpui::{AppContext, SingletonEntity as _};
 
 // CustomActions are attached to menu items, and may be attached to Bindings.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Sequence)]
@@ -385,4 +387,96 @@ fn mac_only_keystroke(source: &str) -> Option<Keystroke> {
     } else {
         None
     }
+}
+
+// ── 键绑定查询/修改 (端口自 warp util::bindings) ─────────────────────────
+
+/// 把 Trigger 解析成展示用的首个 Keystroke。Custom/Standard 动作本身无快捷键,
+/// 走 custom_tag_to_keystroke / 平台默认值映射。
+pub fn trigger_to_keystroke(trigger: &Trigger) -> Option<Keystroke> {
+    match trigger {
+        Trigger::Keystrokes(keys) => keys.first().cloned(),
+        Trigger::Custom(custom) => custom_tag_to_keystroke(*custom),
+        Trigger::Standard(standard) => match standard {
+            StandardAction::Close => mac_only_keystroke("cmd-shift-W"),
+            StandardAction::Quit => mac_only_keystroke("cmd-q"),
+            StandardAction::Hide => mac_only_keystroke("cmd-h"),
+            StandardAction::HideOtherApps => Keystroke::parse("cmdorctrl-alt-h").ok(),
+            StandardAction::ToggleFullScreen => mac_only_keystroke("cmd-ctrl-f"),
+            StandardAction::Paste => Keystroke::parse(cmd_or_ctrl_shift("v")).ok(),
+            StandardAction::ShowAllApps
+            | StandardAction::BringAllToFront
+            | StandardAction::Minimize
+            | StandardAction::Zoom => None,
+        },
+        Trigger::Empty => None,
+    }
+}
+
+/// 自定义键绑定变更通知器。视图可订阅它接收 KeybindingChangedEvent。
+/// 本地化自 warp settings_view::keybindings (原模块在 binary crate, text_editor 不可见)。
+#[derive(Default)]
+pub struct KeybindingChangedNotifier {}
+
+impl KeybindingChangedNotifier {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+pub enum KeybindingChangedEvent {
+    BindingChanged {
+        binding_name: String,
+        new_trigger: Option<Keystroke>,
+    },
+}
+
+impl warpui::Entity for KeybindingChangedNotifier {
+    type Event = KeybindingChangedEvent;
+}
+
+impl warpui::SingletonEntity for KeybindingChangedNotifier {}
+
+/// 查询某绑定当前的 Keystroke。绑定不存在或未分配时返回 None。
+pub fn keybinding_name_to_keystroke(binding_name: &str, ctx: &AppContext) -> Option<Keystroke> {
+    ctx.get_binding_by_name(binding_name)
+        .and_then(|binding| trigger_to_keystroke(binding.trigger))
+}
+
+/// 为可编辑绑定设置自定义 Keystroke, 并发出 KeybindingChangedEvent。
+/// 注: 端口版只改内存中的 trigger, 不落盘 (warp 原版写 keybindings.yaml)。
+pub fn set_custom_keybinding(binding_name: &str, keystroke: &Keystroke, ctx: &mut AppContext) {
+    ctx.set_custom_trigger(
+        binding_name.into(),
+        Trigger::Keystrokes(vec![keystroke.clone()]),
+    );
+    KeybindingChangedNotifier::handle(ctx).update(ctx, |_, ctx| {
+        ctx.emit(KeybindingChangedEvent::BindingChanged {
+            binding_name: binding_name.into(),
+            new_trigger: Some(keystroke.clone()),
+        })
+    });
+}
+
+/// 把可编辑绑定重置回默认 trigger, 发出 KeybindingChangedEvent, 返回默认 Keystroke。
+/// 注: 端口版只改内存中的 trigger, 不落盘。
+pub fn reset_keybinding_to_default(
+    binding_name: &str,
+    ctx: &mut AppContext,
+) -> Option<Keystroke> {
+    ctx.remove_custom_trigger(binding_name);
+
+    let default_keystroke = ctx
+        .editable_bindings()
+        .find(|binding| binding.name == binding_name)
+        .and_then(|binding| trigger_to_keystroke(binding.trigger));
+
+    KeybindingChangedNotifier::handle(ctx).update(ctx, |_, ctx| {
+        ctx.emit(KeybindingChangedEvent::BindingChanged {
+            binding_name: binding_name.into(),
+            new_trigger: default_keystroke.clone(),
+        })
+    });
+
+    default_keystroke
 }

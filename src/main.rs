@@ -629,7 +629,7 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
     warp::settings::SelectionSettings::register(ctx);
     warp_core::semantic_selection::SemanticSelection::register(ctx);
     register_warp_appearance(ctx);
-    ctx.add_singleton_model(|_| warp::settings_view::keybindings::KeybindingChangedNotifier::new());
+    ctx.add_singleton_model(|_| nexshell::util::bindings::KeybindingChangedNotifier::new());
     nexshell::menu::init(ctx);
     nexshell::text_editor::init(ctx);
     // CodeEditorView 自己的 action 键绑定（方向键/退格/删除/选择等）；可编辑后必需，

@@ -10,19 +10,14 @@ use std::cmp::{self, Ordering};
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use async_fs;
-use base64::engine::general_purpose;
 use base64::Engine as _;
 use element::CommandXRayMouseStateHandle;
-use figma_utils::is_figma_png;
 use itertools::{Either, Itertools};
-use mime_guess::from_path;
 use model::{
     Anchor, AnchorBias, Bias, DisplayMap, DrawableSelection, EditorModel, EditorModelEvent, Edits,
     LocalPendingSelection, LocalSelection, MarkedTextState, MovementResult, SelectionMode,
@@ -46,9 +41,8 @@ use vim::{
     vim_a_block, vim_a_paragraph, vim_a_quote, vim_a_word, vim_inner_block, vim_inner_paragraph,
     vim_inner_quote, vim_inner_word, vim_word_iterator_from_offset,
 };
-use warp_completer::completer::Description;
+use crate::text_editor::editor_support::Description;
 use warp_core::semantic_selection::SemanticSelection;
-use warp_core::{safe_error, send_telemetry_from_ctx};
 use warp_editor::editor::NavigationKey;
 use warp_util::path::ShellFamily;
 use warp_util::user_input::UserInput;
@@ -56,20 +50,19 @@ use warpui::accessibility::{AccessibilityContent, ActionAccessibilityContent, Wa
 use warpui::actions::StandardAction;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
-    ChildView, Container, CornerRadius, CrossAxisAlignment, Flex, Hoverable, MainAxisSize,
+    CornerRadius, CrossAxisAlignment, Flex, Hoverable, MainAxisSize,
     MouseStateHandle, ParentElement, Radius, Shrinkable, DEFAULT_UI_LINE_HEIGHT_RATIO,
 };
 use warpui::fonts::{Cache as FontCache, FamilyId, Properties, Weight};
 use warpui::keymap::{EditableBinding, FixedBinding, Keystroke, PerPlatformKeystroke};
 #[cfg(feature = "voice_input")]
 use warpui::platform::keyboard::KeyCode;
-use warpui::platform::{Cursor, FilePickerConfiguration, OperatingSystem};
-use warpui::r#async::{SpawnedFutureHandle, Timer};
+use warpui::platform::{Cursor, OperatingSystem};
+use warpui::r#async::Timer;
 use warpui::text::word_boundaries::WordBoundariesPolicy;
 use warpui::text::TextBuffer;
 use warpui::text_layout::TextStyle;
-use warpui::ui_components::button::ButtonTooltipPosition;
-use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
+use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::windowing::WindowManager;
 use warpui::{
     elements, windowing, AppContext, BlurContext, CursorInfo, Element, Entity, EntityId,
@@ -97,30 +90,25 @@ use crate::text_editor::accept_autosuggestion_keybinding_view::AcceptAutosuggest
 use crate::text_editor::autosuggestion_ignore_view::{AutosuggestionIgnore, AutosuggestionIgnoreEvent};
 use crate::text_editor::RangeExt;
 use crate::features::FeatureFlag;
-use crate::telemetry::TelemetryEvent;
 #[cfg(feature = "voice_input")]
-use crate::text_editor::settings::AISettingsChangedEvent;
+use crate::text_editor::settings::{AISettings, AISettingsChangedEvent};
 use crate::text_editor::settings::{
-    AISettings, AppEditorSettings, AppEditorSettingsChangedEvent, CursorBlink, CursorDisplayType,
-    InputSettings, SelectionSettings,
+    AppEditorSettings, AppEditorSettingsChangedEvent, CursorBlink, CursorDisplayType, InputType,
+    SelectionSettings,
 };
-use crate::settings_view::flags;
-use crate::text_editor::editor_support::ignored_suggestions_model::{IgnoredSuggestionsModel, SuggestionType};
+use crate::text_editor::flags;
 use crate::util::grid::grid_cell_dimensions;
-use warp::terminal::model::block::BlockId;
+use warp_terminal::model::BlockId;
 use crate::themes::theme::Fill;
 use crate::ui_components::avatar::{Avatar, AvatarContent};
-use crate::ui_components::buttons::icon_button;
-use crate::ui_components::icons;
 use crate::util::bindings::{cmd_or_ctrl_shift, keybinding_name_to_keystroke, CustomAction};
-use warp::util::clipboard::clipboard_content_with_escaped_paths;
-use warp::util::color::{ContrastingColor, MinimumAllowedContrast};
-use warp::util::merge_ranges;
+use crate::util::clipboard::clipboard_content_with_escaped_paths;
+use warp_core::ui::color::contrast::MinimumAllowedContrast;
+use warp_core::ui::color::ContrastingColor;
+use crate::util::merge_ranges;
 #[cfg(feature = "voice_input")]
 use crate::view_components::FeaturePopup;
 use crate::text_editor::vim_registers::{RegisterContent, VimRegisters};
-use warp::workspace::Workspace;
-use warp::BlocklistAIHistoryModel;
 
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_TAB_SIZE: usize = 4;
@@ -130,7 +118,6 @@ pub const VOICE_LIMIT_HIT_TOAST_TEXT: &str = "You have hit the limit for Voice r
 pub const VOICE_ERROR_TOAST_TEXT: &str = "An error occurred while processing your voice input.";
 
 
-use warpui::clipboard_utils::CLIPBOARD_IMAGE_MIME_TYPES;
 
 #[derive(Clone, Copy)]
 pub enum AutosuggestionLocation {
@@ -2807,14 +2794,7 @@ impl EditorView {
 
         #[cfg(feature = "voice_input")]
         {
-            use warp::workspaces::user_workspaces::UserWorkspaces;
-
-            ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), |me, _handle, _event, ctx| {
-                me.update_voice_transcription_options(Self::voice_options(ctx), ctx);
-                // Re-render if teams-related data changed that may affect whether features such as voice input are enabled.
-                ctx.notify();
-            });
-
+            // 解耦：原 UserWorkspaces（teams/cloud）订阅已砍。
             ctx.subscribe_to_model(
                 &AISettings::handle(ctx),
                 |editor, _, event, ctx| match event {
@@ -3990,68 +3970,18 @@ impl EditorView {
             return;
         }
 
-        let terminal_view = ctx
-            .windows()
-            .active_window()
-            .and_then(|active_window| {
-                ctx
-                    // Need to get the workspace info since we don't have access to the terminal view
-                    // from the ClearBuffer action.
-                    .views_of_type::<Workspace>(active_window)
-                    .and_then(|views| views.first().cloned())
-            })
-            .and_then(|workspace| {
-                workspace
-                    .as_ref(ctx)
-                    .active_tab_pane_group()
-                    .as_ref(ctx)
-                    .active_session_view(ctx)
-            });
-
-        // If an agent is responding, we don't want ctrl+c to clear the persistent input.
-        let is_agent_responding = terminal_view
-            .as_ref()
-            .and_then(|terminal_view| {
-                BlocklistAIHistoryModel::as_ref(ctx).active_conversation(terminal_view.id())
-            })
-            .is_some_and(|conversation| {
-                conversation.status().is_in_progress() && conversation.exchange_count() > 0
-            });
-
-        // If there is a pending passive ai block, we don't want ctrl+c to clear the buffer.
-        let is_pending_passive_ai_block = terminal_view.is_some_and(|terminal_view| {
-            let terminal_model = terminal_view.as_ref(ctx).model.lock();
-            terminal_model
-                .block_list()
-                .last_non_hidden_ai_block_handle(ctx)
-                .is_some_and(|ai_block| {
-                    let block = ai_block.as_ref(ctx);
-                    // Ctrl+c should dismiss the passive ai block only if the keybindings for the block are not hidden.
-                    let is_pending_code_diff = block.find_undismissed_code_diff(ctx).is_some();
-                    let is_pending_suggested_prompt = block
-                        .pending_unit_test_suggestion(ctx)
-                        .is_some_and(|suggested_prompt| {
-                            !suggested_prompt.as_ref(ctx).is_keybindings_hidden()
-                        });
-                    block.is_passive_conversation(ctx)
-                        && (is_pending_code_diff || is_pending_suggested_prompt)
-                })
-        });
-
+        // 解耦：原先经 Workspace + BlocklistAIHistoryModel 判定 agent 响应/pending AI block
+        // 以决定是否清空 buffer 的逻辑已砍（属已移除的 AI 功能）。两标志恒为 false，行为等价。
         let mut cleared_buffer_len = 0;
-        if (!self.vim_mode_enabled(ctx)
+        if !self.vim_mode_enabled(ctx)
             || self
                 .vim_mode(ctx)
-                .is_some_and(|vim_mode| matches![vim_mode, VimMode::Normal | VimMode::Insert]))
-            && !is_agent_responding
-            && !is_pending_passive_ai_block
+                .is_some_and(|vim_mode| matches![vim_mode, VimMode::Normal | VimMode::Insert])
         {
             cleared_buffer_len = self.buffer_size(ctx).as_usize();
             self.clear_buffer(ctx);
         }
-        if !is_agent_responding || !is_pending_passive_ai_block {
-            self.vim_interrupt(ctx);
-        }
+        self.vim_interrupt(ctx);
 
         ctx.emit(Event::CtrlC { cleared_buffer_len });
     }
@@ -7444,6 +7374,10 @@ pub enum Event {
     InsertLastWordPrevCommand,
     /// EditorView-initiated search experience, e.g. triggered by some Vim keybindings. The way the
     /// parent view handles this will depend on the parent view.
+    Search {
+        direction: Direction,
+        term: Option<String>,
+    },
     /// Open a menu (command-line mode) to accept an ex-command. See ":help :" in Vim.
     ExCommand,
     /// Notify subscribers that the VimFSA state may have changed. The EditorView itself doesn't
@@ -7466,6 +7400,7 @@ pub enum Event {
         is_transcribing: bool,
     },
     /// Request parent to process image file paths from drag-and-drop
+    DroppedImageFiles(Vec<String>),
     IgnoreAutosuggestion {
         suggestion: String,
     },

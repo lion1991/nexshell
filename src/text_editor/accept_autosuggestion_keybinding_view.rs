@@ -18,14 +18,15 @@ use super::EditorElement;
 use warp_core::ui::appearance::Appearance;
 use crate::text_editor::ACCEPT_AUTOSUGGESTION_KEYBINDING_NAME;
 use crate::menu::{Menu, MenuItemFields};
-use warp::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
-use warp::terminal::input::OPEN_COMPLETIONS_KEYBINDING_NAME;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::util::bindings::{
     keybinding_name_to_keystroke, reset_keybinding_to_default, set_custom_keybinding,
+    KeybindingChangedEvent, KeybindingChangedNotifier,
 };
-use warp::workspace::WorkspaceAction;
+
+/// 原 warp::terminal::input::OPEN_COMPLETIONS_KEYBINDING_NAME，本地化为常量。
+const OPEN_COMPLETIONS_KEYBINDING_NAME: &str = "input:open_completion_suggestions";
 
 pub const AUTOSUGGESTION_HINT_MINIMUM_HEIGHT: f32 = 12.;
 
@@ -213,10 +214,10 @@ impl TypedActionView for AcceptAutosuggestionKeybinding {
                     reset_keybinding_to_default(OPEN_COMPLETIONS_KEYBINDING_NAME, ctx);
                 }
             }
-            AcceptAutosuggestionKeybindingAction::OpenSettingsForCustomKeybinding => ctx
-                .dispatch_typed_action(&WorkspaceAction::ConfigureKeybindingSettings {
-                    keybinding_name: Some("Accept Autosuggestion".to_owned()),
-                }),
+            AcceptAutosuggestionKeybindingAction::OpenSettingsForCustomKeybinding => {
+                // TODO(解耦): 原 dispatch warp::workspace::WorkspaceAction::ConfigureKeybindingSettings
+                // 由 binary 侧 RootView 处理打开键绑定设置页；settings_view 整合后再接回。
+            }
             AcceptAutosuggestionKeybindingAction::OpenMenu => {
                 self.is_menu_open = true;
             }

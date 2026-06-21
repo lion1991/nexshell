@@ -2,6 +2,7 @@
 pub(crate) mod blended_colors;
 pub mod buttons;
 pub mod avatar;
+pub mod red_notification_dot;
 
 pub use warp_core::ui::icons;
 

@@ -2,8 +2,8 @@ use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::external_product_icon::ExternalProductIcon;
 use warp_core::ui::icons::Icon;
 use warpui::elements::{
-    self, Align, Border, CacheOption, ChildAnchor, ConstrainedBox, Container, Element, Image,
-    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Stack, Text,
+    self, Align, Border, ChildAnchor, ConstrainedBox, Container, Element, OffsetPositioning,
+    ParentAnchor, ParentElement, ParentOffsetBounds, Stack, Text,
 };
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 
@@ -49,15 +49,9 @@ impl UiComponent for Avatar {
     fn build(self) -> Container {
         let styles = self.styles;
         let inner_element = match self.content {
-            AvatarContent::Image { url, display_name } => {
-                let mut image = Image::new(asset_cache::url_source(url), CacheOption::BySize)
-                    .before_load(
-                        Align::new(Self::first_initial(&display_name, self.styles)).finish(),
-                    );
-                if let Some(radius) = styles.border_radius {
-                    image = image.with_corner_radius(radius);
-                }
-                image.finish()
+            AvatarContent::Image { url: _, display_name } => {
+                // 解耦：协作者头像走 asset_cache+reqwest 网络拉取已砍，直接显示首字母。
+                Self::first_initial(&display_name, self.styles)
             }
             AvatarContent::Icon(icon) => {
                 let icon_size = {

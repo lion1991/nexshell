@@ -6,9 +6,12 @@ publish = false
 
 [features]
 default = ["warpui-app"]
+# text_editor 残留 cfg（voice 已砍 / settings 宏内部 integration_tests）：声明以消 check-cfg 警告，默认关、不激活。
+voice_input = []
+integration_tests = []
 # 实际运行的应用 feature：拉入 warpui + warpui_core（皆 MIT），在 macOS 上
 # 同时把 warp 的整个平台层 (cocoa/metal/font-kit/objc) 间接拉入。
-warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim", "dep:sum_tree", "dep:string-offset", "dep:vec1", "dep:arrayvec", "dep:smallvec", "dep:num-traits", "dep:itertools", "dep:instant", "dep:bounded-vec-deque", "dep:uuid", "dep:rayon"]
+warpui-app = ["dep:settings", "dep:warp", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim", "dep:sum_tree", "dep:string-offset", "dep:vec1", "dep:arrayvec", "dep:smallvec", "dep:num-traits", "dep:itertools", "dep:instant", "dep:bounded-vec-deque", "dep:uuid", "dep:rayon", "dep:concat-idents", "dep:cfg-if", "dep:mime_guess", "dep:async-fs"]
 
 [dependencies]
 alacritty_terminal = "0.25"
@@ -61,6 +64,11 @@ instant = { version = "0.1", features = ["wasm-bindgen"], optional = true }
 bounded-vec-deque = { version = "0.1", optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 rayon = { version = "1", optional = true }
+# editor 本地化补依赖：settings 宏裸用 concat_idents::；element/settings 用 cfg-if；mod.rs 用 mime_guess/async-fs。
+concat-idents = { version = "1.1.4", optional = true }
+cfg-if = { version = "1.0.0", optional = true }
+mime_guess = { version = "2.0", optional = true }
+async-fs = { version = "2.1.2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "=0.26.0"
@@ -97,7 +105,7 @@ settings_value = { path = "../warp/crates/settings_value", features = ["derive"]
 # editor 本地化：text_editor 的 vim_model 依赖纯净的 vim crate（无 ai/app/网络）。
 vim = { path = "../warp/crates/vim", optional = true }
 sum_tree = { path = "../warp/crates/sum_tree", optional = true }
-string-offset = { path = "../warp/crates/string-offset", features = ["serde"], optional = true }
+string-offset = { path = "../warp/crates/string-offset", optional = true }
 
 [[bin]]
 name = "nexshell"
