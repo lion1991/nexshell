@@ -159,6 +159,7 @@ impl MenuVariant {
 pub(crate) enum MenuTooltipPosition {
     #[default]
     Right,
+    #[allow(dead_code)]
     Above,
 }
 
@@ -875,6 +876,7 @@ impl<A: Action + Clone> MenuItemFields<A> {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_tooltip_position(mut self, position: MenuTooltipPosition) -> Self {
         self.tooltip_position = position;
         self

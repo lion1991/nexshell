@@ -28,6 +28,7 @@ pub struct LineDiffContent {
 
 impl LineDiffContent {
     /// diff 行原文，去掉 `+`/`-` 前缀与尾换行。
+    #[allow(dead_code)]
     pub(crate) fn original_text(&self) -> String {
         let s = self.content.trim_end_matches('\n');
         s.strip_prefix('+')

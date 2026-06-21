@@ -115,6 +115,7 @@ impl GridCell {
         }
     }
 
+    #[allow(dead_code)]
     pub fn empty() -> Self {
         Self::empty_with_palette(&TerminalPalette::default())
     }

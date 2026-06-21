@@ -48,6 +48,7 @@ pub struct EditorReviewComment {
 }
 
 impl EditorReviewComment {
+    #[allow(dead_code)]
     pub(crate) fn new(
         line: EditorLineLocation,
         diff_content: LineDiffContent,

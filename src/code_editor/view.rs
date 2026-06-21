@@ -497,6 +497,7 @@ impl CodeEditorView {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn disable_find_and_replace(mut self) -> Self {
         self.find_bar = None;
         self
@@ -905,16 +906,19 @@ impl CodeEditorView {
         ctx.emit(CodeEditorEvent::HiddenSectionExpanded);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_can_show_diff_ui(mut self, can_show_diff_ui: bool) -> Self {
         self.display_options.can_show_diff_ui = can_show_diff_ui;
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_show_line_numbers(mut self, show_line_numbers: bool) -> Self {
         self.display_options.show_line_numbers = show_line_numbers;
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_horizontal_scrollbar_appearance(
         mut self,
         scrollbar_appearance: ScrollableAppearance,
@@ -923,10 +927,12 @@ impl CodeEditorView {
         self
     }
 
+    #[allow(dead_code)]
     pub(crate) fn starting_line_number(&self) -> Option<usize> {
         self.display_options.starting_line_number
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_starting_line_number(&mut self, starting_line_number: Option<usize>) {
         self.display_options.starting_line_number = starting_line_number;
     }

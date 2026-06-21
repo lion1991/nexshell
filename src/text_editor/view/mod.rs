@@ -1,5 +1,4 @@
 mod element;
-mod figma_utils;
 mod model;
 mod movement;
 mod snapshot;
@@ -15,7 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use base64::Engine as _;
 use element::CommandXRayMouseStateHandle;
 use itertools::{Either, Itertools};
 use model::{
@@ -7160,6 +7158,7 @@ impl EditorView {
         self.user_insert(&input, ctx);
     }
 
+    #[allow(dead_code)]
     fn render_menu_button_tooltip(
         &self,
         tooltip_text: String,
