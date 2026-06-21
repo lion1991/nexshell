@@ -675,7 +675,7 @@ mod tests {
         assert!(options.soft_wrap);
         assert!(options.placeholder_soft_wrap);
         assert!(!options.single_line);
-        assert!(crate::GIT_COMMIT_EDITOR_MIN_HEIGHT > 32.0);
+        assert!(crate::GIT_COMMIT_EDITOR_MIN_HEIGHT > 28.0);
         assert!(crate::GIT_COMMIT_EDITOR_MAX_HEIGHT >= crate::GIT_COMMIT_EDITOR_MIN_HEIGHT * 2.0);
     }
 

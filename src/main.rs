@@ -178,7 +178,7 @@ const GIT_PANEL_WIDTH_MIN: f32 = 220.0;
 const GIT_PANEL_WIDTH_MAX: f32 = 640.0;
 const GIT_PANEL_DIVIDER_WIDTH: f32 = 6.0;
 const GIT_HISTORY_DIVIDER_HEIGHT: f32 = 6.0;
-const GIT_COMMIT_EDITOR_MIN_HEIGHT: f32 = 48.0;
+const GIT_COMMIT_EDITOR_MIN_HEIGHT: f32 = 30.0; // 默认一行（12pt×1.2 + 8+8 padding ≈ 30）
 const GIT_COMMIT_EDITOR_MAX_HEIGHT: f32 = 120.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -259,6 +259,39 @@ impl AssetProvider for EmbeddedAssets {
             }
             "async/jpg/phenomenon_bg.jpg" => {
                 include_bytes!("../../warp/app/assets/async/jpg/phenomenon_bg.jpg")
+            }
+            "async/jpg/jellyfish_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/jellyfish_bg.jpg")
+            }
+            "async/jpg/koi_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/koi_bg.jpg")
+            }
+            "async/jpg/leafy_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/leafy_bg.jpg")
+            }
+            "async/jpg/marble_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/marble_bg.jpg")
+            }
+            "async/jpg/pink_city_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/pink_city_bg.jpg")
+            }
+            "async/jpg/snowy_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/snowy_bg.jpg")
+            }
+            "async/jpg/red_rock_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/red_rock_bg.jpg")
+            }
+            "async/jpg/dark_city_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/dark_city_bg.jpg")
+            }
+            "async/jpg/sent_referral_reward_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/sent_referral_reward_bg.jpg")
+            }
+            "async/jpg/solarflare_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/solarflare_bg.jpg")
+            }
+            "async/jpg/received_referral_reward_bg.jpg" => {
+                include_bytes!("../../warp/app/assets/async/jpg/received_referral_reward_bg.jpg")
             }
             _ => {
                 return Err(anyhow::anyhow!(

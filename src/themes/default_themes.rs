@@ -3,9 +3,10 @@ use warp_core::ui::color::blend::Blend;
 use warp_core::ui::color::{coloru_with_opacity, OPAQUE};
 use warp_core::ui::theme::color::CustomDetails;
 use warp_core::ui::theme::{
-    AnsiColor, AnsiColors, Details, Fill, HorizontalGradient, TerminalColors,
+    AnsiColor, AnsiColors, Details, Fill, HorizontalGradient, Image, TerminalColors,
     VerticalGradient, WarpTheme,
 };
+use warpui::assets::asset_cache::AssetSource;
 
 const DARK_MODE_NORMAL_COLORS: AnsiColors = AnsiColors::new(
     AnsiColor::from_u32(0x616161FF),
@@ -415,7 +416,12 @@ pub(super) fn phenomenon() -> WarpTheme {
         None,
         Some(Details::Darker),
         phenomenon_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/phenomenon_bg.jpg",
+            },
+            opacity: 100,
+        }),
         Some("Phenomenon".to_string()),
     )
 }
@@ -429,7 +435,12 @@ pub(super) fn jellyfish() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/jellyfish_bg.jpg",
+            },
+            opacity: 30,
+        }),
         Some("Jellyfish".to_string()),
     )
 }
@@ -442,7 +453,12 @@ pub(super) fn koi() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/koi_bg.jpg",
+            },
+            opacity: 30,
+        }),
         Some("Koi".to_string()),
     )
 }
@@ -455,7 +471,12 @@ pub(super) fn leafy() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/leafy_bg.jpg",
+            },
+            opacity: 30,
+        }),
         Some("Leafy".to_string()),
     )
 }
@@ -468,7 +489,12 @@ pub(super) fn marble() -> WarpTheme {
         None,
         Some(Details::Lighter),
         light_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/marble_bg.jpg",
+            },
+            opacity: 50,
+        }),
         Some("Marble".to_string()),
     )
 }
@@ -484,7 +510,12 @@ pub(super) fn pink_city() -> WarpTheme {
         None,
         Some(Details::Custom(details)),
         light_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/pink_city_bg.jpg",
+            },
+            opacity: 40,
+        }),
         Some("Pink City".to_string()),
     )
 }
@@ -500,7 +531,12 @@ pub(super) fn snowy() -> WarpTheme {
         None,
         Some(Details::Lighter),
         light_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/snowy_bg.jpg",
+            },
+            opacity: 20,
+        }),
         Some("Snowy".to_string()),
     )
 }
@@ -518,7 +554,12 @@ pub(super) fn red_rock() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/red_rock_bg.jpg",
+            },
+            opacity: 30,
+        }),
         Some("Red Rock".to_string()),
     )
 }
@@ -536,7 +577,12 @@ pub(super) fn dark_city() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/dark_city_bg.jpg",
+            },
+            opacity: 20,
+        }),
         Some("Dark City".to_string()),
     )
 }
@@ -549,7 +595,12 @@ pub(super) fn sent_referral_reward() -> WarpTheme {
         None,
         Some(Details::Darker),
         dark_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/sent_referral_reward_bg.jpg",
+            },
+            opacity: 100,
+        }),
         Some("Warp Referral".to_string()),
     )
 }
@@ -562,7 +613,12 @@ pub(super) fn solar_flare() -> WarpTheme {
         None,
         Some(Details::Darker),
         solarflare_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/solarflare_bg.jpg",
+            },
+            opacity: 20,
+        }),
         Some("Solar Flare".to_string()),
     )
 }
@@ -588,7 +644,12 @@ pub(super) fn received_referral_reward() -> WarpTheme {
         None,
         Some(Details::Lighter),
         light_mode_colors(),
-        None,
+        Some(Image {
+            source: AssetSource::Bundled {
+                path: "async/jpg/received_referral_reward_bg.jpg",
+            },
+            opacity: 100,
+        }),
         Some("Received Referral Reward".to_string()),
     )
 }
