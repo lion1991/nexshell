@@ -377,3 +377,12 @@ pub fn cmd_or_ctrl_shift(key: &str) -> String {
         format!("ctrl-shift-{key}")
     }
 }
+
+/// 仅在 macOS 上把 source 解析为 Keystroke，其它平台返回 None。
+fn mac_only_keystroke(source: &str) -> Option<Keystroke> {
+    if OperatingSystem::get().is_mac() {
+        Keystroke::parse(source).ok()
+    } else {
+        None
+    }
+}
