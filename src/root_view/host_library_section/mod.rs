@@ -13,7 +13,7 @@
 use crate::host_management_view::constants::HostUiColors;
 use crate::host_management_view::render_host_management_panel;
 use crate::RootView;
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::elements::{CrossAxisAlignment, Expanded, Flex, MainAxisSize, ParentElement};
 use warpui::{AppContext, Element, SingletonEntity as _};
 

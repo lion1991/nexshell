@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::EditorView;
 use warpui::{
     color::ColorU,

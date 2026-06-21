@@ -16,7 +16,7 @@ use nexshell::file_panel::{
     SftpRequest,
 };
 use nexshell::sftp_ops::EntryKind;
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::clipboard::ClipboardContent;
 use warpui::{SingletonEntity as _, ViewContext};

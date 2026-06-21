@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pathfinder_geometry::vector::{vec2f, Vector2F};
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::{
@@ -495,7 +495,7 @@ impl RootView {
             file_panel_button_state: Arc::new(Mutex::new(MouseState::default())),
             settings_menu: {
                 let menu = ctx.add_typed_action_view(|ctx| {
-                    let theme = warp::appearance::Appearance::as_ref(ctx).theme();
+                    let theme = warp_core::ui::appearance::Appearance::as_ref(ctx).theme();
                     warp::menu::Menu::new()
                         .with_width(220.)
                         .with_border(Border::all(1.).with_border_color(theme.outline().into()))
@@ -513,7 +513,7 @@ impl RootView {
             new_session_menu_open: false,
             new_session_menu: {
                 let menu = ctx.add_typed_action_view(|ctx| {
-                    let theme = warp::appearance::Appearance::as_ref(ctx).theme();
+                    let theme = warp_core::ui::appearance::Appearance::as_ref(ctx).theme();
                     warp::menu::Menu::new()
                         .with_width(200.)
                         .with_border(Border::all(1.).with_border_color(theme.outline().into()))

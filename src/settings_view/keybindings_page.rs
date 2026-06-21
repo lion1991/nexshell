@@ -1,4 +1,4 @@
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
         Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Expanded,

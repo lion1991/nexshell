@@ -662,7 +662,7 @@ fn register_warp_appearance(ctx: &mut AppContext) {
         });
 
     ctx.add_singleton_model(move |_| {
-        warp::appearance::Appearance::new(
+        warp_core::ui::appearance::Appearance::new(
             warp::themes::default_themes::dark_theme(),
             monospace_font,
             ui_settings.font_size,
@@ -797,7 +797,7 @@ fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Arc<At
 }
 
 fn main() -> Result<()> {
-    warp::features::init_feature_flags();
+    nexshell::features::init_feature_flags();
     warp_core::features::FeatureFlag::ImeMarkedText.set_enabled(true);
     #[cfg(target_os = "macos")]
     nexshell::platform::macos::install_warp_ime_shims();

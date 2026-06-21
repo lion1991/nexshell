@@ -4,7 +4,7 @@ pub mod render_helpers;
 
 use std::sync::{Arc, Mutex};
 
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     color::ColorU,
     elements::{

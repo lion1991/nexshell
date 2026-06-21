@@ -6,7 +6,7 @@
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
 
 use pathfinder_geometry::vector::Vector2F;
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{Element, SingletonEntity as _, ViewContext};
 
 use crate::file_panel_view_helpers::{

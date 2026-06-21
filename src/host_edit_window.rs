@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_editor::editor::NavigationKey;
 use warpui::{

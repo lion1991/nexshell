@@ -7,7 +7,7 @@ use crate::RootView;
 use nexshell::host_management::{
     default_database_path, upsert_host_card_in_db_path,
 };
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::{SingletonEntity as _, ViewContext};
 

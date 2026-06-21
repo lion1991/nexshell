@@ -27,6 +27,8 @@ pub struct ReferencePolicy {
 
 pub mod actions;
 pub mod file_drop_target;
+#[cfg(feature = "warpui-app")]
+pub mod features;
 pub mod file_panel;
 pub mod frame_export;
 pub mod git_ops;

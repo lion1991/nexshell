@@ -1,4 +1,4 @@
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
         Align, Border, ChildAnchor, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,

@@ -12,7 +12,7 @@ use nexshell::host_overview::{
     NetworkRow, NetworkRowKind, NetworkSortKey, SortDirection,
 };
 use std::sync::{Arc, Mutex};
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::color::ColorU;
 use warpui::elements::{
     Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::{
     elements::{

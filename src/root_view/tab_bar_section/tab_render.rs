@@ -20,7 +20,7 @@ use nexshell::warp_horizontal_tabs::{
 use nexshell::warp_tab_context_menu::{
     tab_rename_editor_top_margin, TabContextMenuAnchor, TAB_COLOR_ICON_PATH,
 };
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warp_core::ui::color::coloru_with_opacity;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::color::ColorU;

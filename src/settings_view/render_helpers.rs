@@ -1,5 +1,5 @@
 // warp/app/src/settings_view/settings_page.rs 渲染辅助函数
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
         Align, Container, CrossAxisAlignment, Element, Flex, MainAxisSize, ParentElement,

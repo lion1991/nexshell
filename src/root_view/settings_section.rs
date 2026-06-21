@@ -19,7 +19,7 @@ use crate::ui_settings::{
 };
 use crate::{warp_dropdown_view, AppPage, RootView};
 use nexshell::terminal_runtime::TerminalPalette;
-use warp::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
 
 impl RootView {
@@ -251,7 +251,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.monospace_font_weight = weight;
-        warp::appearance::Appearance::handle(ctx).update(ctx, |appearance, ctx| {
+        warp_core::ui::appearance::Appearance::handle(ctx).update(ctx, |appearance, ctx| {
             appearance.set_monospace_font_weight(weight, ctx);
         });
         // warp: 更新 Dropdown 选中项
