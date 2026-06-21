@@ -1,4 +1,4 @@
-// warp: view_components/dropdown.rs — 完整复制，仅修改 crate:: → warp::
+// warp 源: view_components/dropdown.rs — menu/appearance 已本地化
 use std::fmt::Debug;
 
 use pathfinder_color::ColorU;
@@ -19,10 +19,8 @@ use warpui::{
     ViewHandle, WeakViewHandle,
 };
 
-use warp::{
-    appearance::Appearance,
-    menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant},
-};
+use nexshell::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant};
+use warp_core::ui::appearance::Appearance;
 
 pub const TOP_MENU_BAR_HEIGHT: f32 = 30.;
 pub const TOP_MENU_BAR_MAX_WIDTH: f32 = 190.;

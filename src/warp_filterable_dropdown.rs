@@ -3,14 +3,12 @@ use super::warp_dropdown_view::{
     DropdownAction, DropdownItem, MenuHeaderTextFormatter, DROPDOWN_PADDING, TOP_MENU_BAR_HEIGHT,
     TOP_MENU_BAR_MAX_WIDTH,
 };
-use warp::{
-    appearance::Appearance,
-    editor::{
-        EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
-        TextOptions,
-    },
-    menu::{Event as MenuEvent, Menu, MenuItem, MenuVariant},
+use nexshell::menu::{Event as MenuEvent, Menu, MenuItem, MenuVariant};
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
+    TextOptions,
 };
+use warp_core::ui::appearance::Appearance;
 use warp_core::ui::icons;
 use warp_editor::editor::NavigationKey;
 use warpui::{
