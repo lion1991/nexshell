@@ -67,6 +67,8 @@ pub mod terminal_runtime;
 pub mod time_format;
 #[cfg(feature = "warpui-app")]
 pub mod ui_components;
+#[cfg(feature = "warpui-app")]
+pub mod util;
 pub mod view_model;
 pub mod warp_horizontal_tabs;
 pub mod warp_source_plan;

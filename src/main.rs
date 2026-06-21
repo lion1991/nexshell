@@ -679,7 +679,7 @@ fn register_warp_appearance(ctx: &mut AppContext) {
 fn warp_text_input_custom_tag_to_keystroke(
     custom: warpui::keymap::CustomTag,
 ) -> Option<warpui::keymap::Keystroke> {
-    warp::util::bindings::custom_tag_to_keystroke(custom)
+    nexshell::util::bindings::custom_tag_to_keystroke(custom)
 }
 
 fn configure_warp_text_input_custom_action_key_bindings(app_builder: &mut platform::AppBuilder) {
@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn warp_text_input_custom_actions_have_keystroke_fallbacks() {
-        use warp::util::bindings::CustomAction;
+        use nexshell::util::bindings::CustomAction;
         use warpui::keymap::Keystroke;
 
         assert_eq!(
