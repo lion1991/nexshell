@@ -243,55 +243,55 @@ impl AssetProvider for EmbeddedAssets {
             ICON_PATH_GIT_BRANCH => include_bytes!("../assets/svg/git-branch.svg"),
             ICON_PATH_GIT_LOCAL_REF => include_bytes!("../assets/svg/git-local-ref.svg"),
             "bundled/svg/check-thick.svg" => {
-                include_bytes!("../../warp/app/assets/bundled/svg/check-thick.svg")
+                include_bytes!("../assets/bundled/svg/check-thick.svg")
             }
             "bundled/svg/search-small.svg" => {
-                include_bytes!("../../warp/app/assets/bundled/svg/search-small.svg")
+                include_bytes!("../assets/bundled/svg/search-small.svg")
             }
             "bundled/svg/chevron-down.svg" => {
-                include_bytes!("../../warp/app/assets/bundled/svg/chevron-down.svg")
+                include_bytes!("../assets/bundled/svg/chevron-down.svg")
             }
             TAB_COLOR_ICON_PATH => {
-                include_bytes!("../../warp/app/assets/bundled/svg/ellipse.svg")
+                include_bytes!("../assets/bundled/svg/ellipse.svg")
             }
             TAB_NO_COLOR_ICON_PATH => {
-                include_bytes!("../../warp/app/assets/bundled/svg/no_color_ellipse.svg")
+                include_bytes!("../assets/bundled/svg/no_color_ellipse.svg")
             }
             "async/jpg/phenomenon_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/phenomenon_bg.jpg")
+                include_bytes!("../assets/async/jpg/phenomenon_bg.jpg")
             }
             "async/jpg/jellyfish_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/jellyfish_bg.jpg")
+                include_bytes!("../assets/async/jpg/jellyfish_bg.jpg")
             }
             "async/jpg/koi_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/koi_bg.jpg")
+                include_bytes!("../assets/async/jpg/koi_bg.jpg")
             }
             "async/jpg/leafy_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/leafy_bg.jpg")
+                include_bytes!("../assets/async/jpg/leafy_bg.jpg")
             }
             "async/jpg/marble_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/marble_bg.jpg")
+                include_bytes!("../assets/async/jpg/marble_bg.jpg")
             }
             "async/jpg/pink_city_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/pink_city_bg.jpg")
+                include_bytes!("../assets/async/jpg/pink_city_bg.jpg")
             }
             "async/jpg/snowy_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/snowy_bg.jpg")
+                include_bytes!("../assets/async/jpg/snowy_bg.jpg")
             }
             "async/jpg/red_rock_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/red_rock_bg.jpg")
+                include_bytes!("../assets/async/jpg/red_rock_bg.jpg")
             }
             "async/jpg/dark_city_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/dark_city_bg.jpg")
+                include_bytes!("../assets/async/jpg/dark_city_bg.jpg")
             }
             "async/jpg/sent_referral_reward_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/sent_referral_reward_bg.jpg")
+                include_bytes!("../assets/async/jpg/sent_referral_reward_bg.jpg")
             }
             "async/jpg/solarflare_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/solarflare_bg.jpg")
+                include_bytes!("../assets/async/jpg/solarflare_bg.jpg")
             }
             "async/jpg/received_referral_reward_bg.jpg" => {
-                include_bytes!("../../warp/app/assets/async/jpg/received_referral_reward_bg.jpg")
+                include_bytes!("../assets/async/jpg/received_referral_reward_bg.jpg")
             }
             _ => {
                 return Err(anyhow::anyhow!(
@@ -681,7 +681,7 @@ fn register_warp_appearance(ctx: &mut AppContext) {
                 .load_family_from_bytes(
                     "PasswordCircle",
                     vec![
-                        include_bytes!("../../warp/app/assets/bundled/fonts/password.ttf")
+                        include_bytes!("../assets/bundled/fonts/password.ttf")
                             .to_vec(),
                     ],
                 )

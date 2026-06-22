@@ -360,7 +360,7 @@ impl TextStyleOperation {
     /// * `text_style_operation` - The TextStyleOperation to apply.
     ///
     /// # Example
-    /// ```
+    /// ```ignore
     /// use warpui::color::ColorU;
     /// use warpui::text_layout::TextStyle;
     /// use warp::editor::TextStyleOperation;

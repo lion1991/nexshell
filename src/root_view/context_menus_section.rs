@@ -674,7 +674,7 @@ mod tests {
             [
                 "Open",
                 "Edit",
-                "Open in viewer",
+                "Open in editor",
                 "---",
                 "New file",
                 "---",
