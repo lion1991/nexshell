@@ -669,6 +669,9 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
     // CodeEditorView 自己的 action 键绑定（方向键/退格/删除/选择等）；可编辑后必需，
     // 单行 editor::init 不含（ADR 0003）。否则只有 IME 字符输入可用、方向键/功能键全失效。
     nexshell::code_editor::init_code_editor_view(ctx);
+    // 查找栏键盘导航（cmd-g / cmd-shift-G 跳下一处/上一处）：warp 在 lib.rs:1707 独立调用
+    // find::view::init（与 init_code_editor_view 是两个 init），解耦时漏调，致快捷键失效。
+    nexshell::code_editor::find::view::init(ctx);
 }
 
 fn register_warp_appearance(ctx: &mut AppContext) {

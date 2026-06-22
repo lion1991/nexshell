@@ -11,10 +11,15 @@ pub fn init_feature_flags() {
     mark_initialized();
 }
 
-/// 内置编辑器(code_viewer)需要的 Warp editor flag：vim 模式 + alt 多光标。
-/// 默认 false，解耦前由 warp app 的 init_feature_flags 启用，本地化后须在此显式补回。
-const NEXSHELL_EDITOR_FLAGS: [FeatureFlag; 2] =
-    [FeatureFlag::VimCodeEditor, FeatureFlag::RichTextMultiselect];
+/// 内置编辑器(code_viewer)需要的 Warp editor flag：vim 模式 + alt 多光标 + 查找替换。
+/// 默认 false，解耦前由 warp app 的 init_feature_flags 启用（CodeFindReplace 对应 warp
+/// 默认 cargo feature code_find_replace，开 code_viewer 查找栏快捷键 cmd-shift-f），
+/// 本地化后须在此显式补回。
+const NEXSHELL_EDITOR_FLAGS: [FeatureFlag; 3] = [
+    FeatureFlag::VimCodeEditor,
+    FeatureFlag::RichTextMultiselect,
+    FeatureFlag::CodeFindReplace,
+];
 
 /// 当前 channel 应启用的 flag。nexshell 不启用 Warp app 特有 feature
 /// （原 Warp 的 ~200 个 `#[cfg(feature=…)]` flag 全被排除），仅取 channel 额外 flag
