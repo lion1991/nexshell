@@ -926,6 +926,14 @@ fn main() -> Result<()> {
     #[cfg(target_os = "macos")]
     app_builder.set_menu_bar_builder(nexshell_menu_bar);
 
+    #[cfg(target_os = "windows")]
+    {
+        // 对齐 warp（lib.rs:1037）：设 AppUserModelID（用 nexshell 自己的 bundle id），
+        // Windows 任务栏据此正确分组窗口 / 取应用图标 / 归集跳转列表与通知。
+        use warpui::platform::windows::AppBuilderExt;
+        app_builder.set_app_user_model_id("com.matt.nexshell".to_string());
+    }
+
     let flags_for_run = Arc::clone(&foreground_flags);
     let _ = app_builder.run(move |ctx| {
         register_warp_text_input_stack(ctx);
