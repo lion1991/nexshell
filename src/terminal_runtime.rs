@@ -4223,6 +4223,29 @@ fn configure_command_environment(command: &mut CommandBuilder) {
     command.env("TERM_PROGRAM", "WarpTerminal");
     command.env("COLORTERM", "truecolor");
     command.env("NEXSHELL_NATIVE_SPIKE", "1");
+
+    // UTF-8 locale：解耦漏搬 warp 的 set_locale_environment（terminal/platform.rs）。PTY 子进程
+    // 无 UTF-8 locale 时，vim 等 locale-aware 程序按 latin1 读 UTF-8 文件 → 中文乱码
+    // （cat 不依赖 locale 故正常）。
+    apply_utf8_locale(command);
+}
+
+/// 尊重用户已设的 UTF-8 locale，仅在缺失/为 C 时补 fallback（warp 同款策略：只设 LC_CTYPE）。
+fn apply_utf8_locale(command: &mut CommandBuilder) {
+    let has_utf8 = ["LC_ALL", "LC_CTYPE", "LANG"].iter().any(|key| {
+        env_var(key).is_some_and(|v| {
+            let upper = v.to_ascii_uppercase();
+            upper.contains("UTF-8") || upper.contains("UTF8")
+        })
+    });
+    if has_utf8 {
+        return;
+    }
+    // macOS libc 接受裸 "UTF-8"（warp FALLBACK_LOCALE 同款）；其他平台用通用的 "C.UTF-8"。
+    #[cfg(target_os = "macos")]
+    command.env("LC_CTYPE", "UTF-8");
+    #[cfg(not(target_os = "macos"))]
+    command.env("LC_CTYPE", "C.UTF-8");
 }
 
 fn env_var(name: &str) -> Option<String> {

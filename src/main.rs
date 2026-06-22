@@ -6,6 +6,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 mod external_editor;
 mod file_panel_view_helpers;
 mod font_enumeration;
+mod font_fallback;
 mod git_commit_detail_helpers;
 mod git_panel_view_helpers;
 mod group_tag_manage_window;
@@ -701,6 +702,11 @@ fn register_warp_appearance(ctx: &mut AppContext) {
             password_font,
         )
     });
+
+    // CJK fallback：base 字体（Hack/Roboto）缺中文字形时，给 warpui 文本系统（code_viewer）
+    // 提供系统中文字体 fallback。解耦删 warp app 时漏搬此注册，致 code_viewer 中文乱码。
+    ctx.set_fallback_font_fn(font_fallback::fallback_font_fn);
+    ctx.set_fallback_font_source_provider(font_fallback::fallback_source);
 }
 
 fn warp_text_input_custom_tag_to_keystroke(
