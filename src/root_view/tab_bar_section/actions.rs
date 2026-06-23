@@ -44,6 +44,7 @@ impl RootView {
 
     pub(in crate::root_view) fn handle_show_host_management(&mut self, ctx: &mut ViewContext<Self>) {
         self.app_page = AppPage::HostManagement;
+        self.reload_host_recent(); // 进页面即刷新最近访问，不必等刷新/连接
         ctx.notify();
     }
 

@@ -434,7 +434,7 @@ impl RootView {
             }
         }
 
-        Self {
+        let mut view = Self {
             window_id: ctx.window_id(),
             app_page: AppPage::HostManagement,
             host_state,
@@ -666,7 +666,9 @@ impl RootView {
             settings_prewarmed: std::cell::Cell::new(false),
             last_host_swap_time: None,
             code_viewer_pending_post: std::collections::HashMap::new(),
-        }
+        };
+        view.reload_host_recent(); // 启动首屏即填充最近访问
+        view
     }
 
     fn create_tab_rename_editor(ctx: &mut ViewContext<Self>) -> warpui::ViewHandle<EditorView> {
@@ -2507,6 +2509,7 @@ impl RootView {
             self.active_tab_index = 0;
             self.terminal = inactive_terminal_runtime();
             self.app_page = AppPage::HostManagement;
+            self.reload_host_recent();
             self.sync_terminal_window_title(None, ctx);
             self.sync_host_overview_monitor(ctx);
             return;
@@ -2584,6 +2587,7 @@ impl RootView {
             self.active_tab_index = 0;
             self.terminal = inactive_terminal_runtime();
             self.app_page = AppPage::HostManagement;
+            self.reload_host_recent();
             self.sync_terminal_window_title(None, ctx);
             return;
         }
