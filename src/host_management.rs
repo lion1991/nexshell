@@ -1469,13 +1469,20 @@ fn ssh_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
         return Some("用户名为空".to_string());
     }
     if config.auth_method.eq_ignore_ascii_case("key") {
-        if config
+        // 私钥本体或 key_id 引用任一有即可（引用走 resolve_private_key_source 取库内容）
+        let no_inline = config
             .private_key
             .as_deref()
             .map(str::trim)
             .unwrap_or_default()
-            .is_empty()
-        {
+            .is_empty();
+        let no_keyref = config
+            .key_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .is_empty();
+        if no_inline && no_keyref {
             return Some("密钥认证未保存私钥".to_string());
         }
     } else if config

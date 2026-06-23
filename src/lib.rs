@@ -2895,6 +2895,43 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(config.serial_baud_rate, 115_200);
     }
 
+    #[test]
+    fn ssh_keyref_only_host_builds_saved_ssh_plan() {
+        // 回归：仅 key_id 引用（无内联私钥）的 SSH 主机应得 SavedSsh，
+        // 而非被门禁误判 Unsupported（私钥本体在连接时按 key_id 取库）。
+        let mut connection = host_management::HostConnectionConfig::ssh("10.0.0.1", 22, "root");
+        connection.auth_method = "key".to_string();
+        connection.private_key = None;
+        connection.key_id = Some("sshkey-1".to_string());
+
+        let snapshot = host_management::HostManagementSnapshot {
+            title: "",
+            top_actions: ["", "", "", ""],
+            groups: vec![],
+            search_placeholder: "",
+            protocol_filter_label: "",
+            available_tags: vec![],
+            hosts: vec![host_management::HostCardSnapshot {
+                id: "keyref".to_string(),
+                name: "keyref".to_string(),
+                protocol: "SSH".to_string(),
+                endpoint: "10.0.0.1:22".to_string(),
+                description: String::new(),
+                connection,
+                group_id: None,
+                tags: vec![],
+                system: host_management::HostSystemIcon::Terminal,
+                sort_order: 0,
+            }],
+        };
+
+        let state = host_management::HostManagementState::new(snapshot);
+        assert!(matches!(
+            state.connection_plan_for("keyref"),
+            Some(host_management::HostConnectionPlan::SavedSsh { .. })
+        ));
+    }
+
     #[cfg(any())]
     #[test]
     fn host_management_snapshot_can_load_real_tauri_host_database() {
