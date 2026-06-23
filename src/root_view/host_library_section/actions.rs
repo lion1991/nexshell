@@ -131,7 +131,7 @@ impl RootView {
     }
 
     /// 重新从库加载密钥列表（含关联主机数）到缓存。
-    fn reload_host_keys(&mut self) {
+    pub(super) fn reload_host_keys(&mut self) {
         if let Some(db_path) = nexshell::host_management::default_database_path()
         {
             if let Ok(keys) =

@@ -145,12 +145,35 @@ impl RootView {
                 name: g.label.clone(),
             })
             .collect();
+        // 被主机引用到的密钥 id（去重）；密钥本体在后台从库读出一并打包，
+        // 使引用型主机（仅 key_id、无内联私钥）跨机导入后仍可连。
+        let mut seen = std::collections::HashSet::new();
+        let key_ids: Vec<String> = hosts
+            .iter()
+            .filter_map(|h| h.connection.key_id.clone())
+            .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+            .collect();
+        let db_path = default_database_path();
         let count = hosts.len();
         self.host_password_busy = true;
         self.schedule_busy_tick(ctx);
         ctx.notify();
         let _ = ctx.spawn(
-            async move { host_export::encrypt_export(&hosts, &groups, &password) },
+            async move {
+                // 仅收被引用到的密钥（不外泄无关密钥）；db 不可用则跳过，主机仍带 key_id
+                let keys: Vec<nexshell::ssh_key_store::SshKeyRecord> = db_path
+                    .as_deref()
+                    .map(|db| {
+                        key_ids
+                            .iter()
+                            .filter_map(|id| {
+                                nexshell::ssh_key_store::get_ssh_key(db, id).ok().flatten()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                host_export::encrypt_export(&hosts, &groups, &keys, &password)
+            },
             move |view, result, ctx| {
                 view.host_password_busy = false;
                 let bytes = match result {
@@ -232,6 +255,19 @@ impl RootView {
                         }
                     }
                 }
+                // 再重建被引用的密钥库（id 主键 upsert，幂等），避免随后写入的 host.key_id 悬空
+                let mut keys_written = 0usize;
+                let mut key_error: Option<String> = None;
+                for key in &lib.keys {
+                    match nexshell::ssh_key_store::upsert_ssh_key(&db_path, key) {
+                        Ok(()) => keys_written += 1,
+                        Err(error) => {
+                            if key_error.is_none() {
+                                key_error = Some(error);
+                            }
+                        }
+                    }
+                }
                 let hosts = lib.hosts;
                 let total = hosts.len();
                 let mut imported = 0usize;
@@ -242,22 +278,27 @@ impl RootView {
                         Err(error) => last_error = Some(error),
                     }
                 }
-                // 主机错误优先（保持原有 host-only 行为不变），否则暴露分组错误
-                let last_error = last_error.or(group_error);
-                Ok::<(usize, usize, usize, Option<String>), String>((
+                // 主机错误优先（保持原有 host-only 行为不变），其次分组、密钥
+                let last_error = last_error.or(group_error).or(key_error);
+                Ok::<(usize, usize, usize, usize, Option<String>), String>((
                     imported,
                     total,
                     groups_written,
+                    keys_written,
                     last_error,
                 ))
             },
             |view, result, ctx| {
                 view.host_password_busy = false;
                 match result {
-                    Ok((imported, total, groups_written, last_error)) => {
+                    Ok((imported, total, groups_written, keys_written, last_error)) => {
                         // 仅导入分组（无主机）时也要刷新，否则恢复成功却界面无变化
                         if imported > 0 || groups_written > 0 {
                             let _ = view.load_host_snapshot_from_db();
+                        }
+                        // 导入了密钥则刷新密钥缓存，密钥管理面板才能看到
+                        if keys_written > 0 {
+                            view.reload_host_keys();
                         }
                         view.host_state.notice = if let Some(error) = last_error {
                             Some(rust_i18n::t!("toast_import_failed", error = error).to_string())

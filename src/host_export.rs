@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use nexshell::host_management::HostCardSnapshot;
+use nexshell::ssh_key_store::SshKeyRecord;
 
 const ENVELOPE_VERSION: u32 = 1;
 const PBKDF2_ITERS: u32 = 600_000;
@@ -37,10 +38,11 @@ pub struct ExportGroup {
     pub name: String,
 }
 
-/// 解密结果：分组先于主机重建，避免 host.group_id 悬空。
+/// 解密结果：分组、密钥先于主机重建，避免 host.group_id / key_id 悬空。
 #[derive(Debug)]
 pub struct ImportedLibrary {
     pub groups: Vec<ExportGroup>,
+    pub keys: Vec<SshKeyRecord>,
     pub hosts: Vec<HostCardSnapshot>,
 }
 
@@ -49,6 +51,9 @@ struct ExportPayload<'a> {
     schema: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     groups: Vec<ExportGroup>,
+    // 被主机引用到的密钥本体，使引用型主机跨档案可连
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    keys: Vec<SshKeyRecord>,
     hosts: &'a [HostCardSnapshot],
 }
 
@@ -57,6 +62,8 @@ struct ImportPayload {
     schema: String,
     #[serde(default)] // 旧版导出文件无 groups 字段，按空处理
     groups: Vec<ExportGroup>,
+    #[serde(default)] // 旧版导出文件无 keys 字段，按空处理
+    keys: Vec<SshKeyRecord>,
     hosts: Vec<HostCardSnapshot>,
 }
 
@@ -64,11 +71,13 @@ struct ImportPayload {
 pub fn encrypt_export(
     hosts: &[HostCardSnapshot],
     groups: &[ExportGroup],
+    keys: &[SshKeyRecord],
     password: &str,
 ) -> Result<Vec<u8>, String> {
     let payload = ExportPayload {
         schema: "nexshell.host_library.v1",
         groups: groups.to_vec(),
+        keys: keys.to_vec(),
         hosts,
     };
     let plaintext = serde_json::to_vec(&payload).map_err(|e| format!("序列化失败：{}", e))?;
@@ -139,6 +148,7 @@ pub fn decrypt_export(bytes: &[u8], password: &str) -> Result<ImportedLibrary, S
     }
     Ok(ImportedLibrary {
         groups: payload.groups,
+        keys: payload.keys,
         hosts: payload.hosts,
     })
 }
@@ -172,7 +182,7 @@ mod tests {
             id: "g-prod".to_string(),
             name: "Production".to_string(),
         }];
-        let bytes = encrypt_export(&hosts, &groups, "correct horse").unwrap();
+        let bytes = encrypt_export(&hosts, &groups, &[], "correct horse").unwrap();
         let restored = decrypt_export(&bytes, "correct horse").unwrap();
         assert_eq!(restored.hosts.len(), 1);
         assert_eq!(restored.hosts[0].name, "edge-1");
@@ -186,20 +196,41 @@ mod tests {
     }
 
     #[test]
+    fn referenced_keys_roundtrip() {
+        // 引用型主机的密钥本体随导出一并 round-trip，跨机才能连
+        let hosts = vec![sample_host()];
+        let keys = vec![SshKeyRecord {
+            id: "sshkey-1".to_string(),
+            name: "id_ed25519".to_string(),
+            content: "-----BEGIN OPENSSH PRIVATE KEY-----...".to_string(),
+            passphrase: Some("kp".to_string()),
+            key_type: "ed25519".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }];
+        let bytes = encrypt_export(&hosts, &[], &keys, "pw").unwrap();
+        let restored = decrypt_export(&bytes, "pw").unwrap();
+        assert_eq!(restored.keys.len(), 1);
+        assert_eq!(restored.keys[0].id, "sshkey-1");
+        assert_eq!(restored.keys[0].passphrase.as_deref(), Some("kp"));
+    }
+
+    #[test]
     fn decrypt_with_wrong_password_fails() {
         let hosts = vec![sample_host()];
-        let bytes = encrypt_export(&hosts, &[], "right").unwrap();
+        let bytes = encrypt_export(&hosts, &[], &[], "right").unwrap();
         let err = decrypt_export(&bytes, "wrong").unwrap_err();
         assert!(err.contains("密码"));
     }
 
     #[test]
     fn legacy_file_without_groups_still_imports() {
-        // 旧版 envelope（payload 无 groups 字段）必须仍可导入，groups 视为空
+        // 旧版 envelope（payload 无 groups/keys 字段）必须仍可导入，均视为空
         let hosts = vec![sample_host()];
-        let bytes = encrypt_export(&hosts, &[], "pw").unwrap();
+        let bytes = encrypt_export(&hosts, &[], &[], "pw").unwrap();
         let restored = decrypt_export(&bytes, "pw").unwrap();
         assert_eq!(restored.hosts.len(), 1);
         assert!(restored.groups.is_empty());
+        assert!(restored.keys.is_empty());
     }
 }
