@@ -6,7 +6,7 @@ use std::{
     ops::{BitOr, BitOrAssign, Range},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         mpsc::{self, Receiver, SyncSender},
         Arc,
     },
@@ -126,6 +126,26 @@ pub fn encode_sgr_mouse_report(
         row = row.max(1),
     )
     .into_bytes()
+}
+
+// 鼠标上报模式的原子镜像位。UI 线程发鼠标报告前用它免锁查实时状态，
+// 不能依赖渲染期快照——TUI 退出瞬间快照滞后会把 \e[<35;x;yM 漏进 shell。
+pub const MOUSE_MODE_SGR: u8 = 1 << 0;
+pub const MOUSE_MODE_CLICK: u8 = 1 << 1;
+pub const MOUSE_MODE_MOTION: u8 = 1 << 2;
+pub const MOUSE_MODE_DRAG: u8 = 1 << 3;
+
+pub fn mouse_mode_bits_app_active(bits: u8) -> bool {
+    bits & MOUSE_MODE_SGR != 0
+        && bits & (MOUSE_MODE_CLICK | MOUSE_MODE_MOTION | MOUSE_MODE_DRAG) != 0
+}
+
+pub fn mouse_mode_bits_drag_active(bits: u8) -> bool {
+    bits & MOUSE_MODE_SGR != 0 && bits & (MOUSE_MODE_DRAG | MOUSE_MODE_MOTION) != 0
+}
+
+pub fn mouse_mode_bits_motion_active(bits: u8) -> bool {
+    bits & MOUSE_MODE_SGR != 0 && bits & MOUSE_MODE_MOTION != 0
 }
 use portable_pty::native_pty_system;
 use portable_pty::CommandBuilder;
@@ -1351,6 +1371,8 @@ pub struct TerminalGridCore {
     style_map: HashMap<TerminalCellStyleSnapshot, u16>,
     /// 备用屏 scrollback 容量（进 alt 屏时撑给 alt grid，见 ADR 0006）。
     scrollback: usize,
+    /// 鼠标上报模式实时镜像（MOUSE_MODE_* 位），供 UI 线程免锁查询。
+    mouse_modes: Arc<AtomicU8>,
 }
 
 struct TerminalPromptPrefixSnapshot {
@@ -1389,6 +1411,7 @@ impl TerminalGridCore {
             styles: vec![TerminalCellStyleSnapshot::default()],
             style_map: HashMap::from([(TerminalCellStyleSnapshot::default(), 0u16)]),
             scrollback,
+            mouse_modes: Arc::new(AtomicU8::new(0)),
         };
         // alacritty 的 TermMode 默认开 ALTERNATE_SCROLL(DECSET 1007)，与 iTerm2(默认关)
         // 相反：会让备用屏滚轮被转发成 ↑/↓ 给应用，而非滚本地 scrollback。关掉使默认=
@@ -1428,6 +1451,31 @@ impl TerminalGridCore {
             self.mark_all_dirty();
         }
         self.mark_dirty_for_content_drift();
+        self.sync_mouse_modes();
+    }
+
+    /// pty 线程每次消化输出后刷新镜像，UI 线程发鼠标报告前实时读取，
+    /// 不经渲染快照——避免 TUI 退出瞬间快照滞后把鼠标序列漏进 shell。
+    fn sync_mouse_modes(&self) {
+        let mode = self.term.mode();
+        let mut bits = 0u8;
+        if mode.contains(TermMode::SGR_MOUSE) {
+            bits |= MOUSE_MODE_SGR;
+        }
+        if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+            bits |= MOUSE_MODE_CLICK;
+        }
+        if mode.contains(TermMode::MOUSE_MOTION) {
+            bits |= MOUSE_MODE_MOTION;
+        }
+        if mode.contains(TermMode::MOUSE_DRAG) {
+            bits |= MOUSE_MODE_DRAG;
+        }
+        self.mouse_modes.store(bits, Ordering::Relaxed);
+    }
+
+    pub fn mouse_modes_handle(&self) -> Arc<AtomicU8> {
+        Arc::clone(&self.mouse_modes)
     }
 
     /// 按 alacritty 当前 mode 位拼接关闭序列，只复位实际启用的 TUI modes，
@@ -3088,6 +3136,16 @@ impl LocalTerminalRuntime {
 
     pub fn shell_is_foreground_handle(&self) -> Arc<std::sync::atomic::AtomicBool> {
         Arc::clone(&self.shell_is_foreground)
+    }
+
+    /// 鼠标上报模式实时镜像（MOUSE_MODE_* 位）。failed 态无 grid，给常 0 桩。
+    pub fn mouse_modes_handle(&self) -> Arc<AtomicU8> {
+        self.state
+            .lock()
+            .grid
+            .as_ref()
+            .map(|grid| grid.mouse_modes_handle())
+            .unwrap_or_else(|| Arc::new(AtomicU8::new(0)))
     }
 
     pub fn uses_remote_ssh(&self) -> bool {

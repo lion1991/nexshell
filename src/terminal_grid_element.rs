@@ -40,10 +40,12 @@ use nexshell::file_panel::FilePanelSelectMode;
 use nexshell::git_panel::GitPanelSelectMode;
 use nexshell::terminal_runtime::{
     dim_color, encode_sgr_mouse_report, encode_terminal_key_event_with_modes,
-    encode_terminal_modifier_key_with_modes, resolve_terminal_color, terminal_alt_scroll_bytes,
-    terminal_input_editor_should_capture, LocalTerminalRuntime, MouseReportAction,
-    MouseReportButton, MouseReportModifiers, TerminalCursorShape, TerminalGridCellSnapshot,
-    TerminalGridSnapshot, TerminalInputEditor, TerminalPalette, TerminalRuntimeSnapshot,
+    encode_terminal_modifier_key_with_modes, mouse_mode_bits_app_active,
+    mouse_mode_bits_drag_active, mouse_mode_bits_motion_active, resolve_terminal_color,
+    terminal_alt_scroll_bytes, terminal_input_editor_should_capture, LocalTerminalRuntime,
+    MouseReportAction, MouseReportButton, MouseReportModifiers, TerminalCursorShape,
+    TerminalGridCellSnapshot, TerminalGridSnapshot, TerminalInputEditor, TerminalPalette,
+    TerminalRuntimeSnapshot,
 };
 use nexshell::warp_tab_context_menu::TabContextMenuAnchor;
 
@@ -575,6 +577,9 @@ pub struct TerminalGridElement {
     shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
     terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
     shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
+    /// 鼠标上报模式实时镜像。发报告前查它而非渲染快照：TUI 退出瞬间快照
+    /// 滞后一帧，按旧状态继续上报会把 \e[<35;x;yM 漏给 shell 回显。
+    mouse_modes: Arc<std::sync::atomic::AtomicU8>,
     pane_id: Option<NexPaneId>,
     is_focused_pane: bool,
     palette: TerminalPalette,
@@ -1194,6 +1199,10 @@ impl TerminalGridElement {
         is_focused_pane: bool,
         palette: TerminalPalette,
     ) -> Self {
+        let mouse_modes = terminal
+            .lock()
+            .map(|rt| rt.mouse_modes_handle())
+            .unwrap_or_else(|_| Arc::new(std::sync::atomic::AtomicU8::new(0)));
         Self {
             snapshot,
             cell_metrics,
@@ -1211,6 +1220,7 @@ impl TerminalGridElement {
             shaped_line_cache,
             terminal_ime_layout,
             shell_is_foreground,
+            mouse_modes,
             pane_id,
             is_focused_pane,
             palette,
@@ -1260,6 +1270,23 @@ impl TerminalGridElement {
         })
     }
 
+    // 实时鼠标模式（pty 线程同步的原子镜像），gating 一律用它，别用渲染快照。
+    fn live_mouse_bits(&self) -> u8 {
+        self.mouse_modes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn live_mouse_app_active(&self) -> bool {
+        mouse_mode_bits_app_active(self.live_mouse_bits())
+    }
+
+    fn live_mouse_drag_reporting_active(&self) -> bool {
+        mouse_mode_bits_drag_active(self.live_mouse_bits())
+    }
+
+    fn live_mouse_motion_reporting_active(&self) -> bool {
+        mouse_mode_bits_motion_active(self.live_mouse_bits())
+    }
+
     fn mouse_report_for_position(
         &self,
         position: Vector2F,
@@ -1267,7 +1294,7 @@ impl TerminalGridElement {
         action: MouseReportAction,
         modifiers: ModifiersState,
     ) -> Option<Vec<u8>> {
-        if !self.mouse_position_is_in_bounds(position) {
+        if !self.live_mouse_app_active() || !self.mouse_position_is_in_bounds(position) {
             return None;
         }
         let origin = self.origin?.xy() + grid_content_offset();
@@ -1733,14 +1760,6 @@ fn grid_mouse_app_active(snapshot: &impl TerminalGridAccess) -> bool {
         && (snapshot.mouse_report_click()
             || snapshot.mouse_report_motion()
             || snapshot.mouse_report_drag())
-}
-
-fn grid_mouse_drag_reporting_active(snapshot: &impl TerminalGridAccess) -> bool {
-    snapshot.sgr_mouse() && (snapshot.mouse_report_drag() || snapshot.mouse_report_motion())
-}
-
-fn grid_mouse_motion_reporting_active(snapshot: &impl TerminalGridAccess) -> bool {
-    snapshot.sgr_mouse() && snapshot.mouse_report_motion()
 }
 
 fn repeat_mouse_report_bytes(bytes: &[u8], repeats: usize) -> Vec<u8> {
@@ -2978,9 +2997,8 @@ impl Element for TerminalGridElement {
                     return true;
                 }
 
-                let grid = self.grid();
-                if grid_mouse_app_active(&grid) && !modifiers.shift {
-                    if grid_mouse_drag_reporting_active(&grid) {
+                if self.live_mouse_app_active() && !modifiers.shift {
+                    if self.live_mouse_drag_reporting_active() {
                         if let Some(bytes) = self.mouse_report_for_position(
                             *position,
                             MouseReportButton::Left,
@@ -3077,7 +3095,7 @@ impl Element for TerminalGridElement {
                 let grid = self.grid();
 
                 // mouse-app 模式：逐行发 wheel report，清除亚行余量。
-                if grid_mouse_app_active(&grid) && !modifiers.shift {
+                if self.live_mouse_app_active() && !modifiers.shift {
                     if whole_lines == 0 {
                         if let Ok(mut acc) = self.smooth_scroll_px.lock() {
                             *acc = 0.0;
@@ -3161,8 +3179,7 @@ impl Element for TerminalGridElement {
                 is_synthetic,
                 ..
             } => {
-                let grid = self.grid();
-                if *is_synthetic || !grid_mouse_motion_reporting_active(&grid) || *shift {
+                if *is_synthetic || !self.live_mouse_motion_reporting_active() || *shift {
                     if self.update_scrollbar_hover_state(*position) {
                         ctx.notify();
                     }

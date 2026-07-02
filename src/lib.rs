@@ -2189,6 +2189,34 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
+    fn terminal_mouse_modes_handle_mirrors_live_term_state() {
+        // UI 线程发鼠标报告前查这个原子镜像（而非渲染快照），TUI 退出瞬间
+        // 必须立即读到"已关闭"，否则 \e[<35;x;yM 会漏进 shell 回显。
+        use std::sync::atomic::Ordering;
+        let mut grid = terminal_runtime::TerminalGridCore::new(8, 2, 100);
+        let handle = grid.mouse_modes_handle();
+        assert_eq!(handle.load(Ordering::Relaxed), 0);
+
+        grid.process_output(b"\x1b[?1003h\x1b[?1006h");
+        let bits = handle.load(Ordering::Relaxed);
+        assert!(terminal_runtime::mouse_mode_bits_app_active(bits));
+        assert!(terminal_runtime::mouse_mode_bits_motion_active(bits));
+
+        grid.process_output(b"\x1b[?1003l\x1b[?1006l");
+        assert!(!terminal_runtime::mouse_mode_bits_app_active(
+            handle.load(Ordering::Relaxed)
+        ));
+
+        // 走 alt-screen 退出兜底（reset_leaked_tui_modes）也要同步镜像。
+        grid.process_output(b"\x1b[?1049h\x1b[?1002h\x1b[?1006h");
+        assert!(terminal_runtime::mouse_mode_bits_drag_active(
+            handle.load(Ordering::Relaxed)
+        ));
+        grid.process_output(b"\x1b[?1049l");
+        assert_eq!(handle.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn terminal_alt_scroll_bytes_follow_warp_escape_sequences() {
         let enabled_modes = terminal_runtime::TerminalInputModes {
             alt_screen: true,
