@@ -2642,9 +2642,13 @@ impl<A: Action + Clone> SubMenu<A> {
                 }
                 self.reset_selection(ctx);
             }
-            MenuAction::Close(via_select_item) => ctx.emit(Event::Close {
-                via_select_item: *via_select_item,
-            }),
+            MenuAction::Close(via_select_item) => {
+                // 关闭前清选中行，否则焦点滞留时 enter 会重放上次选中项
+                self.reset_selection(ctx);
+                ctx.emit(Event::Close {
+                    via_select_item: *via_select_item,
+                });
+            }
             MenuAction::Enter => {
                 if let Some(action) = self.selected_action_for_enter(ctx) {
                     if dispatch_item_actions {
@@ -2655,6 +2659,8 @@ impl<A: Action + Clone> SubMenu<A> {
                     ctx.emit(Event::Close {
                         via_select_item: true,
                     });
+                    // 取值后再清，避免下次 enter 重放
+                    self.reset_selection(ctx);
                 }
             }
         }

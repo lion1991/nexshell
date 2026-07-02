@@ -637,6 +637,7 @@ impl RootView {
         }
 
         self.show_tab_right_click_menu = None;
+        ctx.focus_self(); // 收回键盘焦点，否则回车会重放右键菜单项
     }
 
     fn duplicate_terminal_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
