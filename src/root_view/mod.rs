@@ -40,7 +40,7 @@ use warpui::{
     fonts,
     r#async::Timer,
     AppContext, BlurContext, CursorInfo, Element, Entity, FocusContext, SingletonEntity as _,
-    TypedActionView, View, ViewContext,
+    TypedActionView, View, ViewContext, ViewHandle,
 };
 
 use nexshell::file_panel::{
@@ -502,9 +502,10 @@ impl RootView {
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.settings_menu_open = false;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -520,9 +521,10 @@ impl RootView {
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.new_session_menu_open = false;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -531,9 +533,10 @@ impl RootView {
             tab_right_click_menu: {
                 // warp/app/src/workspace/view.rs:1744-1750.
                 let menu = ctx.add_typed_action_view(|_| nexshell::menu::Menu::new());
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_tab_right_click_menu = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -547,9 +550,10 @@ impl RootView {
                         .with_drop_shadow()
                         .prevent_interaction_with_other_elements()
                 });
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_terminal_context_menu = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -561,9 +565,10 @@ impl RootView {
                 // 右键仍能冒泡到 entry handler → 重新 dispatch ShowContextMenu 替换菜单
                 let menu =
                     ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_file_panel_context_menu = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -573,9 +578,10 @@ impl RootView {
             git_panel_context_menu: {
                 let menu =
                     ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_git_panel_context_menu = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -585,12 +591,13 @@ impl RootView {
             process_list_context_menu: {
                 let menu =
                     ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_process_list_context_menu = None;
                         if let Some(tab) = me.terminal_tabs.get_mut(me.active_tab_index) {
                             tab.process_list_selected_pid = None;
                         }
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -600,10 +607,11 @@ impl RootView {
             host_card_context_menu: {
                 let menu =
                     ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
-                ctx.subscribe_to_view(&menu, |me, _, event: &nexshell::menu::Event, ctx| {
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_host_card_context_menu = None;
                         me.host_state.context_menu_target = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
                 });
@@ -669,6 +677,18 @@ impl RootView {
         };
         view.reload_host_recent(); // 启动首屏即填充最近访问
         view
+    }
+
+    // 菜单隐藏后若键盘焦点仍滞留其上，收回 RootView；否则 enter 会重放菜单项。
+    // 条件判断：菜单项 action 可能刚 focus 某编辑器，此时焦点已非菜单，不能抢走。
+    fn refocus_root_after_menu_close<V: View>(
+        &self,
+        menu: &ViewHandle<V>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        if ctx.focused_view_id(ctx.window_id()) == Some(menu.id()) {
+            ctx.focus_self();
+        }
     }
 
     fn create_tab_rename_editor(ctx: &mut ViewContext<Self>) -> warpui::ViewHandle<EditorView> {
