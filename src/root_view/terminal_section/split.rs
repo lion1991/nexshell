@@ -114,6 +114,8 @@ impl RootView {
                             rows,
                         )
                     }
+                    // RDP 为整页 tab，不参与分屏（已定案）；分屏场景退回本地终端。
+                    HostConnectionPlan::Rdp { .. } => spawn_local(&session_id),
                     HostConnectionPlan::Unsupported { .. } => spawn_local(&session_id),
                 }
             } else {
@@ -212,7 +214,11 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_focus_pane(&mut self, pane_id: NexPaneId, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_focus_pane(
+        &mut self,
+        pane_id: NexPaneId,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.focused_pane_id = pane_id;
             if let Some(t) = tab.pane_terminals.get(&pane_id) {
@@ -231,7 +237,11 @@ impl RootView {
         self.dragged_border = Some(border);
     }
 
-    pub(in crate::root_view) fn handle_pane_resize_move(&mut self, position: Vector2F, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_pane_resize_move(
+        &mut self,
+        position: Vector2F,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(border) = &mut self.dragged_border {
             let delta = match border.direction {
                 SplitDirection::Horizontal => position.x() - border.previous_mouse_location.x(),
@@ -249,7 +259,10 @@ impl RootView {
         self.dragged_border = None;
     }
 
-    pub(in crate::root_view) fn handle_toggle_maximize_pane(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_toggle_maximize_pane(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if self.maximized_pane.is_some() {
             self.maximized_pane = None;
         } else if let Some(tab) = self.terminal_tabs.get(self.active_tab_index) {

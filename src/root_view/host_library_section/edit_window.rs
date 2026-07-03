@@ -2,10 +2,12 @@
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
 
+use crate::group_tag_manage_window::{
+    GroupTagManageEvent, GroupTagManageModel, GroupTagManageView,
+};
+use crate::host_edit_window::{HostEditDraft, HostEditEvent, HostEditModel, HostEditView};
 #[cfg(target_os = "macos")]
 use crate::macos_window_util;
-use crate::group_tag_manage_window::{GroupTagManageEvent, GroupTagManageModel, GroupTagManageView};
-use crate::host_edit_window::{HostEditDraft, HostEditEvent, HostEditModel, HostEditView};
 use crate::terminal_view_helpers::optional_text;
 use crate::RootView;
 use nexshell::host_management::{
@@ -31,8 +33,15 @@ impl RootView {
             || (draft.protocol == "SSH" && draft.port == 0)
             || (draft.protocol == "Serial" && draft.serial_baud_rate == 0)
             || (draft.protocol == "SSH" && draft.username.trim().is_empty())
+            || (draft.protocol == "RDP" && (draft.port == 0 || draft.username.trim().is_empty()))
         {
             self.host_state.notice = Some(rust_i18n::t!("toast_form_required").to_string());
+            return false;
+        }
+
+        // RDP 必须存密码，否则快连会被门禁挡下；此处给专门提示。
+        if draft.protocol == "RDP" && draft.password.trim().is_empty() {
+            self.host_state.notice = Some(rust_i18n::t!("toast_rdp_password_required").to_string());
             return false;
         }
 
@@ -113,13 +122,10 @@ impl RootView {
             .map(|group| (group.id.clone(), group.label.clone()))
             .collect();
         let available_tags = self.host_state.snapshot.available_tags.clone();
-        let key_options: Vec<(String, String)> =
-            nexshell::host_management::default_database_path()
-                .and_then(|db| {
-                    nexshell::ssh_key_store::list_ssh_keys_with_usage(&db).ok()
-                })
-                .map(|keys| keys.into_iter().map(|(k, _)| (k.id, k.name)).collect())
-                .unwrap_or_default();
+        let key_options: Vec<(String, String)> = nexshell::host_management::default_database_path()
+            .and_then(|db| nexshell::ssh_key_store::list_ssh_keys_with_usage(&db).ok())
+            .map(|keys| keys.into_iter().map(|(k, _)| (k.id, k.name)).collect())
+            .unwrap_or_default();
         let model = ctx.add_model(move |_| HostEditModel {
             draft,
             is_new,
@@ -195,8 +201,7 @@ impl RootView {
             .map(|g| (g.id.clone(), g.label.clone()))
             .collect();
         let tags = self.host_state.snapshot.available_tags.clone();
-        let db_path = nexshell::host_management::default_database_path()
-            .unwrap_or_default();
+        let db_path = nexshell::host_management::default_database_path().unwrap_or_default();
 
         let model = ctx.add_model(move |_| GroupTagManageModel {
             groups,
@@ -295,6 +300,15 @@ impl RootView {
     }
 
     fn connection_config_from_draft(draft: &HostEditDraft) -> HostConnectionConfig {
+        if draft.protocol == "RDP" {
+            let mut connection =
+                HostConnectionConfig::rdp(draft.host.trim(), draft.port, draft.username.trim());
+            connection.auth_method = "password".to_string();
+            connection.password = optional_text(&draft.password);
+            connection.rdp_display_quality = draft.rdp_display_quality;
+            return connection;
+        }
+
         if draft.protocol == "Serial" {
             let mut connection =
                 HostConnectionConfig::serial(draft.host.trim(), draft.serial_baud_rate);

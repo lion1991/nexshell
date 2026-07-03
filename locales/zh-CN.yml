@@ -25,6 +25,10 @@ network_list_empty: 暂无网络连接
 tab_system_info: 系统信息
 tab_git_diff: Diff
 tab_code_viewer: 内置编辑器
+tab_rdp: 远程桌面
+rdp_connecting: 正在连接远程桌面…
+rdp_disconnected: "连接已断开：%{reason}"
+rdp_reconnect: 重新连接
 code_viewer_loading: 文件加载中…
 code_viewer_read_error: "读取文件失败：%{error}"
 code_viewer_saved: 已保存
@@ -280,6 +284,7 @@ toast_feature_wip: 功能开发中...
 toast_move_wip: 移动功能开发中...
 toast_connecting: "正在连接 %{title}"
 toast_connect_failed: "%{title}：%{reason}"
+toast_rdp_password_required: RDP 需要保存密码
 
 # === Host management ===
 host_empty: 暂无主机
@@ -334,6 +339,9 @@ form_key_auth: 密钥认证
 form_key_passphrase: 密钥密码
 form_certificate: 证书文件
 form_password: 密码
+form_display_quality: 显示质量
+form_display_quality_standard: 标准
+form_display_quality_hidpi: 高清 HiDPI
 form_serial_device: 串口设备
 form_baud_rate: 波特率
 form_description: 描述

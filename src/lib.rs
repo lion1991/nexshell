@@ -51,6 +51,7 @@ pub mod pane_state;
 pub mod pane_tree;
 pub mod platform;
 pub mod pty_event_loop;
+pub mod rdp_session;
 pub mod remote_edit_io;
 pub mod renderer_ipc;
 pub mod runtime_settings;

@@ -12,10 +12,8 @@ use crate::terminal_view_helpers::serial_port_from_host_config;
 use crate::{AppPage, RootView, TabMoveDirection, DEFAULT_COLS, DEFAULT_ROWS};
 use nexshell::host_management::HostConnectionPlan;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
-use nexshell::warp_tab_context_menu::{
-    custom_title_from_editor, selected_tab_color_after_toggle,
-};
 use nexshell::text_editor::Event as EditorEvent;
+use nexshell::warp_tab_context_menu::{custom_title_from_editor, selected_tab_color_after_toggle};
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::ViewContext;
 
@@ -34,7 +32,10 @@ impl RootView {
         ctx.minimize_window();
     }
 
-    pub(in crate::root_view) fn handle_window_toggle_maximize(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_window_toggle_maximize(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         ctx.toggle_maximized_window();
     }
 
@@ -42,7 +43,10 @@ impl RootView {
         ctx.close_window();
     }
 
-    pub(in crate::root_view) fn handle_show_host_management(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_show_host_management(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.app_page = AppPage::HostManagement;
         self.reload_host_recent(); // 进页面即刷新最近访问，不必等刷新/连接
         ctx.notify();
@@ -54,7 +58,10 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_toggle_new_session_menu(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_toggle_new_session_menu(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if self.new_session_menu_open {
             self.new_session_menu_open = false;
         } else {
@@ -75,7 +82,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_select_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_select_tab(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if self.app_page != AppPage::Terminal {
             self.app_page = AppPage::Terminal;
         }
@@ -83,12 +94,20 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_move_tab_left(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_move_tab_left(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.move_terminal_tab(index, TabMoveDirection::Left, ctx);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_move_tab_right(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_move_tab_right(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.move_terminal_tab(index, TabMoveDirection::Right, ctx);
         ctx.notify();
     }
@@ -114,28 +133,48 @@ impl RootView {
     }
 
     // === 标签：关闭 / 重连 / 复制 ===
-    pub(in crate::root_view) fn handle_close_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_close_tab(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.close_terminal_tab(index, ctx);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_close_other_tabs(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_close_other_tabs(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.close_other_terminal_tabs(index, ctx);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_close_tabs_right(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_close_tabs_right(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.close_terminal_tabs_right(index, ctx);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_reconnect_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_reconnect_tab(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.reconnect_terminal_tab(index, ctx);
         ctx.notify();
     }
 
     /// 主动断开：保留终端内容，仅关闭底层 IO（远程/串口），UI 转为离线（横幅 + 红点）。
-    pub(in crate::root_view) fn handle_disconnect_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_disconnect_tab(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get(index) {
             for rt in tab
                 .pane_terminals
@@ -179,8 +218,7 @@ impl RootView {
         self.show_tab_right_click_menu = None;
 
         let Some(bytes) = stopped else {
-            self.host_state.notice =
-                Some(rust_i18n::t!("toast_recording_started").to_string());
+            self.host_state.notice = Some(rust_i18n::t!("toast_recording_started").to_string());
             ctx.notify();
             return;
         };
@@ -209,14 +247,11 @@ impl RootView {
                     return;
                 };
                 view.host_state.notice = Some(match std::fs::write(&path_str, &bytes) {
-                    Ok(()) => {
-                        rust_i18n::t!("toast_recording_saved", path = path_str).to_string()
+                    Ok(()) => rust_i18n::t!("toast_recording_saved", path = path_str).to_string(),
+                    Err(error) => {
+                        rust_i18n::t!("toast_recording_save_failed", error = error.to_string())
+                            .to_string()
                     }
-                    Err(error) => rust_i18n::t!(
-                        "toast_recording_save_failed",
-                        error = error.to_string()
-                    )
-                    .to_string(),
                 });
                 sub_ctx.notify();
             },
@@ -225,7 +260,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_duplicate_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_duplicate_tab(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.duplicate_terminal_tab(index, ctx);
         ctx.notify();
     }
@@ -244,7 +283,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_tab_hover_width_start(&mut self, width: f32, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_tab_hover_width_start(
+        &mut self,
+        width: f32,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.tab_fixed_width = Some(width);
         ctx.notify();
     }
@@ -264,7 +307,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_tab_rename_editor_event(&mut self, event: &EditorEvent, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_tab_rename_editor_event(
+        &mut self,
+        event: &EditorEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if self.tab_being_renamed.is_none() {
             return;
         }
@@ -354,7 +401,12 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(crate) fn on_tab_drag(&mut self, current_index: usize, position: RectF, ctx: &mut ViewContext<Self>) {
+    pub(crate) fn on_tab_drag(
+        &mut self,
+        current_index: usize,
+        position: RectF,
+        ctx: &mut ViewContext<Self>,
+    ) {
         let new_index = self.calculate_updated_tab_index(current_index, position, ctx);
         if new_index != current_index {
             self.move_terminal_tab(
@@ -479,8 +531,7 @@ impl RootView {
         if index >= self.terminal_tabs.len() {
             return;
         }
-        let close_indices: Vec<usize> =
-            ((index + 1)..self.terminal_tabs.len()).collect();
+        let close_indices: Vec<usize> = ((index + 1)..self.terminal_tabs.len()).collect();
         let dirty_ids = self.dirty_code_viewer_ids_in(&close_indices);
         if !dirty_ids.is_empty() {
             let anchor = self.terminal_tabs[index].id.clone();
@@ -594,6 +645,11 @@ impl RootView {
                     cols,
                     rows,
                 )
+            }
+            HostConnectionPlan::Rdp { .. } => {
+                // RDP 整页 tab 走专用重连（用 tab 内 config 重 spawn，沿用原分辨率）。
+                self.reconnect_rdp_tab(index, ctx);
+                return;
             }
             HostConnectionPlan::Unsupported { title, reason } => {
                 self.host_state.notice = Some(

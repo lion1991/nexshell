@@ -13,6 +13,7 @@ mod find_section;
 mod git_panel_section;
 mod host_library_section;
 mod host_monitor_section;
+mod rdp_section;
 mod settings_section;
 mod tab_bar_section;
 mod terminal_section;
@@ -24,9 +25,11 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::{
     clipboard::ClipboardContent,
@@ -46,9 +49,7 @@ use warpui::{
 use nexshell::file_panel::{
     apply_sftp_event, spawn_sftp_worker, FilePanelState, FilePanelWorkerHandle, SftpRequest,
 };
-use nexshell::git_panel::{
-    apply_git_event, spawn_git_worker, GitEvent, GitPanelState, GitRequest,
-};
+use nexshell::git_panel::{apply_git_event, spawn_git_worker, GitEvent, GitPanelState, GitRequest};
 use nexshell::host_management::{
     default_database_path, load_or_initialize_host_management_snapshot_from_db_path,
     unavailable_host_management_snapshot, HostConnectionConfig, HostConnectionPlan,
@@ -117,6 +118,10 @@ pub(crate) struct RootView {
     // === 路由 ===
     window_id: warpui::WindowId,
     app_page: AppPage,
+
+    // 已推给本窗口 host view 的 IME 抑制态（RDP tab 走远端原始 scancode，本地 IME 不参与）。
+    // render 里按活动 tab 变化增量下发，避免每帧 FFI。None=未初始化。
+    local_ime_disabled: std::cell::Cell<Option<bool>>,
 
     // === 主机库（host_library_section）：状态 / 内联编辑器 / 密码栏 ===
     host_state: HostManagementState,
@@ -437,6 +442,7 @@ impl RootView {
         let mut view = Self {
             window_id: ctx.window_id(),
             app_page: AppPage::HostManagement,
+            local_ime_disabled: std::cell::Cell::new(None),
             host_state,
             host_view_states: RefCell::new(HostManagementViewStates::new()),
             host_status_fleet: HostOverviewFleet::new(),
@@ -1335,6 +1341,23 @@ impl RootView {
         }
     }
 
+    /// RDP tab 聚焦时抑制本地 IME（走远端原始 scancode）；其他 tab 恢复。按活动 tab
+    /// 变化增量下发到本窗口 host view，只在状态翻转时做一次 FFI。
+    fn sync_local_ime_suppression(&self, app: &AppContext) {
+        let disabled = self.app_page == AppPage::Terminal
+            && self
+                .terminal_tabs
+                .get(self.active_tab_index)
+                .map_or(false, |t| matches!(t.kind, TerminalSessionKind::Rdp));
+        if self.local_ime_disabled.get() == Some(disabled) {
+            return;
+        }
+        if let Some(platform_window) = app.windows().platform_window(self.window_id) {
+            platform_window.as_ref().set_ime_disabled(disabled);
+            self.local_ime_disabled.set(Some(disabled));
+        }
+    }
+
     fn apply_window_opacity(_ctx: &mut ViewContext<Self>, opacity: u8) {
         #[cfg(target_os = "macos")]
         {
@@ -1428,7 +1451,8 @@ impl View for RootView {
         if self.app_page == AppPage::HostManagement {
             let focused = ctx.focused_view_id(ctx.window_id());
             if focused == Some(self.host_search_editor.id()) {
-                let cursor_id = nexshell::text_editor::position_id_for_cursor(self.host_search_editor.id());
+                let cursor_id =
+                    nexshell::text_editor::position_id_for_cursor(self.host_search_editor.id());
                 let font_size = Appearance::as_ref(ctx).ui_font_size();
                 return ctx
                     .element_position_by_id(cursor_id)
@@ -1450,6 +1474,7 @@ impl View for RootView {
     }
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
+        self.sync_local_ime_suppression(app);
         let on_terminal_page = self.app_page == AppPage::Terminal;
         let mut tabs: Vec<TabModel> = self
             .terminal_tabs
@@ -1512,6 +1537,13 @@ impl View for RootView {
             // 否则打开文件后切到本 tab，文件面板按钮失效（toggle 了状态却无处渲染）。
             let code_viewer_page = self.render_code_viewer_page(app);
             self.render_active_tab_body_with_side_panels(code_viewer_page, app)
+        } else if self
+            .terminal_tabs
+            .get(self.active_tab_index)
+            .map_or(false, |t| matches!(t.kind, TerminalSessionKind::Rdp))
+        {
+            // RDP：整页，无侧栏（照 ProcessList/CodeViewer 全页先例，不参与 split）。
+            self.render_rdp_page(app)
         } else {
             let active_tab = self.terminal_tabs.get(self.active_tab_index);
             let in_split = active_tab.map_or(false, |t| t.pane_tree.len() > 1);
@@ -2437,6 +2469,7 @@ impl RootView {
                 code_viewer_ssh_handle: None,
                 code_viewer_saving: false,
                 code_viewer_remote_meta: None,
+                rdp: None,
             },
         );
         self.tab_states
@@ -2503,6 +2536,10 @@ impl RootView {
     }
 
     fn activate_terminal_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        // 切走前若离开 RDP tab，抬起远端全部修饰键防卡键。
+        if self.active_tab_index != index {
+            self.release_rdp_modifiers(self.active_tab_index);
+        }
         let Some(tab) = self.terminal_tabs.get(index) else {
             return;
         };
@@ -2742,6 +2779,13 @@ impl RootView {
                 );
                 self.host_state.notice =
                     Some(rust_i18n::t!("toast_connecting", title = title).to_string());
+            }
+            HostConnectionPlan::Rdp {
+                session_id,
+                title,
+                config,
+            } => {
+                self.connect_rdp_host(host_id, &session_id, title, config, ctx);
             }
             HostConnectionPlan::Unsupported { title, reason } => {
                 self.host_state.notice = Some(

@@ -16,7 +16,8 @@ warpui-app = ["dep:settings", "dep:warp_editor", "dep:warpui", "dep:warpui_core"
 [dependencies]
 alacritty_terminal = "0.25"
 anyhow = "1.0"
-bitflags = "=2.9.4"
+# 原 =2.9.4 死钉；ironrdp-pdu 需要 ^2.11，放宽到 2.11+（bitflags 2.x 语义稳定、纯增量）。
+bitflags = "2.11"
 portable-pty = "0.8"
 rusqlite = "0.35"
 serde = { version = "1", features = ["derive"] }
@@ -51,6 +52,28 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 serialport = "4.9.0"
+# RDP 远程桌面：纯 Rust IronRDP（见 docs/adr/0007-rdp-via-ironrdp.md）。
+# 协议层无 UI 依赖、跨平台，故常开不进 warpui-app feature。
+# TLS 走 ironrdp-tls 的 rustls backend，复用树内 rustls 0.23，不引 OpenSSL。
+ironrdp-connector = "0.9"
+ironrdp-session = "0.10"
+ironrdp-graphics = "0.8"
+ironrdp-pdu = "0.8"
+ironrdp-core = "0.2"
+ironrdp-async = "0.9"
+ironrdp-tokio = "0.9"
+ironrdp-tls = { version = "0.2", default-features = false, features = ["rustls"] }
+# CLIPRDR 剪贴板通道（见 docs/adr/0007 第⑤步）。0.6.0 依赖 pdu 0.8/svc 0.7/core 0.2，
+# 与树内 connector 0.9/session 0.10 完全一致。cliprdr-native 只有 windows 后端、macOS 仅 stub，
+# 故不引 native，自实现 CliprdrBackend + arboard 访问 Mac 剪贴板。
+ironrdp-cliprdr = "0.6"
+# Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
+# macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
+# 只在单一 RDP 线程访问 NSPasteboard，无并发。
+arboard = { version = "3.6", default-features = false }
+# 只为在 RDP 连接前显式 install_default crypto provider（树内两 provider 共存，
+# 不指定 rustls builder 会 panic）。ring 已在树，零新增编译量。
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # git 面板用：监听仓库 .git/ 与工作区变化触发自动刷新。Warp 同款思路，
 # 用 upstream crates.io 版本即可，不引入 fork。
 notify-debouncer-full = "0.3"
@@ -122,6 +145,8 @@ required-features = ["warpui-app"]
 
 [dev-dependencies]
 tempfile = "3"
+# rdp_probe 探针把 framebuffer 落盘成 PNG 验证（仅验证用，运行期喂 warpui RGBA）。
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [build-dependencies]
 cc = "1"

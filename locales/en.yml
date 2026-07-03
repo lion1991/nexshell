@@ -25,6 +25,10 @@ network_list_empty: "No network connections"
 tab_system_info: System Info
 tab_git_diff: Diff
 tab_code_viewer: Built-in Editor
+tab_rdp: Remote Desktop
+rdp_connecting: "Connecting to remote desktop…"
+rdp_disconnected: "Disconnected: %{reason}"
+rdp_reconnect: Reconnect
 code_viewer_loading: "Loading file…"
 code_viewer_read_error: "Failed to read file: %{error}"
 code_viewer_saved: Saved
@@ -280,6 +284,7 @@ toast_feature_wip: Feature in development...
 toast_move_wip: Move feature in development...
 toast_connecting: "Connecting to %{title}"
 toast_connect_failed: "%{title}: %{reason}"
+toast_rdp_password_required: "RDP requires a saved password"
 
 # === Host management ===
 host_empty: No hosts
@@ -334,6 +339,9 @@ form_key_auth: Key authentication
 form_key_passphrase: Key passphrase
 form_certificate: Certificate file
 form_password: Password
+form_display_quality: Display quality
+form_display_quality_standard: Standard
+form_display_quality_hidpi: HiDPI
 form_serial_device: Serial device
 form_baud_rate: Baud rate
 form_description: Description

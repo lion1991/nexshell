@@ -14,7 +14,15 @@ _Avoid_: 文件树、资源管理器
 终端标签的两类；本地路径是真实本地 fs 路径，远程经 SSH/SFTP。
 
 **标签种类 (TerminalSessionKind)**：
-一个标签的内容类型。除终端外，已有 ProcessList/NetworkList/SystemInfo/GitDiff 等**非终端**整页种类；**内置编辑器**是其中一种。
+一个标签的内容类型。除终端外，已有 ProcessList/NetworkList/SystemInfo/GitDiff 等**非终端**整页种类；**内置编辑器**、**RDP 标签**是其中两种。
+
+**RDP 标签 (RDP Tab)**：
+承载 Windows 远程桌面画面的**整页**标签。不参与 split、无侧栏；关闭标签即断开连接；连接中断显示页内「已断开 + 重连按钮」，不自动重连。引擎选型见 ADR 0007。
+_Avoid_: 远程桌面窗口（不是独立窗口）、RDP 终端（不是终端）
+
+**显示质量 (Display Quality)**：
+RDP 主机的选项：**标准**（逻辑像素协商，省带宽，默认）/ **高清 HiDPI**（物理像素协商，LAN/同城用）。连接时定一次；之后窗口变化走等比缩放。
+_Avoid_: 分辨率设置（用户不直接填数字）
 
 ### 打开文件
 
@@ -54,6 +62,9 @@ _Avoid_: 与「备用屏 scrollback」混为一谈。
 
 ## Relationships
 
+- **RDP** 是主机库 `protocol` 的第三个取值（与 SSH / Serial 并列），不是新的主机实体；凭据复用主机的用户名/密码，Windows 域写在用户名里（`DOMAIN\user`）。
+- **RDP 标签**的键盘按物理直映（⌘→Win、⌥→Alt、⌃→Ctrl），NexShell 自身快捷键本地优先；中文输入交给**远端** Windows 输入法。
+- 服务器证书 v1 无条件接受，与 SSH host key 现状同姿态；「统一主机信任层（TOFU 钉扎）」是两协议一起做的后续项。
 - **内置编辑器**对**本地与远程标签**的**文本文件**都生效：本地经 fs，远程经 SFTP 把内容读进编辑器、`Cmd+S` 写回原路径。
 - **二进制 / 超大文件**不进内置编辑器：本地回退「用外部程序打开」；远程提示先「下载」（系统程序开不了远程路径）。
 - **内置编辑器**复用 Warp 的 `CodeEditorView`（不复刻、调用导出），buffer 由 `Buffer::from_plain_text` 直接构造，不经 Warp 的 GlobalBufferModel / pane / LSP。

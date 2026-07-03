@@ -69,6 +69,7 @@ use nexshell::terminal_runtime::LocalTerminalRuntime;
 use nexshell::warp_tab_context_menu::{TAB_COLOR_ICON_PATH, TAB_NO_COLOR_ICON_PATH};
 
 mod terminal_grid_element;
+mod rdp_view;
 mod root_view;
 // RootView 定义已于 step 11 迁入 root_view/mod.rs；重导出以保持全库 `crate::RootView` 路径不变。
 pub(crate) use root_view::RootView;
@@ -345,6 +346,7 @@ enum TerminalSessionKind {
     SystemInfo,
     GitDiff,
     CodeViewer,
+    Rdp,
 }
 
 impl TerminalSessionKind {
@@ -359,8 +361,32 @@ impl TerminalSessionKind {
             Self::SystemInfo => rust_i18n::t!("tab_system_info").to_string(),
             Self::GitDiff => rust_i18n::t!("tab_git_diff").to_string(),
             Self::CodeViewer => rust_i18n::t!("tab_code_viewer").to_string(),
+            Self::Rdp => rust_i18n::t!("tab_rdp").to_string(),
         }
     }
+}
+
+/// RDP 整页 tab 的连接状态三态（连接中 / 已连接渲染帧 / 已断开）。
+enum RdpConnectionPhase {
+    Connecting,
+    Connected,
+    Disconnected { reason: String },
+}
+
+/// RDP 会话随 tab 生命周期存活的状态。drop = 断开（RdpSessionHandle::Drop 优雅关闭），
+/// 关 tab 时随 TerminalSessionTab 一并 drop，不走终端 shutdown 路径。
+struct RdpTabState {
+    /// 协议层句柄（framebuffer / 帧事件 / 输入通道占位）。
+    handle: nexshell::rdp_session::RdpSessionHandle,
+    /// 重连用连接参数（分辨率连接时定一次，重连沿用同一分辨率）。
+    config: nexshell::rdp_session::RdpSessionConfig,
+    phase: RdpConnectionPhase,
+    /// image cache 稳定键（每会话一个，逐帧覆盖同一条目，不堆积不泄漏）。
+    asset_id: String,
+    /// 已上传纹理对应的帧代号；新帧代号更大才重传，避免重复上传。
+    last_uploaded_generation: u64,
+    /// 当前 letterbox 几何（Element 每帧回写），第 ④ 步鼠标→远端坐标反算用。
+    viewport: std::sync::Arc<std::sync::Mutex<Option<rdp_view::RdpViewport>>>,
 }
 
 struct TerminalSessionTab {
@@ -471,6 +497,8 @@ struct TerminalSessionTab {
     code_viewer_saving: bool,
     /// 远程文件基线元数据 (size, modified)；保存前 re-stat 对比做冲突检测。modified 可能缺失（服务端未报）。
     code_viewer_remote_meta: Option<(u64, Option<std::time::SystemTime>)>,
+    /// RDP 整页会话状态（仅 Rdp kind 持有；drop 即断开）。
+    rdp: Option<RdpTabState>,
 }
 
 impl TerminalSessionTab {

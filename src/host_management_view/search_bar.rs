@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use warp_core::ui::appearance::Appearance;
 use nexshell::text_editor::EditorView;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     color::ColorU,
     elements::{
@@ -251,6 +251,7 @@ fn protocol_filter_options(
         ProtocolFilter::All,
         ProtocolFilter::Ssh,
         ProtocolFilter::Serial,
+        ProtocolFilter::Rdp,
     ]
     .into_iter()
     .map(|filter| {

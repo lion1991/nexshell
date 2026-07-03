@@ -126,6 +126,34 @@ pub struct HostConnectionConfig {
     pub term_encoding: String,
     #[serde(default)]
     pub key_id: Option<String>,
+    // RDP 显示质量：标准（逻辑像素）/ 高清（物理像素）。仅 RDP 协议使用。
+    #[serde(default)]
+    pub rdp_display_quality: RdpDisplayQuality,
+}
+
+// RDP 显示质量二选一：标准=逻辑像素（默认），高清=物理像素（HiDPI）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RdpDisplayQuality {
+    #[default]
+    Standard,
+    Hidpi,
+}
+
+impl RdpDisplayQuality {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Hidpi => "hidpi",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "hidpi" => Self::Hidpi,
+            _ => Self::Standard,
+        }
+    }
 }
 
 impl HostConnectionConfig {
@@ -154,7 +182,14 @@ impl HostConnectionConfig {
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),
             key_id: None,
+            rdp_display_quality: RdpDisplayQuality::Standard,
         }
+    }
+
+    pub fn rdp(host: impl Into<String>, port: u16, username: impl Into<String>) -> Self {
+        let mut config = Self::ssh(host, port, username);
+        config.serial_baud_rate = 115_200;
+        config
     }
 
     pub fn serial(serial_port: impl Into<String>, serial_baud_rate: u32) -> Self {
@@ -183,6 +218,7 @@ impl HostConnectionConfig {
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),
             key_id: None,
+            rdp_display_quality: RdpDisplayQuality::Standard,
         }
     }
 
@@ -219,6 +255,11 @@ pub enum HostConnectionPlan {
         command: PtyCommandSpec,
     },
     Serial {
+        session_id: String,
+        title: String,
+        config: HostConnectionConfig,
+    },
+    Rdp {
         session_id: String,
         title: String,
         config: HostConnectionConfig,
@@ -267,6 +308,7 @@ pub enum ProtocolFilter {
     All,
     Ssh,
     Serial,
+    Rdp,
 }
 
 fn all_hosts_group_label() -> String {
@@ -279,6 +321,7 @@ impl ProtocolFilter {
             Self::All => rust_i18n::t!("host_protocol_all").to_string(),
             Self::Ssh => "SSH".to_string(),
             Self::Serial => "Serial".to_string(),
+            Self::Rdp => "RDP".to_string(),
         }
     }
 
@@ -286,7 +329,8 @@ impl ProtocolFilter {
         match self {
             Self::All => Self::Ssh,
             Self::Ssh => Self::Serial,
-            Self::Serial => Self::All,
+            Self::Serial => Self::Rdp,
+            Self::Rdp => Self::All,
         }
     }
 
@@ -295,6 +339,7 @@ impl ProtocolFilter {
             Self::All => true,
             Self::Ssh => host.protocol == "SSH",
             Self::Serial => host.protocol == "Serial",
+            Self::Rdp => host.protocol == "RDP",
         }
     }
 }
@@ -680,6 +725,17 @@ impl HostManagementState {
                     reason,
                 },
             },
+            "RDP" => match rdp_saved_connection_error(&host.connection) {
+                None => HostConnectionPlan::Rdp {
+                    session_id: session_id_for_host(&host.id),
+                    title: host.name.clone(),
+                    config: host.connection.clone(),
+                },
+                Some(reason) => HostConnectionPlan::Unsupported {
+                    title: host.name.clone(),
+                    reason,
+                },
+            },
             protocol => HostConnectionPlan::Unsupported {
                 title: host.name.clone(),
                 reason: format!("暂不支持 {protocol} 直连"),
@@ -783,9 +839,18 @@ pub fn initialize_host_database(db_path: &Path) -> Result<(), String> {
     conn.execute_batch(HOST_DATABASE_SCHEMA)
         .map_err(|error| format!("initialize NexShell host db: {error}"))?;
     migrate_add_sort_order(&conn);
+    migrate_add_rdp_display_quality(&conn);
     migrate_seed_tags_table(&conn);
     crate::ssh_key_store::ensure_schema(&conn)?;
     Ok(())
+}
+
+// 给 hosts 补 rdp_display_quality 列（幂等；已存在则 ALTER 失败被忽略）。
+fn migrate_add_rdp_display_quality(conn: &Connection) {
+    let _ = conn.execute(
+        "ALTER TABLE hosts ADD COLUMN rdp_display_quality TEXT NOT NULL DEFAULT 'standard'",
+        [],
+    );
 }
 
 fn migrate_add_sort_order(conn: &Connection) {
@@ -1149,6 +1214,8 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
         .map_err(|error| format!("serialize host {} tags: {error}", host.id))?;
     let protocol = if host.protocol.eq_ignore_ascii_case("serial") {
         "serial"
+    } else if host.protocol.eq_ignore_ascii_case("rdp") {
+        "rdp"
     } else {
         "ssh"
     };
@@ -1161,14 +1228,15 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             serial_baud_rate, serial_data_bits, serial_stop_bits, serial_parity,
             serial_flow_control, serial_dtr, serial_rts, group_id,
             keep_alive_enabled, keep_alive_interval, keep_alive_max_failures,
-            tcp_connect_timeout, auth_timeout, term_encoding, tags, created_at, updated_at, key_id
+            tcp_connect_timeout, auth_timeout, term_encoding, tags, created_at, updated_at, key_id,
+            rdp_display_quality
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17,
             ?18, ?19, ?20, ?21,
             ?22, ?23, ?24,
-            ?25, ?26, ?27, ?28, ?29, ?30, ?31
+            ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
         )
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
@@ -1199,7 +1267,8 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             term_encoding = excluded.term_encoding,
             tags = excluded.tags,
             updated_at = excluded.updated_at,
-            key_id = excluded.key_id",
+            key_id = excluded.key_id,
+            rdp_display_quality = excluded.rdp_display_quality",
         params![
             host.id,
             host.name.trim(),
@@ -1236,6 +1305,7 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             now,
             now,
             config.key_id.as_deref().map(str::trim),
+            config.rdp_display_quality.as_str(),
         ],
     )
     .map_err(|error| format!("upsert host {}: {error}", host.id))?;
@@ -1367,7 +1437,8 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
              COALESCE(keep_alive_interval, 30), COALESCE(keep_alive_max_failures, 3), \
              COALESCE(tcp_connect_timeout, 15), COALESCE(auth_timeout, 30), \
              COALESCE(term_encoding, 'utf-8'), COALESCE(tags, '[]'), \
-             COALESCE(sort_order, 0), key_id \
+             COALESCE(sort_order, 0), key_id, \
+             COALESCE(rdp_display_quality, 'standard') \
              FROM hosts ORDER BY sort_order ASC, created_at DESC",
         )
         .map_err(|error| format!("query hosts: {error}"))?;
@@ -1375,8 +1446,11 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
         .query_map([], |row| {
             let protocol_raw: String = row.get(6)?;
             let is_serial = protocol_raw.eq_ignore_ascii_case("serial");
+            let is_rdp = protocol_raw.eq_ignore_ascii_case("rdp");
             let protocol = if is_serial {
                 "Serial".to_string()
+            } else if is_rdp {
+                "RDP".to_string()
             } else {
                 "SSH".to_string()
             };
@@ -1405,6 +1479,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
                 auth_timeout: row.get::<_, i64>(25)? as u16,
                 term_encoding: row.get(26)?,
                 key_id: row.get(29)?,
+                rdp_display_quality: RdpDisplayQuality::from_db(&row.get::<_, String>(30)?),
             };
             let endpoint = connection.endpoint(&protocol);
 
@@ -1493,6 +1568,26 @@ fn ssh_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
         .is_empty()
     {
         return Some("密码认证未保存密码".to_string());
+    }
+    None
+}
+
+// RDP 快连门禁：host/username/password 缺一即给具体 reason，不静默落 Unsupported。
+fn rdp_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
+    if config.host.trim().is_empty() {
+        return Some("主机地址为空".to_string());
+    }
+    if config.username.trim().is_empty() {
+        return Some("用户名为空".to_string());
+    }
+    if config
+        .password
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        return Some("RDP 需要保存密码".to_string());
     }
     None
 }
@@ -1966,6 +2061,111 @@ mod tests {
             .filter_map(|r| r.ok())
             .collect();
         assert_eq!(names, vec!["alpha", "beta", "gamma"]);
+    }
+
+    fn rdp_card(
+        username: &str,
+        password: Option<&str>,
+        quality: RdpDisplayQuality,
+    ) -> HostCardSnapshot {
+        let mut conn = HostConnectionConfig::rdp("10.0.0.5", 3389, username);
+        conn.password = password.map(str::to_string);
+        conn.rdp_display_quality = quality;
+        HostCardSnapshot {
+            id: "rdp-1".to_string(),
+            name: "win-box".to_string(),
+            protocol: "RDP".to_string(),
+            endpoint: conn.endpoint("RDP"),
+            description: "desc".to_string(),
+            connection: conn,
+            group_id: None,
+            tags: Vec::new(),
+            system: HostSystemIcon::Terminal,
+            sort_order: 0,
+        }
+    }
+
+    fn state_with_host(card: HostCardSnapshot) -> HostManagementState {
+        let snapshot = HostManagementSnapshot {
+            title: "t",
+            top_actions: ["a", "b", "c", "d"],
+            groups: Vec::new(),
+            search_placeholder: "s",
+            protocol_filter_label: "p",
+            available_tags: Vec::new(),
+            hosts: vec![card],
+        };
+        HostManagementState::new(snapshot)
+    }
+
+    #[test]
+    fn rdp_plan_ok_with_credentials_and_quality() {
+        let state = state_with_host(rdp_card(
+            "Administrator",
+            Some("pw"),
+            RdpDisplayQuality::Hidpi,
+        ));
+        match state.connection_plan_for("rdp-1").unwrap() {
+            HostConnectionPlan::Rdp { config, title, .. } => {
+                assert_eq!(title, "win-box");
+                assert_eq!(config.port, 3389);
+                assert_eq!(config.rdp_display_quality, RdpDisplayQuality::Hidpi);
+            }
+            other => panic!("expected Rdp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rdp_plan_missing_username_is_unsupported() {
+        let state = state_with_host(rdp_card("", Some("pw"), RdpDisplayQuality::Standard));
+        assert!(matches!(
+            state.connection_plan_for("rdp-1"),
+            Some(HostConnectionPlan::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn rdp_plan_missing_password_is_unsupported() {
+        let state = state_with_host(rdp_card("Administrator", None, RdpDisplayQuality::Standard));
+        assert!(matches!(
+            state.connection_plan_for("rdp-1"),
+            Some(HostConnectionPlan::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn rdp_default_display_quality_is_standard() {
+        let config = HostConnectionConfig::rdp("h", 3389, "u");
+        assert_eq!(config.rdp_display_quality, RdpDisplayQuality::Standard);
+    }
+
+    #[test]
+    fn rdp_host_roundtrips_through_db() {
+        let (db_path, _conn) = temp_db();
+        let card = rdp_card("Administrator", Some("pw"), RdpDisplayQuality::Hidpi);
+        upsert_host_card_in_db_path(&db_path, &card).unwrap();
+
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        let host = snapshot.hosts.iter().find(|h| h.id == "rdp-1").unwrap();
+        assert_eq!(host.protocol, "RDP");
+        assert_eq!(
+            host.connection.rdp_display_quality,
+            RdpDisplayQuality::Hidpi
+        );
+        assert_eq!(host.connection.password.as_deref(), Some("pw"));
+    }
+
+    #[test]
+    fn inserted_host_without_quality_column_defaults_standard() {
+        // create_draft_host_in_db_path 的 INSERT 不含 rdp_display_quality，靠列默认值回退。
+        let (db_path, _conn) = temp_db();
+        let id = create_draft_host_in_db_path(&db_path, None).unwrap();
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        let host = snapshot.hosts.iter().find(|h| h.id == id).unwrap();
+        assert_eq!(
+            host.connection.rdp_display_quality,
+            RdpDisplayQuality::Standard
+        );
     }
 
     fn read_host_tags(conn: &Connection, id: &str) -> Vec<String> {

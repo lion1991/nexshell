@@ -75,7 +75,8 @@ pub(crate) fn terminal_disconnected_notice_text(
         | TerminalSessionKind::NetworkList
         | TerminalSessionKind::SystemInfo
         | TerminalSessionKind::GitDiff
-        | TerminalSessionKind::CodeViewer => return None,
+        | TerminalSessionKind::CodeViewer
+        | TerminalSessionKind::Rdp => return None,
     };
 
     Some(if status.is_empty() {
@@ -319,7 +320,8 @@ pub(crate) fn split_pane_header_badge_title(
 
 pub(crate) fn split_pane_header_badge_icon(kind: TerminalSessionKind) -> &'static str {
     match kind {
-        TerminalSessionKind::Remote => ICON_PATH_CLOUD,
+        // RDP 亦为远程主机，与 Remote 同用云图标（RDP 整页不参与分屏，取值仅备用）。
+        TerminalSessionKind::Remote | TerminalSessionKind::Rdp => ICON_PATH_CLOUD,
         TerminalSessionKind::Local
         | TerminalSessionKind::Serial
         | TerminalSessionKind::Direct

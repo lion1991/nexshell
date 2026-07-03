@@ -2,8 +2,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warp_editor::editor::NavigationKey;
 use warpui::{
     color::ColorU,
@@ -24,8 +26,11 @@ use crate::warp_dropdown::{
     render_warp_dropdown, render_warp_dropdown_with_top_bar, WarpDropdownCustomProps,
     WarpDropdownOption, WarpDropdownProps,
 };
-use nexshell::host_management::HostSystemIcon;
+use nexshell::host_management::{HostSystemIcon, RdpDisplayQuality};
 use warpui::{Entity, ReadModel, UpdateModel};
+
+// RDP 端口默认值：切到 RDP 且端口仍是 SSH 默认(22) 时自动改用此值。
+const RDP_DEFAULT_PORT: u16 = 3389;
 
 // ── 数据模型 ──
 
@@ -60,13 +65,12 @@ pub struct HostEditDraft {
     pub serial_flow_control: String,
     pub serial_dtr: bool,
     pub serial_rts: bool,
+    pub rdp_display_quality: RdpDisplayQuality,
     pub system: HostSystemIcon,
 }
 
 impl HostEditDraft {
-    pub fn from_card(
-        card: &nexshell::host_management::HostCardSnapshot,
-    ) -> Self {
+    pub fn from_card(card: &nexshell::host_management::HostCardSnapshot) -> Self {
         let c = &card.connection;
         Self {
             id: card.id.clone(),
@@ -97,6 +101,7 @@ impl HostEditDraft {
             serial_flow_control: c.serial_flow_control.clone(),
             serial_dtr: c.serial_dtr,
             serial_rts: c.serial_rts,
+            rdp_display_quality: c.rdp_display_quality,
             system: card.system,
         }
     }
@@ -137,10 +142,10 @@ impl HostEditDraft {
             serial_flow_control: "none".to_string(),
             serial_dtr: false,
             serial_rts: false,
+            rdp_display_quality: RdpDisplayQuality::Standard,
             system: HostSystemIcon::Terminal,
         }
     }
-
 }
 
 // ── 焦点字段 ──
@@ -200,7 +205,8 @@ impl warpui::Entity for HostEditModel {
 
 #[derive(Clone, Debug)]
 pub enum HostEditAction {
-    ToggleProtocol,
+    SelectProtocol(String),
+    SelectRdpQuality(RdpDisplayQuality),
     SelectAuthMethod(String),
     ToggleAdvancedSettings,
     ToggleKeepAlive,
@@ -232,7 +238,11 @@ impl Entity for HostEditView {
 
 struct FieldStates {
     close_btn_state: MouseStateHandle,
-    protocol_state: MouseStateHandle,
+    protocol_ssh_state: MouseStateHandle,
+    protocol_rdp_state: MouseStateHandle,
+    protocol_serial_state: MouseStateHandle,
+    rdp_quality_standard_state: MouseStateHandle,
+    rdp_quality_hidpi_state: MouseStateHandle,
     auth_password_state: MouseStateHandle,
     auth_key_state: MouseStateHandle,
     advanced_state: MouseStateHandle,
@@ -272,7 +282,11 @@ impl FieldStates {
         let ms = || Arc::new(Mutex::new(MouseState::default()));
         Self {
             close_btn_state: ms(),
-            protocol_state: ms(),
+            protocol_ssh_state: ms(),
+            protocol_rdp_state: ms(),
+            protocol_serial_state: ms(),
+            rdp_quality_standard_state: ms(),
+            rdp_quality_hidpi_state: ms(),
             auth_password_state: ms(),
             auth_key_state: ms(),
             advanced_state: ms(),
@@ -661,12 +675,14 @@ impl HostEditView {
     }
 
     fn focus_order(&self, ctx: &ViewContext<Self>) -> Vec<EditField> {
-        let (is_ssh, is_key_auth) = ctx.read_model(&self.model, |m, _| {
+        let (protocol, is_key_auth) = ctx.read_model(&self.model, |m, _| {
             (
-                m.draft.protocol == "SSH",
+                m.draft.protocol.clone(),
                 m.draft.auth_method.as_str() == "key",
             )
         });
+        let is_ssh = protocol == "SSH";
+        let is_rdp = protocol == "RDP";
         let mut fields = vec![EditField::Name, EditField::Host];
 
         if is_ssh {
@@ -679,6 +695,10 @@ impl HostEditView {
             } else {
                 fields.push(EditField::Password);
             }
+        } else if is_rdp {
+            fields.push(EditField::Port);
+            fields.push(EditField::Username);
+            fields.push(EditField::Password);
         } else {
             fields.push(EditField::SerialBaudRate);
         }
@@ -911,29 +931,51 @@ impl warpui::TypedActionView for HostEditView {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
-            HostEditAction::ToggleProtocol => {
+            HostEditAction::SelectProtocol(target) => {
                 self.states.borrow_mut().open_dropdown = None;
+                let target = target.clone();
+                // 切协议时按 SSH/RDP 默认端口互换（仅当端口仍是另一协议默认值），避免残留。
+                let mut port_change: Option<u16> = None;
                 let host_placeholder = ctx.update_model(&self.model, |m, ctx| {
-                    if m.draft.protocol == "SSH" {
-                        m.draft.protocol = "Serial".to_string();
-                        m.draft.system = HostSystemIcon::Serial;
-                        if m.draft.host.trim().is_empty() {
+                    if m.draft.protocol != target {
+                        m.draft.protocol = target.clone();
+                        m.draft.system = if target == "Serial" {
+                            HostSystemIcon::Serial
+                        } else {
+                            HostSystemIcon::Terminal
+                        };
+                        if target == "Serial" && m.draft.host.trim().is_empty() {
                             if let Some(device) = available_serial_devices().into_iter().next() {
                                 m.draft.host = device;
                             }
                         }
-                    } else {
-                        m.draft.protocol = "SSH".to_string();
-                        m.draft.system = HostSystemIcon::Terminal;
+                        if target == "RDP" && m.draft.port == 22 {
+                            port_change = Some(RDP_DEFAULT_PORT);
+                        } else if target == "SSH" && m.draft.port == RDP_DEFAULT_PORT {
+                            port_change = Some(22);
+                        }
+                        ctx.notify();
                     }
-                    ctx.notify();
                     Self::host_placeholder(&m.draft.protocol)
                 });
+                if let Some(port) = port_change {
+                    self.set_port_value(port, ctx);
+                }
                 let host_text = ctx.read_model(&self.model, |m, _| m.draft.host.clone());
                 self.host_editor.update(ctx, |editor, ctx| {
                     editor.set_placeholder_text(&host_placeholder, ctx);
                     if editor.buffer_text(ctx) != host_text {
                         editor.system_reset_buffer_text(&host_text, ctx);
+                    }
+                });
+                ctx.notify();
+            }
+            HostEditAction::SelectRdpQuality(quality) => {
+                self.states.borrow_mut().open_dropdown = None;
+                ctx.update_model(&self.model, |m, ctx| {
+                    if m.draft.rdp_display_quality != *quality {
+                        m.draft.rdp_display_quality = *quality;
+                        ctx.notify();
                     }
                 });
                 ctx.notify();
@@ -1305,17 +1347,52 @@ fn render_form(
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
     col.add_child(render_field_label(&rust_i18n::t!("form_protocol"), ui_font));
-    col.add_child(render_protocol_toggle(
-        &draft.protocol,
-        &states.protocol_state,
-        ui_font,
-        hc,
-    ));
+    col.add_child(render_protocol_toggle(&draft.protocol, states, ui_font, hc));
 
     col.add_child(render_field_label(&rust_i18n::t!("form_name"), ui_font));
     col.add_child(render_text_field(&view.name_editor, appearance));
 
-    if draft.protocol == "SSH" {
+    if draft.protocol == "RDP" {
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_host_address"),
+            ui_font,
+        ));
+        col.add_child(render_text_field(&view.host_editor, appearance));
+
+        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font));
+        col.add_child(render_port_stepper(
+            draft.port,
+            &view.port_editor,
+            states,
+            ui_font,
+            appearance,
+            hc,
+        ));
+
+        col.add_child(render_field_label(&rust_i18n::t!("form_username"), ui_font));
+        col.add_child(render_text_field(&view.username_editor, appearance));
+
+        col.add_child(render_field_label(&rust_i18n::t!("form_password"), ui_font));
+        col.add_child(render_password_field(
+            &view.password_editor,
+            &states.password_eye_state,
+            password_visible,
+            appearance,
+            hc,
+        ));
+
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_display_quality"),
+            ui_font,
+        ));
+        col.add_child(render_rdp_quality_toggle(
+            draft.rdp_display_quality,
+            &states.rdp_quality_standard_state,
+            &states.rdp_quality_hidpi_state,
+            ui_font,
+            hc,
+        ));
+    } else if draft.protocol == "SSH" {
         col.add_child(render_field_label(
             &rust_i18n::t!("form_host_address"),
             ui_font,
@@ -1434,9 +1511,12 @@ fn render_form(
         hc,
     ));
 
-    col.add_child(render_advanced_settings(
-        draft, states, ui_font, view, appearance, hc,
-    ));
+    // 高级设置（keep-alive/超时/编码）是 SSH/串口概念，RDP 不展示。
+    if draft.protocol != "RDP" {
+        col.add_child(render_advanced_settings(
+            draft, states, ui_font, view, appearance, hc,
+        ));
+    }
 
     Container::new(col.finish())
         .with_uniform_padding(20.0)
@@ -2157,71 +2237,95 @@ fn render_inline_number_field(
 
 fn render_protocol_toggle(
     protocol: &str,
+    states: &FieldStates,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
+    ConstrainedBox::new(
+        Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(
+                Expanded::new(
+                    1.0,
+                    Container::new(protocol_segment(
+                        "SSH",
+                        protocol == "SSH",
+                        &states.protocol_ssh_state,
+                        ui_font,
+                        hc,
+                    ))
+                    .with_margin_right(8.0)
+                    .finish(),
+                )
+                .finish(),
+            )
+            .with_child(
+                Expanded::new(
+                    1.0,
+                    Container::new(protocol_segment(
+                        "RDP",
+                        protocol == "RDP",
+                        &states.protocol_rdp_state,
+                        ui_font,
+                        hc,
+                    ))
+                    .with_margin_right(8.0)
+                    .finish(),
+                )
+                .finish(),
+            )
+            .with_child(
+                Expanded::new(
+                    1.0,
+                    protocol_segment(
+                        "Serial",
+                        protocol == "Serial",
+                        &states.protocol_serial_state,
+                        ui_font,
+                        hc,
+                    ),
+                )
+                .finish(),
+            )
+            .finish(),
+    )
+    .with_height(TEXT_FIELD_HEIGHT)
+    .finish()
+}
+
+// 协议单段按钮：选中态复用认证方式切换的高亮样式。
+fn protocol_segment(
+    label: &str,
+    selected: bool,
     state: &MouseStateHandle,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     let state = state.clone();
-    let is_ssh = protocol == "SSH";
-
-    let ssh_bg = if is_ssh {
-        hc.badge_ssh_bg
+    let hc = *hc;
+    let target = label.to_string();
+    let label = label.to_string();
+    let (bg, border) = if selected {
+        (
+            ColorU::new(0x20, 0x2a, 0x3e, 0xff),
+            ColorU::new(0x70, 0x8b, 0xc5, 0xff),
+        )
     } else {
-        ColorU::transparent_black()
-    };
-    let ssh_text = if is_ssh {
-        hc.badge_ssh_text
-    } else {
-        hc.text_secondary
-    };
-    let serial_bg = if !is_ssh {
-        hc.badge_serial_bg
-    } else {
-        ColorU::transparent_black()
-    };
-    let serial_text = if !is_ssh {
-        hc.badge_serial_text
-    } else {
-        hc.text_secondary
+        (appearance_panel_black(), FIELD_BORDER)
     };
 
     Hoverable::new(state, move |_mouse| {
         ConstrainedBox::new(
             Container::new(
-                Flex::row()
-                    .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-                    .with_child(
-                        Container::new(
-                            Align::new(
-                                Text::new_inline("SSH".to_string(), ui_font, 13.0)
-                                    .with_color(ssh_text)
-                                    .finish(),
-                            )
-                            .finish(),
-                        )
-                        .with_horizontal_padding(20.0)
-                        .with_background_color(ssh_bg)
-                        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+                Align::new(
+                    Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
+                        .with_color(hc.text_primary)
                         .finish(),
-                    )
-                    .with_child(
-                        Container::new(
-                            Align::new(
-                                Text::new_inline("Serial".to_string(), ui_font, 13.0)
-                                    .with_color(serial_text)
-                                    .finish(),
-                            )
-                            .finish(),
-                        )
-                        .with_horizontal_padding(20.0)
-                        .with_background_color(serial_bg)
-                        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
-                        .finish(),
-                    )
-                    .finish(),
+                )
+                .finish(),
             )
-            .with_background_color(FORM_BG)
-            .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+            .with_background_color(bg)
+            .with_border(Border::all(1.0).with_border_color(border))
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
             .finish(),
         )
@@ -2229,8 +2333,95 @@ fn render_protocol_toggle(
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
-    .on_click(|ctx, _, _| {
-        ctx.dispatch_typed_action(HostEditAction::ToggleProtocol);
+    .on_click(move |ctx, _, _| {
+        ctx.dispatch_typed_action(HostEditAction::SelectProtocol(target.clone()));
+    })
+    .finish()
+}
+
+// RDP 显示质量二选一：标准 / 高清 HiDPI。
+fn render_rdp_quality_toggle(
+    current: RdpDisplayQuality,
+    standard_state: &MouseStateHandle,
+    hidpi_state: &MouseStateHandle,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
+    let standard = rdp_quality_segment(
+        &rust_i18n::t!("form_display_quality_standard"),
+        RdpDisplayQuality::Standard,
+        current == RdpDisplayQuality::Standard,
+        standard_state,
+        ui_font,
+        hc,
+    );
+    let hidpi = rdp_quality_segment(
+        &rust_i18n::t!("form_display_quality_hidpi"),
+        RdpDisplayQuality::Hidpi,
+        current == RdpDisplayQuality::Hidpi,
+        hidpi_state,
+        ui_font,
+        hc,
+    );
+
+    ConstrainedBox::new(
+        Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(
+                Expanded::new(
+                    1.0,
+                    Container::new(standard).with_margin_right(8.0).finish(),
+                )
+                .finish(),
+            )
+            .with_child(Expanded::new(1.0, hidpi).finish())
+            .finish(),
+    )
+    .with_height(TEXT_FIELD_HEIGHT)
+    .finish()
+}
+
+fn rdp_quality_segment(
+    label: &str,
+    quality: RdpDisplayQuality,
+    selected: bool,
+    state: &MouseStateHandle,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
+    let state = state.clone();
+    let hc = *hc;
+    let label = label.to_string();
+    let (bg, border) = if selected {
+        (
+            ColorU::new(0x20, 0x2a, 0x3e, 0xff),
+            ColorU::new(0x70, 0x8b, 0xc5, 0xff),
+        )
+    } else {
+        (appearance_panel_black(), FIELD_BORDER)
+    };
+
+    Hoverable::new(state, move |_mouse| {
+        ConstrainedBox::new(
+            Container::new(
+                Align::new(
+                    Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
+                        .with_color(hc.text_primary)
+                        .finish(),
+                )
+                .finish(),
+            )
+            .with_background_color(bg)
+            .with_border(Border::all(1.0).with_border_color(border))
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
+            .finish(),
+        )
+        .with_height(TEXT_FIELD_HEIGHT)
+        .finish()
+    })
+    .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_click(move |ctx, _, _| {
+        ctx.dispatch_typed_action(HostEditAction::SelectRdpQuality(quality));
     })
     .finish()
 }
