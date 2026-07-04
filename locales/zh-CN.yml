@@ -29,6 +29,24 @@ tab_rdp: 远程桌面
 rdp_connecting: 正在连接远程桌面…
 rdp_disconnected: "连接已断开：%{reason}"
 rdp_reconnect: 重新连接
+rdp_info_title: 连接信息
+rdp_info_na: 不可用
+rdp_info_group_network: 网络
+rdp_info_transport: 传输协议
+rdp_info_rtt: 往返延迟
+rdp_info_recv_rate: 接收码率
+rdp_info_group_connection: 连接
+rdp_info_remote_addr: 远端地址
+rdp_info_resolution: 桌面分辨率
+rdp_info_duration: 会话时长
+rdp_info_group_graphics: 图形管线
+rdp_info_pipeline: 渲染模式
+rdp_info_pipeline_remotefx: RemoteFX 帧边界
+rdp_info_pipeline_bitmap: 传统位图回退
+rdp_info_pipeline_egfx: EGFX 图形管线
+rdp_info_publish_fps: 发布帧率
+rdp_quality_standard: 标准
+rdp_quality_hidpi: 高清
 code_viewer_loading: 文件加载中…
 code_viewer_read_error: "读取文件失败：%{error}"
 code_viewer_saved: 已保存
@@ -412,6 +430,7 @@ tab_ctx_close_others: 关闭其他标签页
 tab_ctx_close_right: 关闭右侧标签页
 tab_ctx_reconnect: 重新连接
 tab_ctx_disconnect: 断开连接
+tab_ctx_connection_info: 连接信息
 tab_ctx_save_config: 保存为新配置
 tab_ctx_record_start: 开始录制
 tab_ctx_record_stop: 停止录制

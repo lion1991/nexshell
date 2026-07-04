@@ -39,8 +39,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use pathfinder_geometry::vector::vec2f;
 use nexshell::text_editor::EditorView;
+use pathfinder_geometry::vector::vec2f;
 use warpui::actions::StandardAction;
 use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
 use warpui::platform::app::ApproveTerminateResult;
@@ -68,16 +68,16 @@ use nexshell::ssh_session::SshHandle;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 use nexshell::warp_tab_context_menu::{TAB_COLOR_ICON_PATH, TAB_NO_COLOR_ICON_PATH};
 
-mod terminal_grid_element;
 mod rdp_view;
 mod root_view;
+mod terminal_grid_element;
 // RootView 定义已于 step 11 迁入 root_view/mod.rs；重导出以保持全库 `crate::RootView` 路径不变。
 pub(crate) use root_view::RootView;
 // main.rs 残留只剩启动装配与伴生类型，下列为这部分仍需的少量符号。
-use terminal_grid_element::TerminalGridAction;
 use font_enumeration::{
     default_monospace_font_family_name, load_nexshell_monospace_font, load_nexshell_ui_font,
 };
+use terminal_grid_element::TerminalGridAction;
 use terminal_view_helpers::{terminal_clear_key_binding, terminal_tab_original_label};
 use ui_settings::load_ui_settings;
 
@@ -387,6 +387,17 @@ struct RdpTabState {
     last_uploaded_generation: u64,
     /// 当前 letterbox 几何（Element 每帧回写），第 ④ 步鼠标→远端坐标反算用。
     viewport: std::sync::Arc<std::sync::Mutex<Option<rdp_view::RdpViewport>>>,
+    /// 显示质量档：true=高清(HiDPI)，用于连接信息面板展示。
+    hidpi: bool,
+    /// 协议层运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
+    stats: Arc<nexshell::rdp_session::RdpStats>,
+    /// 连接信息浮层开关。
+    conn_info_open: bool,
+    /// 上次采样 (bytes, frames, 时刻)，与下一 tick 差分算率。
+    conn_info_last_sample: Option<(u64, u64, std::time::Instant)>,
+    /// 最近算出的接收码率 Mbps / 发布帧率 fps（渲染直接用）。
+    conn_info_mbps: f64,
+    conn_info_fps: f64,
 }
 
 struct TerminalSessionTab {
@@ -712,10 +723,7 @@ fn register_warp_appearance(ctx: &mut AppContext) {
             let password_font = cache
                 .load_family_from_bytes(
                     "PasswordCircle",
-                    vec![
-                        include_bytes!("../assets/bundled/fonts/password.ttf")
-                            .to_vec(),
-                    ],
+                    vec![include_bytes!("../assets/bundled/fonts/password.ttf").to_vec()],
                 )
                 .expect("password font");
             (monospace_font, ui_font, password_font)
@@ -1032,4 +1040,3 @@ mod tests {
         );
     }
 }
-

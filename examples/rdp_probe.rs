@@ -33,12 +33,35 @@ fn main() {
         password,
         width,
         height,
+        // 与主程序同门控（docs/adr/0008 第①步）：开 NEXSHELL_RDP_EGFX=1 可无 UI 验证
+        // EGFX 通道链路（看 stderr 的 [egfx] 日志；此时 PNG 会是黑屏，合成第②步做）。
+        enable_egfx: std::env::var("NEXSHELL_RDP_EGFX").is_ok(),
     });
 
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // RDP_DURATION：采集秒数，缺省 5（长跑抓 EGFX dump 用）。
+    let deadline = Instant::now() + Duration::from_secs(env_or("RDP_DURATION", 5));
     let mut connected_at: Option<Duration> = None;
     let mut first_frame_at: Option<Duration> = None;
     let mut frame_count = 0usize;
+
+    // RDP_JIGGLE=1：每 500ms 抖一下鼠标，模拟交互会话（防服务端闲置掐线 + 触发持续重绘）。
+    if std::env::var("RDP_JIGGLE").is_ok() {
+        let input_tx = handle.input_tx.clone();
+        std::thread::spawn(move || {
+            let mut flip = false;
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                flip = !flip;
+                let x = if flip { 500 } else { 520 };
+                if input_tx
+                    .send_blocking(nexshell::rdp_session::RdpInputEvent::MouseMove { x, y: 400 })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
 
     loop {
         let now = Instant::now();

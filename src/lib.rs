@@ -25,12 +25,12 @@ pub struct ReferencePolicy {
     pub adopt_warp_blocks: bool,
 }
 
+pub mod actions;
 #[cfg(feature = "warpui-app")]
 pub mod code_editor;
-pub mod actions;
-pub mod file_drop_target;
 #[cfg(feature = "warpui-app")]
 pub mod features;
+pub mod file_drop_target;
 pub mod file_panel;
 pub mod frame_export;
 pub mod git_ops;
@@ -62,6 +62,8 @@ pub mod shell_chrome;
 pub mod shell_integration;
 pub mod ssh_key_store;
 pub mod ssh_session;
+#[cfg(feature = "warpui-app")]
+pub mod telemetry;
 pub mod terminal_lifecycle;
 pub mod terminal_mount;
 pub mod terminal_recorder;
@@ -76,8 +78,6 @@ pub mod time_format;
 pub mod ui_components;
 #[cfg(feature = "warpui-app")]
 pub mod util;
-#[cfg(feature = "warpui-app")]
-pub mod telemetry;
 #[cfg(feature = "warpui-app")]
 pub mod view_components;
 pub mod view_model;
@@ -851,6 +851,7 @@ Inter-|   Receive                                                |  Transmit
                 close_tabs_right: Action::CloseRight,
                 reconnect_tab: None,
                 disconnect_tab: None,
+                connection_info: None,
                 toggle_recording: None,
                 is_recording: false,
                 save_current_tab_as_new_config: None,
@@ -918,6 +919,7 @@ Inter-|   Receive                                                |  Transmit
                 close_tabs_right: Action::CloseRight,
                 reconnect_tab: None,
                 disconnect_tab: None,
+                connection_info: None,
                 toggle_recording: None,
                 is_recording: false,
                 save_current_tab_as_new_config: None,
@@ -976,6 +978,7 @@ Inter-|   Receive                                                |  Transmit
             close_tabs_right: Action::CloseRight,
             reconnect_tab: None,
             disconnect_tab: None,
+            connection_info: None,
             toggle_recording: None,
             is_recording: false,
             save_current_tab_as_new_config: None,
@@ -1071,6 +1074,7 @@ Inter-|   Receive                                                |  Transmit
                 close_tabs_right: Action::CloseRight,
                 reconnect_tab: None,
                 disconnect_tab: None,
+                connection_info: None,
                 toggle_recording: None,
                 is_recording: false,
                 save_current_tab_as_new_config: None,

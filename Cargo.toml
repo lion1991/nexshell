@@ -67,6 +67,10 @@ ironrdp-tls = { version = "0.2", default-features = false, features = ["rustls"]
 # 与树内 connector 0.9/session 0.10 完全一致。cliprdr-native 只有 windows 后端、macOS 仅 stub，
 # 故不引 native，自实现 CliprdrBackend + arboard 访问 Mac 剪贴板。
 ironrdp-cliprdr = "0.6"
+# EGFX 图形管线（MS-RDPEGFX，见 docs/adr/0008）。dvc 0.7 承载动态虚拟通道，
+# egfx 0.2 是 EGFX DVC 处理器。不开 openh264 feature（解码走 VideoToolbox，第②步）。
+ironrdp-dvc = "0.7"
+ironrdp-egfx = "0.2"
 # Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
 # macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
 # 只在单一 RDP 线程访问 NSPasteboard，无并发。
@@ -102,6 +106,13 @@ line-ending = { version = "1.4.0", optional = true }
 cocoa = "=0.26.0"
 objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
 core-text = "21.0.0"
+# EGFX H.264 硬解（docs/adr/0008 第②步）：VideoToolbox 纯系统框架，objc2 0.6 生态已在树
+# （app-kit/foundation 皆 0.3.x 系）。framework crate 高度 feature-gated，按用到的类型开。
+objc2 = "0.6"
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFCGTypes", "CFNumber"] }
+objc2-core-media = { version = "0.3", features = ["std", "CMBase", "CMTime", "CMFormatDescription", "CMBlockBuffer", "CMSampleBuffer"] }
+objc2-core-video = { version = "0.3", features = ["std", "CVBase", "CVReturn", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
+objc2-video-toolbox = { version = "0.3", features = ["std", "objc2", "objc2-core-media", "objc2-core-video", "VTDecompressionSession", "VTDecompressionProperties", "VTSession", "VTErrors"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 font-kit = { git = "https://github.com/warpdotdev/font-kit", rev = "a04b225ecb639bb850f21d05212cfdc7465000f3", default-features = false, features = ["source"] }
@@ -162,3 +173,24 @@ core-graphics = { git = "https://github.com/servo/core-foundation-rs", rev = "6f
 core-text = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
 objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
 yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
+
+# EGFX 临时 fork（docs/adr/0008）：connector 加 SUPPORT_DYN_VC_GFX_PROTOCOL 早期能力标志
+# （等价上游 PR #1237）+ cherry-pick 上游 PR #1175（ClearCodec 客户端派发 + RLEX/vbar 解码器
+# 修复，连接级单例）。git workspace 内部是 path 依赖，只 patch 单个 crate 会与 crates.io
+# 拉的其余 ironrdp crate 出现同名两份 → 类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到
+# 同一 fork rev（版本号与 crates.io 发布版逐一一致，无 bump）。退出条件：#1237+#1175 合并发版后删 patch。
+ironrdp-async = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-connector = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-core = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-error = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-session = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-svc = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-tls = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }
+ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP", rev = "e311c53e8cd7d3042da613afe11d6f2ffe832f98" }

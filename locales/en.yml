@@ -29,6 +29,24 @@ tab_rdp: Remote Desktop
 rdp_connecting: "Connecting to remote desktop…"
 rdp_disconnected: "Disconnected: %{reason}"
 rdp_reconnect: Reconnect
+rdp_info_title: Connection Information
+rdp_info_na: N/A
+rdp_info_group_network: Network
+rdp_info_transport: Transport
+rdp_info_rtt: Round-trip time
+rdp_info_recv_rate: Receive rate
+rdp_info_group_connection: Connection
+rdp_info_remote_addr: Remote address
+rdp_info_resolution: Desktop resolution
+rdp_info_duration: Session duration
+rdp_info_group_graphics: Graphics pipeline
+rdp_info_pipeline: Render mode
+rdp_info_pipeline_remotefx: "RemoteFX frame markers"
+rdp_info_pipeline_bitmap: "Legacy bitmap fallback"
+rdp_info_pipeline_egfx: "EGFX graphics pipeline"
+rdp_info_publish_fps: Publish rate
+rdp_quality_standard: Standard
+rdp_quality_hidpi: HiDPI
 code_viewer_loading: "Loading file…"
 code_viewer_read_error: "Failed to read file: %{error}"
 code_viewer_saved: Saved
@@ -412,6 +430,7 @@ tab_ctx_close_others: Close other tabs
 tab_ctx_close_right: Close Tabs to the Right
 tab_ctx_reconnect: Reconnect
 tab_ctx_disconnect: Disconnect
+tab_ctx_connection_info: Connection Information
 tab_ctx_save_config: Save as new config
 tab_ctx_record_start: Start Recording
 tab_ctx_record_stop: Stop Recording

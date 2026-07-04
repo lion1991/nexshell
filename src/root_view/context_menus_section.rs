@@ -94,6 +94,11 @@ impl RootView {
                     .get(index)
                     .filter(|tab| !is_content_tab && tab.can_disconnect())
                     .map(|_| TerminalGridAction::DisconnectTab(index)),
+                connection_info: self
+                    .terminal_tabs
+                    .get(index)
+                    .filter(|tab| tab.rdp.is_some())
+                    .map(|_| TerminalGridAction::ToggleRdpConnectionInfo(index)),
                 toggle_recording: (!is_content_tab)
                     .then(|| TerminalGridAction::ToggleTabRecording(index)),
                 // 与 handler 同一解析：焦点 pane 回退主终端，分屏下文案才与实际一致。

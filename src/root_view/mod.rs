@@ -198,6 +198,8 @@ pub(crate) struct RootView {
     new_session_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     tab_right_click_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_tab_right_click_menu: Option<(usize, TabContextMenuAnchor)>,
+    /// RDP 连接信息面板 1s 刷新定时器是否在跑（防重复起）。
+    rdp_conn_info_refreshing: bool,
     terminal_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_terminal_context_menu: Option<Vector2F>,
     file_panel_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
@@ -549,6 +551,7 @@ impl RootView {
                 menu
             },
             show_tab_right_click_menu: None,
+            rdp_conn_info_refreshing: false,
             terminal_context_menu: {
                 // warp: view.rs:3696-3702
                 let menu = ctx.add_typed_action_view(|_| {
@@ -2110,6 +2113,9 @@ impl TypedActionView for RootView {
             TerminalGridAction::CloseOtherTabs(index) => self.handle_close_other_tabs(*index, ctx),
             TerminalGridAction::CloseTabsRight(index) => self.handle_close_tabs_right(*index, ctx),
             TerminalGridAction::ReconnectTab(index) => self.handle_reconnect_tab(*index, ctx),
+            TerminalGridAction::ToggleRdpConnectionInfo(index) => {
+                self.handle_toggle_rdp_connection_info(*index, ctx)
+            }
             TerminalGridAction::DisconnectTab(index) => self.handle_disconnect_tab(*index, ctx),
             TerminalGridAction::ToggleTabRecording(index) => {
                 self.handle_toggle_tab_recording(*index, ctx)

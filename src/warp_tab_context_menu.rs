@@ -7,8 +7,8 @@
 //! we do not carry yet (shared sessions and saved tab configs) are kept as
 //! empty sections rather than re-shaped into a custom menu.
 
-use pathfinder_geometry::vector::Vector2F;
 use crate::menu::{MenuItem, MenuItemFields};
+use pathfinder_geometry::vector::Vector2F;
 use warp_core::ui::theme::{AnsiColorIdentifier, AnsiColors};
 use warpui::Action;
 
@@ -75,6 +75,8 @@ pub struct HorizontalTabContextMenuActions<A: Action + Clone> {
     pub close_tabs_right: A,
     pub reconnect_tab: Option<A>,
     pub disconnect_tab: Option<A>,
+    /// 仅 RDP 标签有：切换连接信息浮层。
+    pub connection_info: Option<A>,
     pub toggle_recording: Option<A>,
     /// 决定录制菜单项显示「开始录制」还是「停止录制」。
     pub is_recording: bool,
@@ -115,6 +117,7 @@ pub fn horizontal_tab_context_menu_items_with_state<A: Action + Clone>(
         modify_tab_menu_items(&state),
         close_tab_menu_items(&state),
         reconnect_menu_items(&state),
+        connection_info_menu_items(&state),
         recording_menu_items(&state),
         save_config_menu_items(&state),
         color_option_menu_items(&state),
@@ -236,6 +239,19 @@ fn reconnect_menu_items<A: Action + Clone>(
         );
     }
     items
+}
+
+fn connection_info_menu_items<A: Action + Clone>(
+    state: &HorizontalTabContextMenuState<A>,
+) -> Vec<MenuItem<A>> {
+    let Some(action) = &state.actions.connection_info else {
+        return Vec::new();
+    };
+    vec![
+        MenuItemFields::new(rust_i18n::t!("tab_ctx_connection_info"))
+            .with_on_select_action(action.clone())
+            .into_item(),
+    ]
 }
 
 fn recording_menu_items<A: Action + Clone>(

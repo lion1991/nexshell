@@ -719,6 +719,8 @@ pub enum TerminalGridAction {
     CloseTabsRight(usize),
     ReconnectTab(usize),
     DisconnectTab(usize),
+    /// 切换 RDP 标签的连接信息浮层。
+    ToggleRdpConnectionInfo(usize),
     ToggleTabRecording(usize),
     DuplicateTab(usize),
     ToggleTabColor {

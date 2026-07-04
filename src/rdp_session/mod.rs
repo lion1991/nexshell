@@ -5,8 +5,15 @@
 //! 输入/剪贴板留占位（RdpInputEvent + input_tx），后续步骤实现。
 
 mod clipboard;
+mod egfx;
+mod frame_marker;
+mod stats;
+
+pub use egfx::vt_replay_dir;
+pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 
 use std::net::SocketAddr;
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -20,6 +27,7 @@ use ironrdp_connector::{
     BitmapConfig, ClientConnector, Config, ConnectorResult, Credentials, DesktopSize, ServerName,
 };
 use ironrdp_graphics::image_processing::PixelFormat;
+use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::input::fast_path::FastPathInputEvent;
 use ironrdp_pdu::rdp::capability_sets::BitmapCodecs;
 use ironrdp_session::image::DecodedImage;
@@ -36,6 +44,9 @@ pub struct RdpSessionConfig {
     pub password: String,
     pub width: u16,
     pub height: u16,
+    /// 开 EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第①步）。
+    /// 第①步临时用 NEXSHELL_RDP_EGFX 环境变量门控，出画面后（第②步）改默认开。
+    pub enable_egfx: bool,
 }
 
 /// 脏矩形（左上原点，像素）。本步图形更新统一按整帧上报。
@@ -225,6 +236,53 @@ impl RdpFramebuffer {
             self.rgba[off..off + row_bytes].copy_from_slice(&src[off..off + row_bytes]);
         }
     }
+
+    /// EGFX 合成：把已映射 surface（src=src_w×src_h RGBA，映射原点 origin）落进 framebuffer，
+    /// 只写 `clip`（output 坐标）范围内、且被 surface 覆盖的行。不 +generation（发布前统一 bump）。
+    pub fn compose_surface(
+        &mut self,
+        origin_x: i32,
+        origin_y: i32,
+        src: &[u8],
+        src_w: u16,
+        src_h: u16,
+        clip: DirtyRect,
+    ) {
+        let fb_w = i32::from(self.width);
+        let fb_h = i32::from(self.height);
+        let sw = i32::from(src_w);
+        let sh = i32::from(src_h);
+        // clip ∩ surface-output-rect ∩ framebuffer。
+        let cx0 = i32::from(clip.x).max(origin_x).max(0);
+        let cy0 = i32::from(clip.y).max(origin_y).max(0);
+        let cx1 = (i32::from(clip.x) + i32::from(clip.width))
+            .min(origin_x + sw)
+            .min(fb_w);
+        let cy1 = (i32::from(clip.y) + i32::from(clip.height))
+            .min(origin_y + sh)
+            .min(fb_h);
+        if cx1 <= cx0 || cy1 <= cy0 {
+            return;
+        }
+        let fb_stride = usize::from(self.width) * 4;
+        let src_stride = usize::from(src_w) * 4;
+        let n = (cx1 - cx0) as usize * 4;
+        for row in cy0..cy1 {
+            let sy = (row - origin_y) as usize;
+            let sx = (cx0 - origin_x) as usize;
+            let so = sy * src_stride + sx * 4;
+            let dofs = row as usize * fb_stride + cx0 as usize * 4;
+            if so + n > src.len() || dofs + n > self.rgba.len() {
+                continue;
+            }
+            self.rgba[dofs..dofs + n].copy_from_slice(&src[so..so + n]);
+        }
+    }
+
+    /// 手动推进帧代号（EGFX 合成一帧后统一调一次）。
+    pub fn bump_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+    }
 }
 
 /// UI 侧持有的会话句柄。drop 或 close() 时优雅断开。
@@ -235,6 +293,8 @@ pub struct RdpSessionHandle {
     pub framebuffer: Arc<Mutex<RdpFramebuffer>>,
     /// 输入通道占位（本步不消费）。
     pub input_tx: async_channel::Sender<RdpInputEvent>,
+    /// 运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
+    pub stats: Arc<RdpStats>,
     close_tx: async_channel::Sender<()>,
     _thread: Option<thread::JoinHandle<()>>,
 }
@@ -261,11 +321,13 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
     let (input_tx, input_rx) = async_channel::unbounded::<RdpInputEvent>();
     let (close_tx, close_rx) = async_channel::unbounded::<()>();
     let framebuffer = Arc::new(Mutex::new(RdpFramebuffer::new(config.width, config.height)));
+    let stats = Arc::new(RdpStats::new());
 
     let thread = thread::Builder::new()
         .name(format!("nexshell-rdp-{id}"))
         .spawn({
             let framebuffer = Arc::clone(&framebuffer);
+            let stats = Arc::clone(&stats);
             move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -282,6 +344,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
                 runtime.block_on(run_rdp_event_loop(
                     config,
                     framebuffer,
+                    stats,
                     event_tx,
                     close_rx,
                     input_rx,
@@ -294,6 +357,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
         frame_rx,
         framebuffer,
         input_tx,
+        stats,
         close_tx,
         _thread: thread,
     }
@@ -349,9 +413,10 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         bitmap: Some(BitmapConfig {
             color_depth: 32,
             lossy_compression: true,
-            // 空 codec 集：不广告扩展 codec，服务端回退标准位图更新（raw/RLE/RDP6），
-            // ActiveStage 可解。RemoteFX 等 codec 广告后续步骤补。
-            codecs: BitmapCodecs(Vec::new()),
+            // 广告 RemoteFX：服务端整帧 RFX 编码而非 GDI 横条带，消除自上而下扫描。
+            // 失败回退空集（标准位图更新，ActiveStage 可解）。
+            codecs: ironrdp_pdu::rdp::capability_sets::client_codecs_capabilities(&[])
+                .unwrap_or(BitmapCodecs(Vec::new())),
         }),
         client_build: 0,
         client_name: "nexshell".to_string(),
@@ -370,6 +435,9 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         timezone_info: ironrdp_pdu::rdp::client_info::TimezoneInfo::default(),
         alternate_shell: String::new(),
         work_dir: String::new(),
+        // EGFX 早期能力标志（fork patch，docs/adr/0008）：只在门控开时广告，
+        // 让服务端可协商 Microsoft::Windows::RDS::Graphics 通道。
+        support_dyn_vc_gfx_protocol: config.enable_egfx,
     }
 }
 
@@ -377,11 +445,20 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
 async fn run_rdp_event_loop(
     config: RdpSessionConfig,
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
+    stats: Arc<RdpStats>,
     event_tx: async_channel::Sender<RdpEvent>,
     close_rx: async_channel::Receiver<()>,
     input_rx: async_channel::Receiver<RdpInputEvent>,
 ) {
-    let reason = match connect_and_run(&config, &framebuffer, &event_tx, &close_rx, &input_rx).await
+    let reason = match connect_and_run(
+        &config,
+        &framebuffer,
+        &stats,
+        &event_tx,
+        &close_rx,
+        &input_rx,
+    )
+    .await
     {
         Ok(()) => "session ended".to_string(),
         Err(error) => error,
@@ -392,6 +469,7 @@ async fn run_rdp_event_loop(
 async fn connect_and_run(
     config: &RdpSessionConfig,
     framebuffer: &Arc<Mutex<RdpFramebuffer>>,
+    stats: &Arc<RdpStats>,
     event_tx: &async_channel::Sender<RdpEvent>,
     close_rx: &async_channel::Receiver<()>,
     input_rx: &async_channel::Receiver<RdpInputEvent>,
@@ -408,6 +486,8 @@ async fn connect_and_run(
     let client_addr: SocketAddr = tcp
         .local_addr()
         .map_err(|e| format!("local_addr failed: {e}"))?;
+    // TLS 升级前 dup 一份底层 fd 供 RTT 探测（原 stream 随后被 TLS 吃掉）。
+    stats.capture_fd(tcp.as_raw_fd());
 
     // cliprdr：注册文本剪贴板静态通道。backend 经 clip_tx 回递要发的 PDU，
     // 轮询/回调经 shared 桥接（见 clipboard 模块）。
@@ -418,6 +498,17 @@ async fn connect_and_run(
     let connector_config = build_connector_config(config);
     let mut connector = ClientConnector::new(connector_config, client_addr)
         .with_static_channel(CliprdrClient::new(Box::new(clip_backend)));
+    // EGFX：门控开时挂 drdynvc 静态通道 + EGFX 合成动态通道（docs/adr/0008 第②步，出画面）。
+    // handler 直接往共享 framebuffer 写并发 FrameUpdated；ActiveStage 自动路由并回发 FrameAck。
+    if config.enable_egfx {
+        connector = connector.with_static_channel(egfx::build_dvc_client(
+            Arc::clone(framebuffer),
+            event_tx.clone(),
+            Arc::clone(stats),
+            config.width,
+            config.height,
+        ));
+    }
 
     // 阶段一：明文协商到 TLS 升级点。
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
@@ -461,13 +552,48 @@ async fn connect_and_run(
     let mut image = DecodedImage::new(PixelFormat::RgbA32, desktop.width, desktop.height);
     let mut active_stage = ActiveStage::new(connection_result);
     let _ = event_tx.try_send(RdpEvent::Connected);
-    // Mac 剪贴板变化轮询（仅连接存活时跑；随事件循环退出而 drop，无残留任务）。
-    let mut clip_poll = tokio::time::interval(Duration::from_secs(1));
+    // Mac 剪贴板轮询挪出帧循环：独立 OS 线程 1s tick 同步读 NSPasteboard，有变化经 channel 回递。
+    // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程 ~1s 内自退。
+    let (clip_poll_tx, clip_poll_rx) =
+        async_channel::unbounded::<Vec<ironrdp_cliprdr::pdu::ClipboardFormat>>();
+    {
+        let clip_shared = clip_shared.clone();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(1));
+            if clip_poll_tx.is_closed() {
+                break;
+            }
+            if let Some(formats) = clipboard::poll_local_change(&clip_shared) {
+                if clip_poll_tx.send_blocking(formats).is_err() {
+                    break;
+                }
+            }
+        });
+    }
 
     // 阶段四：收图形更新解码合成 + 并发消费键鼠输入，编码成 FastPath 发回。
+    let (dw, dh) = (desktop.width, desktop.height);
+    // 帧聚合状态提升到循环外持久化：acc 跨迭代累积脏区，真帧边界/兜底才发布。
+    let mut acc: Option<DirtyRect> = None;
+    // 连接内一旦 peek 到任何 FrameMarker 即永久走 marker 模式（按真帧边界发布）。
+    let mut marker_support = false;
+    // acc 从空转非空时设 now+50ms；服务端只发 Begin 不发 End 的异常由它兜底发布。
+    let mut frame_deadline: Option<tokio::time::Instant> = None;
+    // 每会话一次的管线诊断日志（surface-command 含 marker / 位图回退）。
+    let mut pipeline_logged = false;
+    // NEXSHELL_RDP_EGFX_DUMP 开时，2s 打一次累计收字节/发帧，核实接收码率统计（面板 0.0 Mbps 排查）。
+    let egfx_dbg = std::env::var_os("NEXSHELL_RDP_EGFX_DUMP").is_some();
+    let mut dbg_last = std::time::Instant::now();
     loop {
-        // select：关闭 / 输入 / cliprdr 回递 / 剪贴板轮询 / 帧。前四路自成闭环 continue，不阻塞帧路径。
-        // 输入分支：攒批→编码→写回。
+        if egfx_dbg && dbg_last.elapsed() >= Duration::from_secs(2) {
+            eprintln!("[rdp] recv_bytes={} frames={}", stats.bytes(), stats.frames());
+            dbg_last = std::time::Instant::now();
+        }
+        // 有在途累积且未武装截止时武装：单一武装点覆盖帧/输入两路（输入路 continue 后由此处补武装）。
+        if acc.is_some() && frame_deadline.is_none() {
+            frame_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(50));
+        }
+        // select：关闭 / cliprdr 回递 / 剪贴板轮询 / 输入 / 截止兜底 / 帧。前几路自成闭环 continue。
         let (action, payload) = tokio::select! {
             _ = close_rx.recv() => return Ok(()),
             msg = clip_rx.recv() => {
@@ -475,20 +601,19 @@ async fn connect_and_run(
                 send_clipboard_pdu(&mut active_stage, &mut upgraded_framed, msg).await?;
                 continue;
             }
-            _ = clip_poll.tick() => {
-                if let Some(formats) = clipboard::poll_local_change(&clip_shared) {
-                    if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
-                        let msgs = cliprdr
-                            .initiate_copy(&formats)
-                            .map_err(|e| format!("cliprdr initiate_copy failed: {e}"))?;
-                        let data = active_stage
-                            .process_svc_processor_messages(msgs)
-                            .map_err(|e| format!("cliprdr encode failed: {e}"))?;
-                        upgraded_framed
-                            .write_all(&data)
-                            .await
-                            .map_err(|e| format!("write cliprdr failed: {e}"))?;
-                    }
+            formats = clip_poll_rx.recv() => {
+                let Ok(formats) = formats else { continue; };
+                if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
+                    let msgs = cliprdr
+                        .initiate_copy(&formats)
+                        .map_err(|e| format!("cliprdr initiate_copy failed: {e}"))?;
+                    let data = active_stage
+                        .process_svc_processor_messages(msgs)
+                        .map_err(|e| format!("cliprdr encode failed: {e}"))?;
+                    upgraded_framed
+                        .write_all(&data)
+                        .await
+                        .map_err(|e| format!("write cliprdr failed: {e}"))?;
                 }
                 continue;
             }
@@ -505,14 +630,18 @@ async fn connect_and_run(
                 let outputs = active_stage
                     .process_fastpath_input(&mut image, &events)
                     .map_err(|e| format!("encode input failed: {e}"))?;
-                for out in outputs {
-                    if let ActiveStageOutput::ResponseFrame(frame) = out {
-                        upgraded_framed
-                            .write_all(&frame)
-                            .await
-                            .map_err(|e| format!("write input failed: {e}"))?;
-                    }
+                // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
+                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx).await? {
+                    return Ok(());
                 }
+                continue;
+            }
+            // 截止兜底：仅在 frame_deadline 已武装时启用（if guard 保证 unwrap 安全）。
+            _ = tokio::time::sleep_until(frame_deadline.unwrap_or_else(tokio::time::Instant::now)),
+                if frame_deadline.is_some() =>
+            {
+                publish_frame(framebuffer, &image, &mut acc, stats, event_tx);
+                frame_deadline = None;
                 continue;
             }
             frame = upgraded_framed.read_pdu() => {
@@ -520,32 +649,79 @@ async fn connect_and_run(
             }
         };
 
+        stats.add_bytes(payload.len() as u64);
+
+        // FastPath 才含 surface command / marker（x224 慢速路径不含），先只读 peek 真帧边界。
+        let mut saw_end = false;
+        if action == ironrdp_pdu::Action::FastPath {
+            let peek = frame_marker::peek_frame_markers(&payload);
+            if peek.saw_marker {
+                marker_support = true;
+                stats.set_marker_mode();
+            }
+            saw_end = peek.saw_end;
+            if !pipeline_logged {
+                if peek.saw_marker {
+                    eprintln!("[rdp] frame pipeline: surface-commands+frame-marker");
+                    pipeline_logged = true;
+                } else if peek.saw_bitmap {
+                    eprintln!("[rdp] frame pipeline: legacy bitmap updates");
+                    pipeline_logged = true;
+                }
+            }
+        }
+
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
+        if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx).await? {
+            return Ok(());
+        }
 
-        for out in outputs {
-            match out {
-                ActiveStageOutput::ResponseFrame(frame) => {
-                    upgraded_framed
-                        .write_all(&frame)
-                        .await
-                        .map_err(|e| format!("write response failed: {e}"))?;
-                }
-                ActiveStageOutput::GraphicsUpdate(_region) => {
-                    // 整帧覆盖 framebuffer（本步不做增量），上报整帧脏矩形。
-                    let dirty = framebuffer.lock().apply_full(image.data());
-                    let _ = event_tx.try_send(RdpEvent::FrameUpdated { dirty });
-                }
-                ActiveStageOutput::Terminate(reason) => {
-                    let _ = event_tx.try_send(RdpEvent::Disconnected {
-                        reason: format!("terminated: {reason}"),
-                    });
-                    return Ok(());
-                }
-                // 指针/DeactivateAll/输入等本步忽略。
-                _ => {}
+        if marker_support {
+            // marker 模式：真帧边界发布，见本 PDU 的 FrameMarker(End) 即发。不跑 drain 探测。
+            if saw_end {
+                publish_frame(framebuffer, &image, &mut acc, stats, event_tx);
+                frame_deadline = None;
             }
+        } else {
+            // 非 marker 模式：drain 掉 socket 里已就绪的后续 PDU，读空且有累积时给 ≤2 次 1.5ms 宽限
+            // 再探（减少大帧在途字节被腰斩），仍无数据才一次性发布。
+            let mut drained = 0;
+            let mut grace = 0;
+            while drained < DRAIN_MAX {
+                let more = tokio::select! {
+                    biased;
+                    res = upgraded_framed.read_pdu() => Some(res),
+                    _ = std::future::ready(()) => None,
+                };
+                match more {
+                    Some(res) => {
+                        let (action, payload) =
+                            res.map_err(|e| format!("read frame failed: {e}"))?;
+                        stats.add_bytes(payload.len() as u64);
+                        let outputs = active_stage
+                            .process(&mut image, action, &payload)
+                            .map_err(|e| format!("process frame failed: {e}"))?;
+                        if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx)
+                            .await?
+                        {
+                            return Ok(());
+                        }
+                        drained += 1;
+                    }
+                    None => {
+                        if acc.is_some() && grace < 2 {
+                            grace += 1;
+                            tokio::time::sleep(Duration::from_micros(1500)).await;
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+            publish_frame(framebuffer, &image, &mut acc, stats, event_tx);
+            frame_deadline = None;
         }
     }
 }
@@ -575,6 +751,101 @@ async fn send_clipboard_pdu<W: FramedWrite>(
         .write_all(&data)
         .await
         .map_err(|e| format!("write cliprdr failed: {e}"))
+}
+
+/// drain 时单帧最多累积的 PDU 数：防服务端持续推流饿死 input/close 分支。
+const DRAIN_MAX: usize = 32;
+
+/// InclusiveRectangle（右/下含端）→ DirtyRect，clamp 到桌面尺寸。
+fn inclusive_to_dirty(rect: &InclusiveRectangle, max_w: u16, max_h: u16) -> DirtyRect {
+    if max_w == 0 || max_h == 0 {
+        return DirtyRect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+    }
+    let left = rect.left.min(max_w - 1);
+    let top = rect.top.min(max_h - 1);
+    let right = rect.right.min(max_w - 1).max(left);
+    let bottom = rect.bottom.min(max_h - 1).max(top);
+    DirtyRect {
+        x: left,
+        y: top,
+        width: right - left + 1,
+        height: bottom - top + 1,
+    }
+}
+
+/// 两脏矩形的包围盒（累积一逻辑帧内多个 GraphicsUpdate）。
+fn union_dirty(a: DirtyRect, b: DirtyRect) -> DirtyRect {
+    let x0 = a.x.min(b.x);
+    let y0 = a.y.min(b.y);
+    let x1 = (a.x + a.width).max(b.x + b.width);
+    let y1 = (a.y + a.height).max(b.y + b.height);
+    DirtyRect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    }
+}
+
+/// 处理一批 outputs：ResponseFrame 立即写回；GraphicsUpdate 转脏区并入 acc（不拷贝像素）；
+/// Terminate 发 Disconnected 并返回 true（需退出）。
+async fn drain_outputs<W: FramedWrite>(
+    framed: &mut W,
+    outputs: Vec<ActiveStageOutput>,
+    acc: &mut Option<DirtyRect>,
+    desktop_w: u16,
+    desktop_h: u16,
+    event_tx: &async_channel::Sender<RdpEvent>,
+) -> Result<bool, String> {
+    for out in outputs {
+        match out {
+            ActiveStageOutput::ResponseFrame(frame) => {
+                framed
+                    .write_all(&frame)
+                    .await
+                    .map_err(|e| format!("write response failed: {e}"))?;
+            }
+            ActiveStageOutput::GraphicsUpdate(region) => {
+                let dirty = inclusive_to_dirty(&region, desktop_w, desktop_h);
+                *acc = Some(match *acc {
+                    Some(prev) => union_dirty(prev, dirty),
+                    None => dirty,
+                });
+            }
+            ActiveStageOutput::Terminate(reason) => {
+                let _ = event_tx.try_send(RdpEvent::Disconnected {
+                    reason: format!("terminated: {reason}"),
+                });
+                return Ok(true);
+            }
+            // 指针/DeactivateAll 等本步忽略。
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+/// 发布累积脏区：apply_region 拷一次 + 发一条 FrameUpdated。acc 为 None 则空操作。
+fn publish_frame(
+    framebuffer: &Arc<Mutex<RdpFramebuffer>>,
+    image: &DecodedImage,
+    acc: &mut Option<DirtyRect>,
+    stats: &Arc<RdpStats>,
+    event_tx: &async_channel::Sender<RdpEvent>,
+) {
+    if let Some(dirty) = acc.take() {
+        if dirty.width == 0 || dirty.height == 0 {
+            return;
+        }
+        framebuffer.lock().apply_region(image.data(), dirty);
+        stats.inc_frame();
+        let _ = event_tx.try_send(RdpEvent::FrameUpdated { dirty });
+    }
 }
 
 #[cfg(test)]
@@ -725,6 +996,78 @@ mod tests {
             }
             other => panic!("expected MouseEvent, got {other:?}"),
         }
+    }
+
+    fn incl(left: u16, top: u16, right: u16, bottom: u16) -> InclusiveRectangle {
+        InclusiveRectangle {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    #[test]
+    fn inclusive_to_dirty_uses_inclusive_bounds() {
+        // 0..=1 两轴 → 2x2 起点(0,0)。
+        assert_eq!(
+            inclusive_to_dirty(&incl(0, 0, 1, 1), 100, 100),
+            DirtyRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 2
+            }
+        );
+        // 单像素 rect：右=左、下=上 → 1x1。
+        assert_eq!(
+            inclusive_to_dirty(&incl(5, 7, 5, 7), 100, 100),
+            DirtyRect {
+                x: 5,
+                y: 7,
+                width: 1,
+                height: 1
+            }
+        );
+    }
+
+    #[test]
+    fn inclusive_to_dirty_clamps_to_desktop() {
+        // 越界的 right/bottom 收敛到 max-1，宽高不超出画面。
+        let d = inclusive_to_dirty(&incl(3, 3, 99, 99), 10, 10);
+        assert_eq!(d.x, 3);
+        assert_eq!(d.y, 3);
+        assert_eq!(d.x + d.width, 10);
+        assert_eq!(d.y + d.height, 10);
+        // 零尺寸桌面不 panic，返回空矩形。
+        assert_eq!(inclusive_to_dirty(&incl(0, 0, 1, 1), 0, 0).width, 0);
+    }
+
+    #[test]
+    fn union_dirty_bounding_box() {
+        let a = DirtyRect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        let b = DirtyRect {
+            x: 5,
+            y: 6,
+            width: 3,
+            height: 4,
+        };
+        assert_eq!(
+            union_dirty(a, b),
+            DirtyRect {
+                x: 0,
+                y: 0,
+                width: 8,
+                height: 10
+            }
+        );
+        // 自并保持不变。
+        assert_eq!(union_dirty(a, a), a);
     }
 
     #[test]
