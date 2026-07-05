@@ -50,6 +50,14 @@ pub fn scancode_for_key(key: &str) -> Option<(u8, bool)> {
         "f10" => (0x44, NORM),
         "f11" => (0x57, NORM),
         "f12" => (0x58, NORM),
+        "f13" => (0x64, NORM),
+        "f14" => (0x65, NORM),
+        "f15" => (0x66, NORM),
+        "f16" => (0x67, NORM),
+        "f17" => (0x68, NORM),
+        "f18" => (0x69, NORM),
+        "f19" => (0x6A, NORM),
+        "f20" => (0x6B, NORM),
         _ => return None,
     };
     Some(code)
@@ -174,6 +182,9 @@ mod tests {
         assert_eq!(scancode_for_key("escape"), Some((0x01, false)));
         assert_eq!(scancode_for_key("f5"), Some((0x3F, false)));
         assert_eq!(scancode_for_key("f11"), Some((0x57, false)));
+        // f13~f20 补漏，均非扩展。
+        assert_eq!(scancode_for_key("f13"), Some((0x64, false)));
+        assert_eq!(scancode_for_key("f20"), Some((0x6B, false)));
         // 方向/编辑键必须是扩展键。
         assert_eq!(scancode_for_key("left"), Some((0x4B, true)));
         assert_eq!(scancode_for_key("delete"), Some((0x53, true)));

@@ -26,7 +26,7 @@ use crate::{
     TITLE_BAR_HEIGHT,
 };
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
-use nexshell::rdp_session::{spawn_rdp_session, RdpEvent, RdpSessionConfig};
+use nexshell::rdp_session::{default_enable_egfx, spawn_rdp_session, RdpEvent, RdpSessionConfig};
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
 impl RootView {
@@ -49,9 +49,8 @@ impl RootView {
             password: config.password.clone().unwrap_or_default(),
             width,
             height,
-            // 第①步临时开发门控：NEXSHELL_RDP_EGFX 存在即开 EGFX（docs/adr/0008）。
-            // reconnect 复用存储的 config 自动继承此值。第②步出画面后改默认开。
-            enable_egfx: std::env::var("NEXSHELL_RDP_EGFX").is_ok(),
+            // EGFX 默认开启；必要时用 NEXSHELL_RDP_DISABLE_EGFX=1 回退旧管线。
+            enable_egfx: default_enable_egfx(),
         };
 
         let handle = spawn_rdp_session(rdp_config.clone());
@@ -262,6 +261,18 @@ impl RootView {
             .iter_mut()
             .find(|t| t.id == tab_id)
             .and_then(|t| t.rdp.as_mut())
+    }
+
+    /// 同步 RDP 符号热键接管态：活动 tab 是 RDP、终端页、且窗口有键盘焦点时 Push，否则 Pop。
+    /// 幂等（HotkeyGuardSlot 只在翻转时动作），render 每帧调 + on_focus/on_blur 调，自愈不叠 Push。
+    pub(in crate::root_view) fn sync_rdp_hotkey_guard(&self) {
+        let desired = self.app_page == crate::AppPage::Terminal
+            && self.window_key_focused.get()
+            && self
+                .terminal_tabs
+                .get(self.active_tab_index)
+                .map_or(false, |t| matches!(t.kind, TerminalSessionKind::Rdp));
+        self.rdp_hotkey_guard.borrow_mut().set_engaged(desired);
     }
 
     /// 切走/关闭某 tab 前，若它是 RDP tab 则抬起全部远端修饰键，防卡键（尤其 Win 键）。

@@ -63,9 +63,9 @@ impl RdpPageElement {
         }
     }
 
-    /// 发一个输入事件；满或断开则丢弃（丢新的），绝不阻塞 UI 线程。
-    fn send(&self, event: RdpInputEvent) {
-        let _ = self.input_tx.try_send(event);
+    /// 发一个输入事件；满或断开则丢弃（丢新的），绝不阻塞 UI 线程。返回 try_send 是否成功。
+    fn send(&self, event: RdpInputEvent) -> bool {
+        self.input_tx.try_send(event).is_ok()
     }
 
     /// 远端光标接管：鼠标在画面内套用远端下发光标，画面外（黑边）恢复箭头。
@@ -267,6 +267,12 @@ impl Element for RdpPageElement {
                 ..
             } => {
                 if *is_composing {
+                    if key_trace() {
+                        eprintln!(
+                            "[nexshell key-debug] page KeyDown key={:?} is_composing=true → 跳过",
+                            keystroke.key
+                        );
+                    }
                     return false;
                 }
                 let scancode = details
@@ -275,9 +281,15 @@ impl Element for RdpPageElement {
                     .and_then(|k| keymap::scancode_for_key(&k.to_lowercase()))
                     .or_else(|| keymap::scancode_for_key(&keystroke.key.to_lowercase()));
                 let Some((scancode, extended)) = scancode else {
+                    if key_trace() {
+                        eprintln!(
+                            "[nexshell key-debug] page KeyDown key={:?} kwm={:?} scancode=miss → 不消费",
+                            keystroke.key, details.key_without_modifiers
+                        );
+                    }
                     return false;
                 };
-                self.send(RdpInputEvent::Key {
+                let sent = self.send(RdpInputEvent::Key {
                     scancode,
                     extended,
                     pressed: true,
@@ -287,18 +299,37 @@ impl Element for RdpPageElement {
                     extended,
                     pressed: false,
                 });
+                if key_trace() {
+                    eprintln!(
+                        "[nexshell key-debug] page KeyDown key={:?} scancode=0x{:02X} ext={} try_send={}",
+                        keystroke.key, scancode, extended, sent
+                    );
+                }
                 true
             }
             // 修饰键：携带物理 KeyCode + 按下/抬起，维持远端修饰键状态。
             Event::ModifierKeyChanged { key_code, state } => {
                 let Some((scancode, extended)) = keymap::scancode_for_modifier(*key_code) else {
+                    if key_trace() {
+                        eprintln!(
+                            "[nexshell key-debug] page Modifier code={:?} state={:?} scancode=miss → 不消费",
+                            key_code, state
+                        );
+                    }
                     return false;
                 };
-                self.send(RdpInputEvent::Key {
+                let pressed = matches!(state, KeyState::Pressed);
+                let sent = self.send(RdpInputEvent::Key {
                     scancode,
                     extended,
-                    pressed: matches!(state, KeyState::Pressed),
+                    pressed,
                 });
+                if key_trace() {
+                    eprintln!(
+                        "[nexshell key-debug] page Modifier code={:?} scancode=0x{:02X} ext={} pressed={} try_send={}",
+                        key_code, scancode, extended, pressed, sent
+                    );
+                }
                 true
             }
             // 合成 MouseMoved（每帧重绘后 warpui 补发，用于刷新 hover）：拖拽期间其坐标冻结在
@@ -363,4 +394,10 @@ impl Element for RdpPageElement {
             _ => false,
         }
     }
+}
+
+/// 按键链路追踪开关（NEXSHELL_DEBUG_KEYS=1，与 warpui 平台层同开关）。
+fn key_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NEXSHELL_DEBUG_KEYS").is_ok_and(|v| v == "1"))
 }

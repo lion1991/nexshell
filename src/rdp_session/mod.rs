@@ -53,6 +53,15 @@ pub struct RdpSessionConfig {
     pub enable_egfx: bool,
 }
 
+fn default_enable_egfx_from_env(disable_egfx: Option<std::ffi::OsString>) -> bool {
+    disable_egfx.is_none()
+}
+
+/// EGFX is the default graphics pipeline; set NEXSHELL_RDP_DISABLE_EGFX=1 for legacy fallback.
+pub fn default_enable_egfx() -> bool {
+    default_enable_egfx_from_env(std::env::var_os("NEXSHELL_RDP_DISABLE_EGFX"))
+}
+
 /// 脏矩形（左上原点，像素）。本步图形更新统一按整帧上报。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirtyRect {
@@ -186,6 +195,11 @@ fn to_fastpath_input(event: RdpInputEvent) -> FastPathInputEvent {
             extended,
             pressed,
         } => {
+            if key_trace() {
+                eprintln!(
+                    "[nexshell key-debug] fastpath encode scancode=0x{scancode:02X} ext={extended} pressed={pressed}"
+                );
+            }
             let mut flags = KeyboardFlags::empty();
             if !pressed {
                 flags |= KeyboardFlags::RELEASE;
@@ -916,6 +930,12 @@ fn ptr_trace() -> bool {
     *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_PTR_TRACE").is_ok_and(|v| v == "1"))
 }
 
+/// 按键链路追踪开关（NEXSHELL_DEBUG_KEYS=1，与 warpui 平台层同开关）。
+fn key_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NEXSHELL_DEBUG_KEYS").is_ok_and(|v| v == "1"))
+}
+
 /// DecodedPointer(Arc) → RdpPointer::Bitmap；与上次同一指针（同 cache_key）则返回 None 去重。
 /// cache_key 取 Arc 内容地址：IronRDP 对同一 cache_index 复用同一 Arc，稳定可判等。
 fn pointer_to_event(
@@ -975,6 +995,18 @@ mod tests {
     #[test]
     fn empty_domain_falls_back_to_local() {
         assert_eq!(split_domain_user("\\svc"), (None, "\\svc".to_string()));
+    }
+
+    #[test]
+    fn egfx_defaults_on_when_not_disabled() {
+        assert!(default_enable_egfx_from_env(None));
+    }
+
+    #[test]
+    fn egfx_can_be_disabled_for_legacy_fallback() {
+        assert!(!default_enable_egfx_from_env(Some(
+            std::ffi::OsString::from("1")
+        )));
     }
 
     #[test]

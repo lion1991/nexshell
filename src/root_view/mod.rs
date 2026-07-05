@@ -123,6 +123,11 @@ pub(crate) struct RootView {
     // render 里按活动 tab 变化增量下发，避免每帧 FFI。None=未初始化。
     local_ime_disabled: std::cell::Cell<Option<bool>>,
 
+    // RDP 前台时接管 macOS 符号热键（⌘Space/⌃Space 等透传远端）。render 里按「活动 tab 是 RDP
+    // 且窗口有键盘焦点」增量 Push/Pop（幂等，见 HotkeyGuardSlot）；焦点态由 on_focus/on_blur 维护。
+    rdp_hotkey_guard: std::cell::RefCell<crate::rdp_view::HotkeyGuardSlot>,
+    window_key_focused: std::cell::Cell<bool>,
+
     // === 主机库（host_library_section）：状态 / 内联编辑器 / 密码栏 ===
     host_state: HostManagementState,
     host_view_states: RefCell<HostManagementViewStates>,
@@ -445,6 +450,8 @@ impl RootView {
             window_id: ctx.window_id(),
             app_page: AppPage::HostManagement,
             local_ime_disabled: std::cell::Cell::new(None),
+            rdp_hotkey_guard: std::cell::RefCell::new(Default::default()),
+            window_key_focused: std::cell::Cell::new(true),
             host_state,
             host_view_states: RefCell::new(HostManagementViewStates::new()),
             host_status_fleet: HostOverviewFleet::new(),
@@ -1344,14 +1351,16 @@ impl RootView {
         }
     }
 
-    /// RDP tab 聚焦时抑制本地 IME（走远端原始 scancode）；其他 tab 恢复。按活动 tab
-    /// 变化增量下发到本窗口 host view，只在状态翻转时做一次 FFI。
+    /// RDP tab 聚焦时抑制本地 IME 并开启原始键盘透传（非 cmd 键直达远端 scancode，
+    /// 绕过本地绑定/AppKit 吞键）；其他 tab 恢复。IME 走 host view FFI（状态翻转时下发），
+    /// 透传写 AppContext 窗口标志（幂等，供 app 派发与 objc performKeyEquivalent 读取）。
     fn sync_local_ime_suppression(&self, app: &AppContext) {
         let disabled = self.app_page == AppPage::Terminal
             && self
                 .terminal_tabs
                 .get(self.active_tab_index)
                 .map_or(false, |t| matches!(t.kind, TerminalSessionKind::Rdp));
+        app.set_raw_key_passthrough(self.window_id, disabled);
         if self.local_ime_disabled.get() == Some(disabled) {
             return;
         }
@@ -1482,6 +1491,8 @@ impl View for RootView {
         if focus_ctx.is_self_focused() {
             self.report_terminal_focus(true);
             Self::sync_titlebar_height(ctx);
+            self.window_key_focused.set(true);
+            self.sync_rdp_hotkey_guard(); // 重获焦点：RDP tab 恢复符号热键接管。
         }
     }
 
@@ -1494,6 +1505,8 @@ impl View for RootView {
         ));
         if blur_ctx.is_self_blurred() {
             self.report_terminal_focus(false);
+            self.window_key_focused.set(false);
+            self.sync_rdp_hotkey_guard(); // 失焦：主动 Pop 兜底（不只靠系统前台自动恢复）。
         }
     }
 
@@ -1521,6 +1534,7 @@ impl View for RootView {
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         self.sync_local_ime_suppression(app);
+        self.sync_rdp_hotkey_guard();
         let on_terminal_page = self.app_page == AppPage::Terminal;
         let mut tabs: Vec<TabModel> = self
             .terminal_tabs
