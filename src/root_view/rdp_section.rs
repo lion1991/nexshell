@@ -81,6 +81,8 @@ impl RootView {
                 last_uploaded_generation: 0,
                 viewport: Arc::new(Mutex::new(None)),
                 last_mouse: Arc::new(Mutex::new(None)),
+                current_pointer: warpui::platform::Cursor::Arrow,
+                pointer_cursor_cache: std::collections::HashMap::new(),
                 hidpi,
                 stats,
                 conn_info_open: false,
@@ -217,6 +219,41 @@ impl RootView {
                 }
                 ctx.notify();
             }
+            RdpEvent::PointerChanged(pointer) => {
+                let Some(rdp) = self.rdp_state_mut(tab_id) else {
+                    return;
+                };
+                // 光标点尺寸随画面缩放（viewport 未就绪时按 1.0，后续指针更新会带上正确值）。
+                let scale = rdp
+                    .viewport
+                    .lock()
+                    .ok()
+                    .and_then(|vp| vp.map(|v| v.scale))
+                    .filter(|s| s.is_finite() && *s > 0.0)
+                    .unwrap_or(1.0);
+                // 备忘命中（同 cache_key 且 scale 未变）则复用已注册光标，避免重复注册打穿 LRU。
+                let cursor = match &pointer {
+                    nexshell::rdp_session::RdpPointer::Bitmap { cache_key, .. } => {
+                        match rdp.pointer_cursor_cache.get(cache_key) {
+                            Some((s, c)) if *s == scale => *c,
+                            _ => {
+                                let c = crate::rdp_view::pointer_to_cursor(&pointer, scale);
+                                rdp.pointer_cursor_cache.insert(*cache_key, (scale, c));
+                                c
+                            }
+                        }
+                    }
+                    _ => crate::rdp_view::pointer_to_cursor(&pointer, scale),
+                };
+                if std::env::var_os("NEXSHELL_RDP_PTR_TRACE").is_some() {
+                    eprintln!("[rdp-ptr] view 收到指针 → {cursor:?} scale={scale}");
+                }
+                if rdp.current_pointer != cursor {
+                    rdp.current_pointer = cursor;
+                    // 鼠标可能正悬停画面内：重绘触发合成 MouseMoved → 重设光标。
+                    ctx.notify();
+                }
+            }
         }
     }
 
@@ -271,6 +308,7 @@ impl RootView {
                     rdp.viewport.clone(),
                     rdp.handle.input_tx.clone(),
                     rdp.last_mouse.clone(),
+                    rdp.current_pointer,
                 )
                 .finish();
                 Container::new(element)

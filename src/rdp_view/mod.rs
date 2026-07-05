@@ -4,6 +4,8 @@
 pub mod geometry;
 pub mod keymap;
 pub mod page_element;
+pub mod pointer;
 
 pub use geometry::{rdp_desktop_size, RdpViewport};
 pub use page_element::RdpPageElement;
+pub use pointer::pointer_to_cursor;

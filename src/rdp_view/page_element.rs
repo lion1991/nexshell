@@ -34,6 +34,8 @@ pub struct RdpPageElement {
     input_tx: async_channel::Sender<RdpInputEvent>,
     /// 上次发出的鼠标远端坐标（跨帧共享；Element 每帧重建）。去重连续 MouseMove 用。
     last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
+    /// 远端接管光标：鼠标在画面内时套用（每帧由 RootView 传入当前值）。
+    cursor: warpui_core::platform::Cursor,
     size: Option<Vector2F>,
     origin: Option<Point>,
 }
@@ -46,6 +48,7 @@ impl RdpPageElement {
         viewport_out: Arc<Mutex<Option<RdpViewport>>>,
         input_tx: async_channel::Sender<RdpInputEvent>,
         last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
+        cursor: warpui_core::platform::Cursor,
     ) -> Self {
         Self {
             asset_id,
@@ -54,6 +57,7 @@ impl RdpPageElement {
             viewport_out,
             input_tx,
             last_mouse,
+            cursor,
             size: None,
             origin: None,
         }
@@ -62,6 +66,20 @@ impl RdpPageElement {
     /// 发一个输入事件；满或断开则丢弃（丢新的），绝不阻塞 UI 线程。
     fn send(&self, event: RdpInputEvent) {
         let _ = self.input_tx.try_send(event);
+    }
+
+    /// 远端光标接管：鼠标在画面内套用远端下发光标，画面外（黑边）恢复箭头。
+    /// set_cursor 只在事件分发帧生效；合成 MouseMoved 每帧补发保证跟随。
+    fn apply_cursor(&self, position: Vector2F, ctx: &mut EventContext) {
+        let Some(z_index) = self.origin.map(|o| o.z_index()) else {
+            return;
+        };
+        let cursor = if self.device_coords(position).is_some() {
+            self.cursor
+        } else {
+            warpui_core::platform::Cursor::Arrow
+        };
+        ctx.set_cursor(cursor, z_index);
     }
 
     /// 鼠标绝对坐标 → 远端桌面像素；画面外（黑边）或无 viewport 返回 None。
@@ -236,7 +254,7 @@ impl Element for RdpPageElement {
     fn dispatch_event(
         &mut self,
         event: &DispatchedEvent,
-        _ctx: &mut EventContext,
+        ctx: &mut EventContext,
         _: &AppContext,
     ) -> bool {
         match event.raw_event() {
@@ -291,6 +309,8 @@ impl Element for RdpPageElement {
                 is_synthetic,
                 ..
             } => {
+                // 合成 MouseMoved 每帧补发：借它把远端光标持续套用（画面内）/恢复（画面外）。
+                self.apply_cursor(*position, ctx);
                 if *is_synthetic {
                     return true;
                 }
@@ -298,6 +318,7 @@ impl Element for RdpPageElement {
             }
             // 左键拖拽。丢弃平台层合成拖拽（静止自动滚动泵：坐标冻结、每 16ms 重发）。
             Event::LeftMouseDragged { position, .. } => {
+                self.apply_cursor(*position, ctx);
                 if warpui_core::event::is_synthetic_drag() {
                     return true;
                 }

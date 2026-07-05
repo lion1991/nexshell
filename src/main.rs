@@ -390,6 +390,10 @@ struct RdpTabState {
     /// 上次发往远端的鼠标坐标；相同则不重发 MouseMove（Element 每帧重建，故存共享层）。
     /// 拖窗时 AppKit 会持续投递重复/近重复 LeftMouseDragged，去重防窗口在移动循环里抖动。
     last_mouse: std::sync::Arc<std::sync::Mutex<Option<(u16, u16)>>>,
+    /// 远端光标接管：当前应显示的本地光标（PointerChanged 时更新，画面 hover 时套用）。
+    current_pointer: warpui::platform::Cursor,
+    /// 远端指针备忘：cache_key → (注册时 scale, Cursor)。同指针反复切换不重复注册。
+    pointer_cursor_cache: std::collections::HashMap<u64, (f32, warpui::platform::Cursor)>,
     /// 显示质量档：true=高清(HiDPI)，用于连接信息面板展示。
     hidpi: bool,
     /// 协议层运行时统计（Arc 与协议线程共享），连接信息面板只读差分。

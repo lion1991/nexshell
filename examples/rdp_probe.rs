@@ -449,6 +449,7 @@ fn main() {
                     );
                 }
             }
+            Ok(RdpEvent::PointerChanged(_)) => {} // probe 不关心指针形状
             Ok(RdpEvent::Disconnected { reason }) => {
                 println!("[probe] disconnected: {reason}");
                 break;

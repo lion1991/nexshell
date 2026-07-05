@@ -71,6 +71,26 @@ pub enum RdpEvent {
     FrameUpdated { dirty: DirtyRect },
     /// 连接结束（正常或错误）。
     Disconnected { reason: String },
+    /// 远端光标形态变化：本地据此接管/隐藏/复原鼠标（accelerated 模式，不合成进帧）。
+    PointerChanged(RdpPointer),
+}
+
+/// 远端下发的光标形态。语义对齐 mstsc/FreeRDP：
+/// Default=系统箭头，Hidden=隐藏，Bitmap=自定义位图（New/Cached/Color/Large）。
+#[derive(Clone, Debug)]
+pub enum RdpPointer {
+    Default,
+    Hidden,
+    Bitmap {
+        /// 非预乘 RGBA（accelerated target）。
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        hotspot_x: f32,
+        hotspot_y: f32,
+        /// 缓存/判等键（用 DecodedPointer 的 Arc 地址）。
+        cache_key: u64,
+    },
 }
 
 /// 鼠标按钮（左/中/右）。侧键不支持（warpui 未派发其抬起事件）。
@@ -428,10 +448,13 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         platform: ironrdp_pdu::rdp::capability_sets::MajorPlatformType::UNSPECIFIED,
         hardware_id: None,
         license_cache: None,
-        enable_server_pointer: false,
+        // 开启服务端光标：本地做「远端光标接管」。accelerated 模式（下一行 false）→
+        // IronRDP 只发 PointerBitmap 事件、不把光标合成进 framebuffer（避免双光标）。
+        enable_server_pointer: true,
         autologon: false,
         enable_audio_playback: false,
         request_data: None,
+        // false=accelerated：产出非预乘 RGBA 的 PointerBitmap，用系统光标绘制。
         pointer_software_rendering: false,
         multitransport_flags: None,
         compression_type: None,
@@ -579,6 +602,8 @@ async fn connect_and_run(
     let (dw, dh) = (desktop.width, desktop.height);
     // 帧聚合状态提升到循环外持久化：acc 跨迭代累积脏区，真帧边界/兜底才发布。
     let mut acc: Option<DirtyRect> = None;
+    // 远端光标去重：记上次发出的 PointerBitmap cache_key，连续同指针不重发。
+    let mut last_pointer_key: Option<u64> = None;
     // 连接内一旦 peek 到任何 FrameMarker 即永久走 marker 模式（按真帧边界发布）。
     let mut marker_support = false;
     // acc 从空转非空时设 now+50ms；服务端只发 Begin 不发 End 的异常由它兜底发布。
@@ -639,7 +664,7 @@ async fn connect_and_run(
                     .process_fastpath_input(&mut image, &events)
                     .map_err(|e| format!("encode input failed: {e}"))?;
                 // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
-                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx).await? {
+                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key).await? {
                     return Ok(());
                 }
                 continue;
@@ -682,7 +707,17 @@ async fn connect_and_run(
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
-        if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx).await? {
+        if drain_outputs(
+            &mut upgraded_framed,
+            outputs,
+            &mut acc,
+            dw,
+            dh,
+            event_tx,
+            &mut last_pointer_key,
+        )
+        .await?
+        {
             return Ok(());
         }
 
@@ -711,8 +746,16 @@ async fn connect_and_run(
                         let outputs = active_stage
                             .process(&mut image, action, &payload)
                             .map_err(|e| format!("process frame failed: {e}"))?;
-                        if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx)
-                            .await?
+                        if drain_outputs(
+                            &mut upgraded_framed,
+                            outputs,
+                            &mut acc,
+                            dw,
+                            dh,
+                            event_tx,
+                            &mut last_pointer_key,
+                        )
+                        .await?
                         {
                             return Ok(());
                         }
@@ -809,6 +852,7 @@ async fn drain_outputs<W: FramedWrite>(
     desktop_w: u16,
     desktop_h: u16,
     event_tx: &async_channel::Sender<RdpEvent>,
+    last_pointer_key: &mut Option<u64>,
 ) -> Result<bool, String> {
     for out in outputs {
         match out {
@@ -825,17 +869,72 @@ async fn drain_outputs<W: FramedWrite>(
                     None => dirty,
                 });
             }
+            ActiveStageOutput::PointerDefault => {
+                *last_pointer_key = None;
+                if ptr_trace() {
+                    eprintln!("[rdp-ptr] default");
+                }
+                let _ = event_tx.try_send(RdpEvent::PointerChanged(RdpPointer::Default));
+            }
+            ActiveStageOutput::PointerHidden => {
+                *last_pointer_key = None;
+                if ptr_trace() {
+                    eprintln!("[rdp-ptr] hidden");
+                }
+                let _ = event_tx.try_send(RdpEvent::PointerChanged(RdpPointer::Hidden));
+            }
+            ActiveStageOutput::PointerBitmap(pointer) => {
+                if let Some(p) = pointer_to_event(&pointer, last_pointer_key) {
+                    if ptr_trace() {
+                        eprintln!(
+                            "[rdp-ptr] bitmap {}x{} hs=({},{})",
+                            pointer.width, pointer.height, pointer.hotspot_x, pointer.hotspot_y
+                        );
+                    }
+                    // 发送失败（通道满）回滚去重键，下次同指针可重试，否则光标永久丢失。
+                    if event_tx.try_send(RdpEvent::PointerChanged(p)).is_err() {
+                        *last_pointer_key = None;
+                    }
+                }
+            }
             ActiveStageOutput::Terminate(reason) => {
                 let _ = event_tx.try_send(RdpEvent::Disconnected {
                     reason: format!("terminated: {reason}"),
                 });
                 return Ok(true);
             }
-            // 指针/DeactivateAll 等本步忽略。
+            // PointerPosition（本地光标本就跟手）/ DeactivateAll 等忽略。
             _ => {}
         }
     }
     Ok(false)
+}
+
+/// 指针链路追踪开关（NEXSHELL_RDP_PTR_TRACE=1）。
+fn ptr_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_PTR_TRACE").is_ok_and(|v| v == "1"))
+}
+
+/// DecodedPointer(Arc) → RdpPointer::Bitmap；与上次同一指针（同 cache_key）则返回 None 去重。
+/// cache_key 取 Arc 内容地址：IronRDP 对同一 cache_index 复用同一 Arc，稳定可判等。
+fn pointer_to_event(
+    pointer: &std::sync::Arc<ironrdp_graphics::pointer::DecodedPointer>,
+    last_pointer_key: &mut Option<u64>,
+) -> Option<RdpPointer> {
+    let cache_key = std::sync::Arc::as_ptr(pointer) as u64;
+    if *last_pointer_key == Some(cache_key) {
+        return None;
+    }
+    *last_pointer_key = Some(cache_key);
+    Some(RdpPointer::Bitmap {
+        rgba: pointer.bitmap_data.clone(),
+        width: pointer.width as u32,
+        height: pointer.height as u32,
+        hotspot_x: pointer.hotspot_x as f32,
+        hotspot_y: pointer.hotspot_y as f32,
+        cache_key,
+    })
 }
 
 /// 发布累积脏区：apply_region 拷一次 + 发一条 FrameUpdated。acc 为 None 则空操作。
@@ -1099,5 +1198,58 @@ mod tests {
         let row2 = &fb.rgba[2 * stride..3 * stride];
         assert!(row2[..8].iter().all(|&b| b == 0));
         assert!(row2[8..16].iter().all(|&b| b == 7));
+    }
+
+    fn make_pointer(px: u8) -> Arc<ironrdp_graphics::pointer::DecodedPointer> {
+        Arc::new(ironrdp_graphics::pointer::DecodedPointer {
+            width: 2,
+            height: 2,
+            hotspot_x: 1,
+            hotspot_y: 0,
+            bitmap_data: vec![px; 2 * 2 * 4],
+        })
+    }
+
+    #[test]
+    fn pointer_bitmap_maps_fields() {
+        let mut last = None;
+        let p = make_pointer(9);
+        let event = pointer_to_event(&p, &mut last).expect("first pointer emitted");
+        match event {
+            RdpPointer::Bitmap {
+                rgba,
+                width,
+                height,
+                hotspot_x,
+                hotspot_y,
+                cache_key,
+            } => {
+                assert_eq!(rgba, vec![9u8; 16]);
+                assert_eq!((width, height), (2, 2));
+                assert_eq!((hotspot_x, hotspot_y), (1.0, 0.0));
+                assert_eq!(cache_key, Arc::as_ptr(&p) as u64);
+                assert_eq!(last, Some(cache_key));
+            }
+            other => panic!("expected Bitmap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pointer_same_arc_dedups() {
+        let mut last = None;
+        let p = make_pointer(1);
+        assert!(pointer_to_event(&p, &mut last).is_some());
+        // 同一 Arc 再来一次 → 去重返回 None。
+        assert!(pointer_to_event(&p, &mut last).is_none());
+    }
+
+    #[test]
+    fn pointer_different_arc_reemits() {
+        let mut last = None;
+        let a = make_pointer(1);
+        let b = make_pointer(2);
+        assert!(pointer_to_event(&a, &mut last).is_some());
+        // 不同 Arc（不同地址）→ 重新发送。
+        assert!(pointer_to_event(&b, &mut last).is_some());
     }
 }
