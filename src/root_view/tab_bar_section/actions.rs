@@ -6,10 +6,13 @@
 use std::sync::{Arc, Mutex};
 
 use pathfinder_geometry::rect::RectF;
+use pathfinder_geometry::vector::vec2f;
 
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::terminal_view_helpers::serial_port_from_host_config;
-use crate::{AppPage, RootView, TabMoveDirection, DEFAULT_COLS, DEFAULT_ROWS};
+use crate::{
+    AppPage, RootView, TabMoveDirection, DEFAULT_COLS, DEFAULT_ROWS, NEW_TAB_BUTTON_POSITION_ID,
+};
 use nexshell::host_management::HostConnectionPlan;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 use nexshell::text_editor::Event as EditorEvent;
@@ -71,8 +74,12 @@ impl RootView {
                 .with_icon(warp_core::ui::icons::Icon::Terminal)
                 .with_key_shortcut_label(Some("⌘T"))
                 .into_item()];
+            let origin = ctx
+                .element_position_by_id(NEW_TAB_BUTTON_POSITION_ID)
+                .map(|rect| vec2f(rect.min_x(), rect.max_y() + 2.0));
             self.new_session_menu.update(ctx, |menu, view_ctx| {
                 menu.set_items(items, view_ctx);
+                menu.set_origin(origin);
             });
             ctx.focus(&self.new_session_menu);
             self.new_session_menu_open = true;

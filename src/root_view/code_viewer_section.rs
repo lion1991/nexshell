@@ -5,17 +5,17 @@
 
 use std::path::PathBuf;
 
-use crate::file_panel_view_helpers::{code_viewer_tab_id, code_viewer_tab_label, file_panel_message};
+use crate::file_panel_view_helpers::{
+    code_viewer_tab_id, code_viewer_tab_label, file_panel_message,
+};
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionKind, TerminalSessionTab};
-use nexshell::remote_edit_io::{
-    self, RemoteMeta, RemoteReadOutcome, RemoteSaveOutcome,
-};
+use nexshell::code_editor::{CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
+use nexshell::remote_edit_io::{self, RemoteMeta, RemoteReadOutcome, RemoteSaveOutcome};
 use nexshell::ssh_session::SshHandle;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 use nexshell::text_editor::InteractionState;
-use nexshell::code_editor::{CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
 use warp_editor::content::buffer::InitialBufferState;
 use warp_editor::render::element::VerticalExpansionBehavior;
 use warpui::elements::{
@@ -363,7 +363,9 @@ impl RootView {
             .terminal_tabs
             .iter()
             .find(|t| t.id == tab_id)
-            .map_or(false, |t| t.code_viewer_path.as_deref() == Some(path.as_str()));
+            .map_or(false, |t| {
+                t.code_viewer_path.as_deref() == Some(path.as_str())
+            });
         if !still_same {
             // tab 已换文件/已关：本次结果作废。不动 pending——它属于当前占用者，由其生命周期管理。
             return;
@@ -539,8 +541,13 @@ impl RootView {
             rust_i18n::t!("code_viewer_unsaved_message", name = name.as_str()).to_string(),
             vec![
                 ModalButton::for_view(rust_i18n::t!("code_viewer_unsaved_save"), {
-                    let (tab_id, content, path, handle, meta) =
-                        (tab_id.clone(), content.clone(), path.clone(), handle.clone(), meta);
+                    let (tab_id, content, path, handle, meta) = (
+                        tab_id.clone(),
+                        content.clone(),
+                        path.clone(),
+                        handle.clone(),
+                        meta,
+                    );
                     move |view: &mut Self, ctx: &mut ViewContext<Self>| {
                         if let Some(idx) = view.terminal_tabs.iter().position(|t| t.id == tab_id) {
                             // 先存当前内容（本地同步 / 远程异步），成功后换进新文件。
@@ -558,8 +565,13 @@ impl RootView {
                     }
                 }),
                 ModalButton::for_view(rust_i18n::t!("code_viewer_unsaved_discard"), {
-                    let (tab_id, content, path, handle, meta) =
-                        (tab_id.clone(), content.clone(), path.clone(), handle.clone(), meta);
+                    let (tab_id, content, path, handle, meta) = (
+                        tab_id.clone(),
+                        content.clone(),
+                        path.clone(),
+                        handle.clone(),
+                        meta,
+                    );
                     move |view: &mut Self, ctx: &mut ViewContext<Self>| {
                         if let Some(idx) = view.terminal_tabs.iter().position(|t| t.id == tab_id) {
                             view.apply_code_viewer_reuse(
@@ -712,7 +724,13 @@ impl RootView {
         self.terminal_tabs
             .iter()
             .enumerate()
-            .filter(|(i, _)| if close_right { *i > anchor_idx } else { *i != anchor_idx })
+            .filter(|(i, _)| {
+                if close_right {
+                    *i > anchor_idx
+                } else {
+                    *i != anchor_idx
+                }
+            })
             .map(|(_, t)| t.id.clone())
             .collect()
     }
@@ -776,7 +794,10 @@ impl RootView {
 
     /// 渲染只读代码查看器主体（不含侧栏）。侧栏由 render_active_tab_body_with_side_panels 包裹，
     /// 与 GitDiff 同属「内容 + 可选文件/git 侧栏」类，故打开文件后文件面板按钮仍可用。
-    pub(in crate::root_view) fn render_code_viewer_page(&self, _app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_code_viewer_page(
+        &self,
+        _app: &AppContext,
+    ) -> Box<dyn Element> {
         let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
         let Some(tab) = self.terminal_tabs.get(self.active_tab_index) else {
             return file_panel_message(
@@ -789,9 +810,7 @@ impl RootView {
         let header = Container::new(
             Clipped::new(
                 Text::new_inline(
-                    tab.code_viewer_path
-                        .clone()
-                        .unwrap_or_else(|| tab.label()),
+                    tab.code_viewer_path.clone().unwrap_or_else(|| tab.label()),
                     self.monospace_font,
                     11.0,
                 )

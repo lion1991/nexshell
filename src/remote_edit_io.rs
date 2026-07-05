@@ -58,20 +58,24 @@ pub fn spawn_remote_read(
                 }
             };
             runtime.block_on(async {
-                let outcome =
-                    match tokio::time::timeout(SFTP_IO_TIMEOUT, remote_read(&handle, &path, max_bytes))
-                        .await
-                    {
-                        Ok(outcome) => outcome,
-                        Err(_) => RemoteReadOutcome::Error(
-                            "读取超时（远端无响应，可能已断开）".to_string(),
-                        ),
-                    };
+                let outcome = match tokio::time::timeout(
+                    SFTP_IO_TIMEOUT,
+                    remote_read(&handle, &path, max_bytes),
+                )
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        RemoteReadOutcome::Error("读取超时（远端无响应，可能已断开）".to_string())
+                    }
+                };
                 let _ = tx.send(outcome).await;
             });
         })
     {
-        let _ = err_tx.try_send(RemoteReadOutcome::Error(format!("spawn read thread: {error}")));
+        let _ = err_tx.try_send(RemoteReadOutcome::Error(format!(
+            "spawn read thread: {error}"
+        )));
     }
     rx
 }
@@ -138,7 +142,9 @@ pub fn spawn_remote_save(
             });
         })
     {
-        let _ = err_tx.try_send(RemoteSaveOutcome::Error(format!("spawn save thread: {error}")));
+        let _ = err_tx.try_send(RemoteSaveOutcome::Error(format!(
+            "spawn save thread: {error}"
+        )));
     }
     rx
 }

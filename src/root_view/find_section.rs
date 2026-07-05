@@ -5,12 +5,14 @@
 // 分发；render_find_bar 由 mod.rs impl View::render 调用——均用 pub(in crate::root_view)。
 // 仅本文件内调用的 handle_find_editor_event 保持私有。find_match_label 已于 step 10 归 terminal_view_helpers。
 
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, neutral_3, neutral_4};
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DropShadow,
-    Fill, Flex, Hoverable, Icon, ParentElement, Radius, Shrinkable, Text,
+    Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    DropShadow, Fill, Flex, Hoverable, Icon, ParentElement, Radius, Shrinkable, Text,
 };
 use warpui::{Element, ViewContext};
 
@@ -20,7 +22,9 @@ use crate::{RootView, ICON_PATH_ARROW_DOWN, ICON_PATH_ARROW_UP, ICON_PATH_CLOSE}
 
 impl RootView {
     // warp: view_components/find.rs:153-191
-    pub(crate) fn create_find_editor(ctx: &mut ViewContext<Self>) -> warpui::ViewHandle<EditorView> {
+    pub(crate) fn create_find_editor(
+        ctx: &mut ViewContext<Self>,
+    ) -> warpui::ViewHandle<EditorView> {
         let editor = ctx.add_typed_action_view(|ctx| {
             let options = SingleLineEditorOptions {
                 text: TextOptions {
@@ -107,7 +111,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_find_step(&mut self, step: i32, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_find_step(
+        &mut self,
+        step: i32,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Ok(rt) = self.terminal.lock() {
             rt.step_find(step);
         }
@@ -144,8 +152,7 @@ impl RootView {
         let query_editor = Shrinkable::new(
             1.,
             ConstrainedBox::new(
-                Clipped::new(warpui::elements::ChildView::new(&self.find_editor).finish())
-                    .finish(),
+                Clipped::new(warpui::elements::ChildView::new(&self.find_editor).finish()).finish(),
             )
             .with_height(editor_height)
             .finish(),
@@ -292,10 +299,14 @@ impl RootView {
 
         // warp: find.rs:669-684
         let find_bar = Container::new(
-            ConstrainedBox::new(Container::new(find_row).with_background_color(bar_bg).finish())
-                .with_height(editor_height + (2.0 * editor_padding) + (2.0 * find_bar_padding))
-                .with_width(find_bar_width)
-                .finish(),
+            ConstrainedBox::new(
+                Container::new(find_row)
+                    .with_background_color(bar_bg)
+                    .finish(),
+            )
+            .with_height(editor_height + (2.0 * editor_padding) + (2.0 * find_bar_padding))
+            .with_width(find_bar_width)
+            .finish(),
         )
         .with_uniform_padding(find_bar_padding)
         .with_background_color(bar_bg)

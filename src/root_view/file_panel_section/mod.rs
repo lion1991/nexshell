@@ -25,8 +25,8 @@ use nexshell::file_panel::{
     apply_local_file_panel_event, spawn_local_file_worker, FilePanelWorkerHandle, SftpRequest,
 };
 use warpui::elements::{
-    Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragAxis, Draggable, Empty,
-    Expanded, Fill, Flex, Hoverable, MainAxisSize, ParentElement, Radius, Text,
+    Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragAxis, Draggable,
+    Empty, Expanded, Fill, Flex, Hoverable, MainAxisSize, ParentElement, Radius, Text,
 };
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::ui_components::text_input::TextInput;
@@ -94,10 +94,9 @@ impl RootView {
         }
 
         let shell = self.render_file_panel_shell(content.finish(), width, &colors);
-        let callback: nexshell::file_drop_target::DropCallback =
-            Arc::new(|ctx, paths| {
-                ctx.dispatch_typed_action(TerminalGridAction::FilePanelDropFiles(paths));
-            });
+        let callback: nexshell::file_drop_target::DropCallback = Arc::new(|ctx, paths| {
+            ctx.dispatch_typed_action(TerminalGridAction::FilePanelDropFiles(paths));
+        });
         FileDropTarget::new(shell, callback).finish()
     }
 

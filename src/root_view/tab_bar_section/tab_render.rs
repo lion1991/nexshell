@@ -36,7 +36,12 @@ use warpui::ui_components::text_input::TextInput;
 use warpui::{AppContext, Element, SingletonEntity};
 
 impl RootView {
-    pub(in crate::root_view) fn render_tab(&self, tab: &TabModel, index: usize, app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_tab(
+        &self,
+        tab: &TabModel,
+        index: usize,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
         let uc = self.ui_colors();
         let is_active = tab.active;
         let is_settings = tab.is_settings;
@@ -104,7 +109,10 @@ impl RootView {
 
         // 录制中红点：相位由 idle tick 每 500ms 翻转；不可见相位画透明占位防文字抖动。
         let recording_red = (!is_settings
-            && self.terminal_tabs.get(index).is_some_and(|t| t.is_recording()))
+            && self
+                .terminal_tabs
+                .get(index)
+                .is_some_and(|t| t.is_recording()))
         .then(|| {
             let terminal_colors = Appearance::as_ref(app).theme().terminal_colors().normal;
             ColorU::from(AnsiColorIdentifier::Red.to_ansi_color(&terminal_colors))

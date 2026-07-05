@@ -17,20 +17,18 @@ use warpui::{
 
 use crate::terminal_grid_element::TerminalGridAction;
 
-use warp_core::ui::appearance::Appearance;
 use nexshell::text_editor::EditorView;
+use warp_core::ui::appearance::Appearance;
 
-use nexshell::host_management::{
-    HostManagementState, HostViewMode, RecentHostSnapshot,
-};
+use nexshell::host_management::{HostManagementState, HostViewMode, RecentHostSnapshot};
 use nexshell::host_overview_fleet::HostOverviewFleet;
 use nexshell::ssh_key_store::SshKeyRecord;
 
 use constants::*;
 use group_nav::{render_group_nav, GroupNavStates};
 use host_card::{render_host_card, render_host_list_row, render_list_header, HostCardStates};
-use search_bar::{render_search_bar, SearchBarStates};
 use key_manager_view::{render_key_manager_view, KeyManagerStates};
+use search_bar::{render_search_bar, SearchBarStates};
 use selection_bar::{render_reorder_bar, render_selection_bar, SelectionBarStates};
 use status_view::render_status_view;
 

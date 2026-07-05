@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use warp_core::ui::appearance::Appearance;
 use warpui::color::ColorU;
 use warpui::elements::{
-    Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    Empty, Expanded, Flex, Hoverable, Icon, MainAxisSize, MouseState, MouseStateHandle,
-    ParentElement, Radius, Shrinkable, Stack, Text,
+    Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
+    CrossAxisAlignment, Empty, Expanded, Flex, Hoverable, Icon, MainAxisSize, MouseState,
+    MouseStateHandle, ParentElement, Radius, Shrinkable, Stack, Text,
 };
 use warpui::{fonts, AppContext, Element, SingletonEntity as _};
 
@@ -255,7 +255,8 @@ impl RootView {
         } else {
             &network.history
         };
-        let max_points = ((CHART_INNER_WIDTH / (BAR_WIDTH + BAR_MARGIN_RIGHT)).floor() as usize).max(1);
+        let max_points =
+            ((CHART_INNER_WIDTH / (BAR_WIDTH + BAR_MARGIN_RIGHT)).floor() as usize).max(1);
         let visible = &points[points.len().saturating_sub(max_points)..];
         let raw_max = visible
             .iter()
@@ -400,7 +401,10 @@ impl RootView {
         snapshot.networks.first()
     }
 
-    pub(in crate::root_view) fn render_network_list_page(&self, _app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_network_list_page(
+        &self,
+        _app: &AppContext,
+    ) -> Box<dyn Element> {
         let theme = &self.cached_warp_theme;
         let colors = HostOverviewColors::from_theme(theme);
         let active_tab = match self.terminal_tabs.get(self.active_tab_index) {

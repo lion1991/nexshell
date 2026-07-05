@@ -15,15 +15,15 @@ use warpui::ui_components::keyboard_shortcut::KeyboardShortcut;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
 use super::EditorElement;
-use warp_core::ui::appearance::Appearance;
-use crate::text_editor::ACCEPT_AUTOSUGGESTION_KEYBINDING_NAME;
 use crate::menu::{Menu, MenuItemFields};
+use crate::text_editor::ACCEPT_AUTOSUGGESTION_KEYBINDING_NAME;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::util::bindings::{
     keybinding_name_to_keystroke, reset_keybinding_to_default, set_custom_keybinding,
     KeybindingChangedEvent, KeybindingChangedNotifier,
 };
+use warp_core::ui::appearance::Appearance;
 
 /// 原 warp::terminal::input::OPEN_COMPLETIONS_KEYBINDING_NAME，本地化为常量。
 const OPEN_COMPLETIONS_KEYBINDING_NAME: &str = "input:open_completion_suggestions";

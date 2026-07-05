@@ -2,9 +2,7 @@
 //! 无 &self；按 ADR step 10（附录 B）从 main.rs 抽出。详见 docs/adr/0001-root-view-multi-file-impl.md。
 
 use crate::ui_colors::HostOverviewColors;
-use nexshell::host_overview::{
-    format_bytes_short, HostOverviewStatus, UsageMetric,
-};
+use nexshell::host_overview::{format_bytes_short, HostOverviewStatus, UsageMetric};
 use warpui::color::ColorU;
 use warpui::elements::{
     Clipped, ConstrainedBox, CrossAxisAlignment, Flex, ParentElement, Shrinkable, Text,

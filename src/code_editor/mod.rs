@@ -13,8 +13,10 @@ mod nav_bar;
 pub mod scroll;
 pub mod view;
 
-pub use view::{init as init_code_editor_view, CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
 pub use comments::{EditorCommentsModel, EditorReviewComment};
 pub(crate) use diff::DiffResult;
 pub use element::GutterHoverTarget;
 pub use nav_bar::NavBarBehavior;
+pub use view::{
+    init as init_code_editor_view, CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView,
+};

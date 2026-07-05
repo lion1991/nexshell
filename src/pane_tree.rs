@@ -372,7 +372,6 @@ impl PaneNode {
             }
         }
     }
-
 }
 
 impl FindPaneByDirection for PaneNode {
@@ -632,7 +631,6 @@ impl PaneBranch {
     fn axis(&self) -> SplitDirection {
         self.axis
     }
-
 }
 
 impl FindPaneByDirection for PaneBranch {

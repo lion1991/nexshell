@@ -50,7 +50,7 @@ fn system_cjk_font_path() -> &'static str {
         ]
     } else if cfg!(target_os = "windows") {
         &[
-            "C:\\Windows\\Fonts\\msyh.ttc",   // 微软雅黑
+            "C:\\Windows\\Fonts\\msyh.ttc", // 微软雅黑
             "C:\\Windows\\Fonts\\msyh.ttf",
             "C:\\Windows\\Fonts\\simsun.ttc", // 宋体
             "C:\\Windows\\Fonts\\simhei.ttf", // 黑体

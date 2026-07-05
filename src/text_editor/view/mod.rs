@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::text_editor::editor_support::Description;
 use anyhow::Result;
 use element::CommandXRayMouseStateHandle;
 use itertools::{Either, Itertools};
@@ -39,7 +40,6 @@ use vim::{
     vim_a_block, vim_a_paragraph, vim_a_quote, vim_a_word, vim_inner_block, vim_inner_paragraph,
     vim_inner_quote, vim_inner_word, vim_word_iterator_from_offset,
 };
-use crate::text_editor::editor_support::Description;
 use warp_core::semantic_selection::SemanticSelection;
 use warp_editor::editor::NavigationKey;
 use warp_util::path::ShellFamily;
@@ -48,8 +48,8 @@ use warpui::accessibility::{AccessibilityContent, ActionAccessibilityContent, Wa
 use warpui::actions::StandardAction;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
-    CornerRadius, CrossAxisAlignment, Flex, Hoverable, MainAxisSize,
-    MouseStateHandle, ParentElement, Radius, Shrinkable, DEFAULT_UI_LINE_HEIGHT_RATIO,
+    CornerRadius, CrossAxisAlignment, Flex, Hoverable, MainAxisSize, MouseStateHandle,
+    ParentElement, Radius, Shrinkable, DEFAULT_UI_LINE_HEIGHT_RATIO,
 };
 use warpui::fonts::{Cache as FontCache, FamilyId, Properties, Weight};
 use warpui::keymap::{EditableBinding, FixedBinding, Keystroke, PerPlatformKeystroke};
@@ -82,31 +82,33 @@ pub use {
 use self::model::{LocalSelections, Selection, UpdateBufferOption};
 use super::soft_wrap::{ClampDirection, DisplayPointAndClampDirection};
 use super::Point;
-use warp_core::ui::appearance::Appearance;
-use warp_core::channel::{Channel, ChannelState};
-use crate::text_editor::accept_autosuggestion_keybinding_view::AcceptAutosuggestionKeybinding;
-use crate::text_editor::autosuggestion_ignore_view::{AutosuggestionIgnore, AutosuggestionIgnoreEvent};
-use crate::text_editor::RangeExt;
 use crate::features::FeatureFlag;
+use crate::text_editor::accept_autosuggestion_keybinding_view::AcceptAutosuggestionKeybinding;
+use crate::text_editor::autosuggestion_ignore_view::{
+    AutosuggestionIgnore, AutosuggestionIgnoreEvent,
+};
+use crate::text_editor::flags;
 #[cfg(feature = "voice_input")]
 use crate::text_editor::settings::{AISettings, AISettingsChangedEvent};
 use crate::text_editor::settings::{
     AppEditorSettings, AppEditorSettingsChangedEvent, CursorBlink, CursorDisplayType, InputType,
     SelectionSettings,
 };
-use crate::text_editor::flags;
-use crate::util::grid::grid_cell_dimensions;
-use warp_terminal::model::BlockId;
+use crate::text_editor::vim_registers::{RegisterContent, VimRegisters};
+use crate::text_editor::RangeExt;
 use crate::themes::theme::Fill;
 use crate::ui_components::avatar::{Avatar, AvatarContent};
 use crate::util::bindings::{cmd_or_ctrl_shift, keybinding_name_to_keystroke, CustomAction};
 use crate::util::clipboard::clipboard_content_with_escaped_paths;
-use warp_core::ui::color::contrast::MinimumAllowedContrast;
-use warp_core::ui::color::ContrastingColor;
+use crate::util::grid::grid_cell_dimensions;
 use crate::util::merge_ranges;
 #[cfg(feature = "voice_input")]
 use crate::view_components::FeaturePopup;
-use crate::text_editor::vim_registers::{RegisterContent, VimRegisters};
+use warp_core::channel::{Channel, ChannelState};
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::color::contrast::MinimumAllowedContrast;
+use warp_core::ui::color::ContrastingColor;
+use warp_terminal::model::BlockId;
 
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_TAB_SIZE: usize = 4;
@@ -114,8 +116,6 @@ const DEFAULT_TAB_SIZE: usize = 4;
 pub const ACCEPT_AUTOSUGGESTION_KEYBINDING_NAME: &str = "editor_view:insert_autosuggestion";
 pub const VOICE_LIMIT_HIT_TOAST_TEXT: &str = "You have hit the limit for Voice requests. Your limit will be refreshed as a part of your next cycle.";
 pub const VOICE_ERROR_TOAST_TEXT: &str = "An error occurred while processing your voice input.";
-
-
 
 #[derive(Clone, Copy)]
 pub enum AutosuggestionLocation {
@@ -1530,7 +1530,7 @@ impl Default for SingleLineEditorOptions {
         Self {
             text: Default::default(),
             enter_settings: Default::default(),
-            propagate_and_no_op_vertical_navigation_keys: PropagateAndNoOpNavigationKeys::Never,
+            propagate_and_no_op_vertical_navigation_keys: PropagateAndNoOpNavigationKeys::Always,
             propagate_horizontal_navigation_keys: PropagateHorizontalNavigationKeys::Never,
             propagate_and_no_op_escape_key: PropagateAndNoOpEscapeKey::HandleFirst,
             use_settings_line_height_ratio: false,
@@ -1547,6 +1547,27 @@ impl Default for SingleLineEditorOptions {
             convert_newline_to_space: true,
             is_password: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_defaults_propagate_tab_navigation() {
+        assert!(matches!(
+            SingleLineEditorOptions::default().propagate_and_no_op_vertical_navigation_keys,
+            PropagateAndNoOpNavigationKeys::Always
+        ));
+    }
+
+    #[test]
+    fn editor_defaults_keep_tab_editable_for_multiline() {
+        assert!(matches!(
+            EditorOptions::default().propagate_and_no_op_vertical_navigation_keys,
+            PropagateAndNoOpNavigationKeys::Never
+        ));
     }
 }
 
@@ -1586,8 +1607,6 @@ impl VoiceTranscriptionOptions {
         )
     }
 }
-
-
 
 pub struct EditorView {
     view_id: EntityId,
@@ -1717,15 +1736,12 @@ pub struct EditorView {
     #[cfg(feature = "voice_input")]
     voice_new_feature_popup: ViewHandle<FeaturePopup>,
 
-
-
     /// Whether this editor should delegate handling of paste events to its parent.
     delegate_paste_handling: bool,
 
     /// Optional hook that transforms each dropped path before it is escaped and inserted into
     /// the buffer. See [`EditorOptions::drag_drop_path_transformer`].
     drag_drop_path_transformer: Option<PathTransformerFn>,
-
 
     is_password: bool,
 
@@ -2762,7 +2778,6 @@ impl EditorView {
         Self::new_internal("", options, ctx)
     }
 
-
     /// Creates an [`EditorView`] with the initial text
     /// equal to `base_text` and with behaviour specified by `options`.
     #[cfg(test)]
@@ -2846,7 +2861,6 @@ impl EditorView {
             },
         );
 
-
         Self {
             view_id: ctx.view_id(),
             editor_model,
@@ -2917,7 +2931,6 @@ impl EditorView {
             keymap_context_modifier: options.keymap_context_modifier,
         }
     }
-
 
     /// The replica ID of the collaborative buffer.
     pub fn replica_id<C: ModelAsRef>(&self, ctx: &C) -> ReplicaId {
@@ -3117,7 +3130,6 @@ impl EditorView {
         buffer.to_point(char_offset)
     }
 
-
     /// Set an autosuggestion that is rendered natively within the editor as "ghosted" text. This
     /// autosuggestion will continue to be displayed as long as the text in the editor stays the
     /// same or a user inserts a prefix of autosuggestion text.
@@ -3231,7 +3243,6 @@ impl EditorView {
 
         ctx.notify();
     }
-
 
     /// Remove a specific placeholder by prefix.
     pub fn clear_placeholder_text_with_prefix(
@@ -4552,7 +4563,6 @@ impl EditorView {
             .value()
             .to_key_code()
     }
-
 
     /// Alternate path to Self::user_insert for when Vim mode is enabled. Forwards character
     /// commands to the VimFSA for interpretation.
@@ -7186,8 +7196,6 @@ impl EditorView {
         })
     }
 
-
-
     /// Commits the currently composed text from the IME (if there is any) to properly handle one of the following:
     /// - a new selection
     /// - clicking outside of the editor
@@ -7724,7 +7732,6 @@ impl View for EditorView {
                 context.set.insert("VimNormalMode");
             }
         }
-
 
         // Allow parent views to add additional flags to the context
         if let Some(modifier) = &self.keymap_context_modifier {

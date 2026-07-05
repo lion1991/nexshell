@@ -1,11 +1,11 @@
 // host_monitor_section::overview — 概览侧栏：assembler（render_sidebar_panel）+ 通用渲染件（头部/状态/chip/键值/分隔行等）。
 // 本文件只含 impl RootView，无自由函数。
 
-use crate::terminal_grid_element::TerminalGridAction;
-use crate::ui_colors::HostOverviewColors;
 use crate::host_monitor_view_helpers::{
     format_kernel_short, format_uptime, overview_status_dot_color,
 };
+use crate::terminal_grid_element::TerminalGridAction;
+use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab, ICON_PATH_COPY, ICON_PATH_EXPAND};
 use nexshell::host_overview::{
     should_show_empty_overview_status, HostOverviewSnapshot, HostOverviewStatus,

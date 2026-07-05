@@ -1629,7 +1629,10 @@ index 1111111..2222222 100644
             .iter()
             .flat_map(|h| h.lines.iter().map(|l| l.text.as_str()))
             .collect();
-        assert!(texts.iter().any(|t| t.contains("STAR")), "应含目标文件的改动");
+        assert!(
+            texts.iter().any(|t| t.contains("STAR")),
+            "应含目标文件的改动"
+        );
         assert!(
             !texts.iter().any(|t| t.contains("ONE")),
             "同前缀的 g1.txt 改动不该混进来"

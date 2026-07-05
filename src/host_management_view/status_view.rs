@@ -12,9 +12,7 @@ use warpui::{
 };
 
 use nexshell::host_management::HostCardSnapshot;
-use nexshell::host_overview::{
-    HostOverviewSnapshot, HostOverviewStatus, HostOverviewUiState,
-};
+use nexshell::host_overview::{HostOverviewSnapshot, HostOverviewStatus, HostOverviewUiState};
 use nexshell::host_overview_fleet::HostOverviewFleet;
 
 use crate::host_management_view::constants::*;
@@ -153,10 +151,7 @@ fn render_status_card(
             .as_ref()
             .and_then(|s| s.memory.as_ref())
             .map(|m| m.percent);
-        let load = snapshot
-            .as_ref()
-            .and_then(|s| s.load_average)
-            .map(|l| l[0]);
+        let load = snapshot.as_ref().and_then(|s| s.load_average).map(|l| l[0]);
         let (up, down) = snapshot
             .as_ref()
             .and_then(|s| s.network.as_ref())

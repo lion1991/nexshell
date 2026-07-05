@@ -19,6 +19,7 @@ use crate::ui_settings::{
 };
 use crate::{warp_dropdown_view, AppPage, RootView};
 use nexshell::terminal_runtime::TerminalPalette;
+use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::appearance::Appearance;
 use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
 
@@ -80,8 +81,12 @@ impl RootView {
                     .with_on_select_action(TerminalGridAction::SettingsMenuViewLogs)
                     .into_item(),
             ];
+            let origin = ctx
+                .element_position_by_id(crate::SETTINGS_BUTTON_POSITION_ID)
+                .map(|rect| vec2f(rect.max_x(), rect.max_y() + 2.0));
             self.settings_menu.update(ctx, |menu, view_ctx| {
                 menu.set_items(items, view_ctx);
+                menu.set_origin(origin);
             });
             ctx.focus(&self.settings_menu);
             self.settings_menu_open = true;

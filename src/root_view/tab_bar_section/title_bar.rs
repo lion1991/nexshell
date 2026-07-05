@@ -37,7 +37,11 @@ impl RootView {
         warpui::elements::ChildView::new(&self.settings_menu).finish()
     }
 
-    pub(in crate::root_view) fn render_title_bar(&self, tabs: &[TabModel], app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_title_bar(
+        &self,
+        tabs: &[TabModel],
+        app: &AppContext,
+    ) -> Box<dyn Element> {
         let bar_contents = ConstrainedBox::new(
             // warp/app/src/workspace/view.rs:17539-17549:
             // whole tab bar is a drop target after the last tab.

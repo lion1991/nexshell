@@ -74,7 +74,10 @@ pub struct Description {
 impl Description {
     pub fn a11y_text(&self) -> String {
         match &self.description_text {
-            Some(text) => format!("Command inspector triggered for {}, {}", self.token.item, text),
+            Some(text) => format!(
+                "Command inspector triggered for {}, {}",
+                self.token.item, text
+            ),
             None => format!("Command inspector triggered for {}", self.token.item),
         }
     }

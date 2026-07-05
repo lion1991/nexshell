@@ -1,20 +1,20 @@
 // host_monitor_section::system — 系统信息 + 磁盘概览 + 系统信息整页。
 // 本文件只含 impl RootView，无自由函数。
 
-use crate::terminal_grid_element::TerminalGridAction;
-use crate::ui_colors::HostOverviewColors;
 use crate::host_monitor_view_helpers::{
     format_uptime, format_usage_metric, usage_fill_color, OVERVIEW_CONTENT_WIDTH,
 };
+use crate::terminal_grid_element::TerminalGridAction;
+use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab};
 use nexshell::host_overview::{
     format_bytes_short, DiskMetric, HostOverviewSnapshot, HostOverviewStatus,
 };
 use warpui::color::ColorU;
 use warpui::elements::{
-    Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    Empty, Expanded, Fill, Flex, MainAxisSize, ParentElement, Radius, ScrollbarWidth, Shrinkable,
-    Stack, Text,
+    Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
+    CrossAxisAlignment, Empty, Expanded, Fill, Flex, MainAxisSize, ParentElement, Radius,
+    ScrollbarWidth, Shrinkable, Stack, Text,
 };
 use warpui::{fonts, AppContext, Element};
 
@@ -164,11 +164,7 @@ impl RootView {
             Flex::column()
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .with_child(label_row.finish())
-                .with_child(
-                    Container::new(bar.finish())
-                        .with_padding_top(4.0)
-                        .finish(),
-                )
+                .with_child(Container::new(bar.finish()).with_padding_top(4.0).finish())
                 .finish(),
         )
         .with_padding_bottom(9.0)
@@ -336,11 +332,7 @@ impl RootView {
             bar.add_child(
                 ConstrainedBox::new(
                     Container::new(Empty::new().finish())
-                        .with_background_color(usage_fill_color(
-                            percent,
-                            colors.cpu_accent,
-                            colors,
-                        ))
+                        .with_background_color(usage_fill_color(percent, colors.cpu_accent, colors))
                         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(1.5)))
                         .finish(),
                 )
@@ -354,18 +346,17 @@ impl RootView {
             Flex::column()
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .with_child(row.finish())
-                .with_child(
-                    Container::new(bar.finish())
-                        .with_padding_top(3.0)
-                        .finish(),
-                )
+                .with_child(Container::new(bar.finish()).with_padding_top(3.0).finish())
                 .finish(),
         )
         .with_padding_bottom(7.0)
         .finish()
     }
 
-    pub(in crate::root_view) fn render_system_info_page(&self, _app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_system_info_page(
+        &self,
+        _app: &AppContext,
+    ) -> Box<dyn Element> {
         let theme = &self.cached_warp_theme;
         let colors = HostOverviewColors::from_theme(theme);
         let active_tab = match self.terminal_tabs.get(self.active_tab_index) {

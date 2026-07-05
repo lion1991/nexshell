@@ -41,17 +41,17 @@ use super::{
     DrawableSelection, EditorAction, LocalDrawableSelectionData, ReplicaId, ScrollState,
     SelectAction,
 };
-use warp_core::ui::appearance::Appearance;
 use crate::text_editor::accept_autosuggestion_keybinding_view::{
     AcceptAutosuggestionKeybinding, AUTOSUGGESTION_HINT_MINIMUM_HEIGHT,
 };
 use crate::text_editor::autosuggestion_ignore_view::AutosuggestionIgnore;
 use crate::text_editor::position_id_for_first_cursor;
-use crate::text_editor::view::AutosuggestionLocation;
 use crate::text_editor::settings::CursorDisplayType;
+use crate::text_editor::view::AutosuggestionLocation;
 use crate::themes::theme::Fill;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
+use warp_core::ui::appearance::Appearance;
 
 // Similar to the terminal::model::ansi::CursorShape, this Editor Element has different cursor
 // shapes. However, this element doesn't implement all the same variants, so we don't share that

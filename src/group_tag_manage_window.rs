@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::{
     elements::{
         Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,

@@ -12,7 +12,15 @@ use serde::{Deserialize, Serialize};
 
 /// FG 颜色可自动调整以与 BG 对比时的策略。显式定义遮蔽 font::* 里宏生成的同名 marker。
 #[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
     settings_value::SettingsValue,
 )]
 #[schemars(

@@ -46,19 +46,19 @@ use warpui::elements::{
     Border, ChildView, Dismiss, Fill, Flex, Margin, MouseStateHandle, NewScrollable,
     OffsetPositioning, Padding, ParentElement, ScrollStateHandle, Shrinkable, Stack,
 };
-use warpui::ui_components::checkbox::HOVER_BACKGROUND_COLOR;
 use warpui::event::ModifiersState;
 use warpui::keymap::Keystroke;
 use warpui::platform::Cursor;
 use warpui::prelude::RectF;
 use warpui::text::point::Point;
+use warpui::ui_components::checkbox::HOVER_BACKGROUND_COLOR;
 use warpui::units::Pixels;
 use warpui::{
     AppContext, BlurContext, CursorInfo, Element, Entity, FocusContext, ModelHandle,
     SingletonEntity, View, ViewContext, ViewHandle, WeakViewHandle, WindowId,
 };
 
-use warp_core::ui::appearance::Appearance;
+use crate::code_editor::comment_types::CommentId;
 use crate::code_editor::comments::PendingComment;
 use crate::code_editor::diff::DiffStatus;
 use crate::code_editor::element::{
@@ -73,14 +73,14 @@ use crate::code_editor::model::{
 };
 use crate::code_editor::nav_bar::{NavBar, NavBarBehavior, NavBarEvent};
 use crate::code_editor::scroll::{ScrollPosition, ScrollTrigger, ScrollWheelBehavior};
-use crate::code_editor::comment_types::CommentId;
 use crate::code_editor::{DiffResult, EditorReviewComment};
-use crate::text_editor::InteractionState;
 use crate::features::FeatureFlag;
 use crate::text_editor::settings::{
     derived_notebook_font_size, AppEditorSettings, CodeEditorLineNumberMode, FontSettings,
 };
+use crate::text_editor::InteractionState;
 use crate::view_components::find::FindDirection;
+use warp_core::ui::appearance::Appearance;
 
 /// find_references 卡片显隐委托（本地 stub，code_viewer 无 LSP 故恒 false）。
 pub trait ShowFindReferencesCardProvider: std::fmt::Debug + 'static {
@@ -1411,7 +1411,6 @@ impl CodeEditorView {
         });
     }
 
-
     fn reset_for_editing_change(&mut self) {
         self.display_states.display_state.reset_cursor_blink_timer();
     }
@@ -1999,7 +1998,6 @@ impl CodeEditorView {
             vim_model.keypress(keystroke, ctx);
         });
     }
-
 }
 
 impl Entity for CodeEditorView {

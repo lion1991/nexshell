@@ -24,8 +24,8 @@ use nexshell::sftp_ops::EntryKind;
 use warpui::elements::{
     Align, Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, DispatchEventResult, Empty, EventHandler, Expanded, Fill, Flex, Hoverable,
-    Icon, MainAxisSize, MouseState, ParentElement, Radius, SavePosition, ScrollbarWidth, Shrinkable,
-    Text,
+    Icon, MainAxisSize, MouseState, ParentElement, Radius, SavePosition, ScrollbarWidth,
+    Shrinkable, Text,
 };
 use warpui::fonts;
 use warpui::Element;
@@ -325,7 +325,14 @@ impl RootView {
             if !mouse.is_hovered() {
                 return base;
             }
-            file_panel_name_tooltip(base, &name_pos_id, name.clone(), font, tooltip_bg, tooltip_text)
+            file_panel_name_tooltip(
+                base,
+                &name_pos_id,
+                name.clone(),
+                font,
+                tooltip_bg,
+                tooltip_text,
+            )
         };
 
         if is_error {
@@ -649,7 +656,14 @@ impl RootView {
             if !mouse.is_hovered() {
                 return base;
             }
-            file_panel_name_tooltip(base, &name_pos_id, name.clone(), font, tooltip_bg, tooltip_text)
+            file_panel_name_tooltip(
+                base,
+                &name_pos_id,
+                name.clone(),
+                font,
+                tooltip_bg,
+                tooltip_text,
+            )
         };
 
         let name_for_click = entry.name.clone();
@@ -679,10 +693,7 @@ impl RootView {
             });
         } else {
             // 远程文件双击 → 内置编辑器（ADR 0005）；二进制/超大由 handler 提示下载。
-            let full_path = nexshell::file_panel::join_path(
-                &tab.file_panel_state.cwd,
-                &entry.name,
-            );
+            let full_path = nexshell::file_panel::join_path(&tab.file_panel_state.cwd, &entry.name);
             hover = hover.on_double_click(move |ctx, _, _| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelOpenInCodeViewer {
                     path: full_path.clone(),

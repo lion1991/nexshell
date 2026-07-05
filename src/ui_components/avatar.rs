@@ -49,7 +49,10 @@ impl UiComponent for Avatar {
     fn build(self) -> Container {
         let styles = self.styles;
         let inner_element = match self.content {
-            AvatarContent::Image { url: _, display_name } => {
+            AvatarContent::Image {
+                url: _,
+                display_name,
+            } => {
                 // 解耦：协作者头像走 asset_cache+reqwest 网络拉取已砍，直接显示首字母。
                 Self::first_initial(&display_name, self.styles)
             }

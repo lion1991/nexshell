@@ -11,7 +11,9 @@ use warpui::text::point::Point;
 use warpui::{AppContext, Entity, ModelContext, ModelHandle};
 
 use super::buffer::{self, Anchor, Buffer, Edit, StylizedChar, ToCharOffset, ToPoint};
-use crate::text_editor::soft_wrap::{self, DisplayPointAndClampDirection, SoftWrapPoint, SoftWrapState};
+use crate::text_editor::soft_wrap::{
+    self, DisplayPointAndClampDirection, SoftWrapPoint, SoftWrapState,
+};
 
 #[derive(Copy, Clone)]
 pub enum Bias {

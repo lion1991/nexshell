@@ -22,18 +22,18 @@ use warpui::{
     ViewHandle,
 };
 
-use warp_core::ui::appearance::Appearance;
+use crate::features::FeatureFlag;
+use crate::text_editor::settings::AppEditorSettings;
 use crate::text_editor::{
     EditorView, Event as EditorEvent, InteractionState, PropagateAndNoOpNavigationKeys,
     SingleLineEditorOptions, TextOptions,
 };
-use crate::features::FeatureFlag;
-use crate::text_editor::settings::AppEditorSettings;
 use crate::themes::theme::Fill;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
 use crate::view_components::action_button::{ActionButton, DisabledSecondaryTheme, SecondaryTheme};
 use crate::view_components::find::FindDirection;
+use warp_core::ui::appearance::Appearance;
 
 pub const FIND_BAR_WIDTH: f32 = 500.;
 const ICON_PADDING: f32 = 4.;

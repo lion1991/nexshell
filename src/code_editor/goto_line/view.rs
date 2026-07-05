@@ -9,12 +9,12 @@ use warpui::{
     ViewHandle,
 };
 
-use warp_core::ui::appearance::Appearance;
 use crate::code_editor::find::view::{FIND_BAR_PADDING, FIND_EDITOR_BORDER_RADIUS};
 use crate::text_editor::{
     EditorView, Event as EditorEvent, InteractionState, PropagateAndNoOpNavigationKeys,
     SingleLineEditorOptions, TextOptions,
 };
+use warp_core::ui::appearance::Appearance;
 
 const GOTO_LINE_WIDTH: f32 = 300.;
 const GOTO_LINE_LABEL_FONT_SIZE: f32 = 12.;

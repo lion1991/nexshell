@@ -4,15 +4,17 @@
 // create_*_editor（含密钥 name/passphrase）/ handle_host_*_editor_event 由 RootView::new() 调用（pub(crate)）。
 
 use crate::RootView;
-use nexshell::host_management::{
-    default_database_path, upsert_host_card_in_db_path,
+use nexshell::host_management::{default_database_path, upsert_host_card_in_db_path};
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
 };
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::{SingletonEntity as _, ViewContext};
 
 impl RootView {
-    pub(crate) fn create_host_search_editor(ctx: &mut ViewContext<Self>) -> warpui::ViewHandle<EditorView> {
+    pub(crate) fn create_host_search_editor(
+        ctx: &mut ViewContext<Self>,
+    ) -> warpui::ViewHandle<EditorView> {
         ctx.add_typed_action_view(|ctx| {
             let font_size = Appearance::as_ref(ctx).ui_font_size();
             let options = SingleLineEditorOptions {
@@ -28,7 +30,9 @@ impl RootView {
         })
     }
 
-    pub(crate) fn create_host_rename_editor(ctx: &mut ViewContext<Self>) -> warpui::ViewHandle<EditorView> {
+    pub(crate) fn create_host_rename_editor(
+        ctx: &mut ViewContext<Self>,
+    ) -> warpui::ViewHandle<EditorView> {
         let editor = ctx.add_typed_action_view(|ctx| {
             let font_size = Appearance::as_ref(ctx).ui_font_size();
             let options = SingleLineEditorOptions {

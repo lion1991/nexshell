@@ -364,7 +364,8 @@ fn render_theme_chooser_card(
 
     EventHandler::new(
         Hoverable::new(mouse_state, move |mouse| {
-            let preview = nexshell::themes::theme::render_preview(&card_theme, monospace_font, None);
+            let preview =
+                nexshell::themes::theme::render_preview(&card_theme, monospace_font, None);
 
             let name = Text::new_inline(label.clone(), ui_font, THEME_NAME_FONT_SIZE)
                 .with_color(text_color)

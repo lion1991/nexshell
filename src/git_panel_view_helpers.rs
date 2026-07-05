@@ -554,13 +554,11 @@ mod tests {
     #[test]
     fn git_commit_decoration_label_hides_remote_branch_name() {
         assert_eq!(
-            git_commit_decoration_badge("HEAD -> windows-native-shell")
-                .map(|badge| badge.label),
+            git_commit_decoration_badge("HEAD -> windows-native-shell").map(|badge| badge.label),
             Some("windows-native-shell".to_string())
         );
         assert_eq!(
-            git_commit_decoration_badge("origin/windows-native-shell")
-                .map(|badge| badge.label),
+            git_commit_decoration_badge("origin/windows-native-shell").map(|badge| badge.label),
             Some(String::new())
         );
     }

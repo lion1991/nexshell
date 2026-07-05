@@ -186,7 +186,9 @@ fn render_key_list_panel(
                 col.add_child(divider(hc));
             }
             let selected = selected_key_id == Some(key.id.as_str());
-            col.add_child(render_key_row(key, *usage, index, selected, states, ui_font, hc));
+            col.add_child(render_key_row(
+                key, *usage, index, selected, states, ui_font, hc,
+            ));
         }
         Container::new(col.finish())
             .with_background_color(hc.card_bg)
@@ -275,7 +277,11 @@ fn render_key_row(
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_child(Expanded::new(1.0, info).finish())
             .with_child(spacer_h(8.0))
-            .with_child(icon_box(ICON_CHEVRON_RIGHT, hc.text_secondary, ICON_SIZE_SM))
+            .with_child(icon_box(
+                ICON_CHEVRON_RIGHT,
+                hc.text_secondary,
+                ICON_SIZE_SM,
+            ))
             .finish();
 
         Container::new(row)
@@ -364,7 +370,12 @@ fn render_detail_empty(ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn E
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(icon_box(ICON_KEY, hc.text_secondary, 40.0))
                 .with_child(spacer_v(18.0))
-                .with_child(bold("选择密钥".to_string(), ui_font, 20.0, hc.text_secondary))
+                .with_child(bold(
+                    "选择密钥".to_string(),
+                    ui_font,
+                    20.0,
+                    hc.text_secondary,
+                ))
                 .with_child(spacer_v(8.0))
                 .with_child(
                     Text::new_inline(
@@ -524,7 +535,12 @@ fn info_row(
 }
 
 fn section_title(title: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn Element> {
-    bold(title.to_string(), ui_font, UI_FONT_SIZE + 3.0, hc.text_primary)
+    bold(
+        title.to_string(),
+        ui_font,
+        UI_FONT_SIZE + 3.0,
+        hc.text_primary,
+    )
 }
 
 // 复制公钥到服务器卡：默认折叠成可点击入口；点击复制 echo >> authorized_keys 命令到

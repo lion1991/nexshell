@@ -17,9 +17,7 @@ use warpui::elements::Expanded;
 use warpui::ui_components::components::{UiComponent, UiComponentStyles};
 use warpui::ui_components::text_input::TextInput;
 
-use nexshell::host_management::{
-    HostCardSnapshot, HostSystemIcon, HostViewMode,
-};
+use nexshell::host_management::{HostCardSnapshot, HostSystemIcon, HostViewMode};
 
 pub struct HostCardStates {
     pub card_states: Vec<MouseStateHandle>,

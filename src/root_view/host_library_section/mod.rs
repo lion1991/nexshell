@@ -24,7 +24,10 @@ mod operations;
 mod transfer;
 
 impl RootView {
-    pub(in crate::root_view) fn render_host_management_page(&self, app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_host_management_page(
+        &self,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
         let mut view_states = self.host_view_states.borrow_mut();
         let hc = HostUiColors::from_theme(&self.cached_warp_theme);
         let panel = render_host_management_panel(
@@ -42,7 +45,8 @@ impl RootView {
             self.host_selected_key_public.as_deref(),
             self.host_state.copy_cmd_expanded,
             self.host_key_edit_target.is_some()
-                && self.host_key_edit_target.as_deref() == self.host_state.selected_key_id.as_deref(),
+                && self.host_key_edit_target.as_deref()
+                    == self.host_state.selected_key_id.as_deref(),
             self.host_state.key_delete_confirming,
             &self.host_key_name_editor,
             &self.host_key_passphrase_editor,

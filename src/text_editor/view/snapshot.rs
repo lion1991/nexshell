@@ -6,13 +6,13 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::text_editor::editor_support::Description;
 use anyhow::Result;
 use instant::Instant;
 use parking_lot::Mutex;
 use pathfinder_geometry::vector::{vec2f, Vector2F};
 use rayon::prelude::*;
 use string_offset::ByteOffset;
-use crate::text_editor::editor_support::Description;
 use warpui::fonts::{Cache as FontCache, FamilyId, Properties};
 use warpui::platform::LineStyle;
 use warpui::text::point::Point;

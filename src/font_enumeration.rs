@@ -305,14 +305,10 @@ pub(crate) fn load_nexshell_monospace_font(
         .load_family_from_bytes(
             "Hack",
             vec![
-                include_bytes!("../assets/bundled/fonts/hack/Hack-Italic.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/hack/Hack-Bold.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/hack/Hack-Regular.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/hack/Hack-BoldItalic.ttf")
-                    .to_vec(),
+                include_bytes!("../assets/bundled/fonts/hack/Hack-Italic.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/hack/Hack-Bold.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/hack/Hack-Regular.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/hack/Hack-BoldItalic.ttf").to_vec(),
             ],
         )
         .expect("bundled Hack font")
@@ -329,22 +325,12 @@ pub(crate) fn load_nexshell_ui_font(cache: &mut fonts::Cache) -> Option<fonts::F
         .load_family_from_bytes(
             "Roboto",
             vec![
-                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Italic.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Bold.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Regular.ttf")
-                    .to_vec(),
-                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Medium.ttf")
-                    .to_vec(),
-                include_bytes!(
-                    "../assets/bundled/fonts/roboto/RobotoFlex-Semibold.ttf"
-                )
-                .to_vec(),
-                include_bytes!(
-                    "../assets/bundled/fonts/roboto/Roboto-BoldItalic.ttf"
-                )
-                .to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Italic.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Bold.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Regular.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/Roboto-Medium.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/RobotoFlex-Semibold.ttf").to_vec(),
+                include_bytes!("../assets/bundled/fonts/roboto/Roboto-BoldItalic.ttf").to_vec(),
             ],
         )
         .ok()

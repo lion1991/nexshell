@@ -1,10 +1,10 @@
 pub mod accept_autosuggestion_keybinding_view;
 pub mod autosuggestion_ignore_view;
-mod soft_wrap;
-mod view;
 pub mod editor_support;
 pub mod flags;
 pub mod settings;
+mod soft_wrap;
+mod view;
 pub mod vim_registers;
 
 use std::cmp;

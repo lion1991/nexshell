@@ -460,10 +460,7 @@ pub fn set_custom_keybinding(binding_name: &str, keystroke: &Keystroke, ctx: &mu
 
 /// 把可编辑绑定重置回默认 trigger, 发出 KeybindingChangedEvent, 返回默认 Keystroke。
 /// 注: 端口版只改内存中的 trigger, 不落盘。
-pub fn reset_keybinding_to_default(
-    binding_name: &str,
-    ctx: &mut AppContext,
-) -> Option<Keystroke> {
+pub fn reset_keybinding_to_default(binding_name: &str, ctx: &mut AppContext) -> Option<Keystroke> {
     ctx.remove_custom_trigger(binding_name);
 
     let default_keystroke = ctx

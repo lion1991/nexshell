@@ -11,9 +11,7 @@ use warpui::{
 
 use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
-use nexshell::host_management::{
-    HostGroupSnapshot, HostViewMode, RecentHostSnapshot,
-};
+use nexshell::host_management::{HostGroupSnapshot, HostViewMode, RecentHostSnapshot};
 
 pub struct GroupNavStates {
     pub group_states: Vec<MouseStateHandle>,
@@ -278,7 +276,11 @@ fn group_marker(is_all: bool, hc: &HostUiColors) -> Box<dyn Element> {
 }
 
 // 区块小标题（带顶部分隔线），如"最近访问"。
-fn render_section_title(label: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn Element> {
+fn render_section_title(
+    label: &str,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
     Container::new(
         Text::new_inline(label.to_string(), ui_font, UI_FONT_SIZE)
             .with_color(hc.text_secondary)

@@ -1361,6 +1361,53 @@ impl RootView {
         }
     }
 
+    fn page_uses_terminal_ime_cursor(
+        app_page: AppPage,
+        active_kind: Option<TerminalSessionKind>,
+    ) -> bool {
+        app_page == AppPage::Terminal
+            && matches!(
+                active_kind,
+                Some(
+                    TerminalSessionKind::Local
+                        | TerminalSessionKind::Remote
+                        | TerminalSessionKind::Serial
+                        | TerminalSessionKind::Direct
+                )
+            )
+    }
+
+    fn fallback_cursor_info(ctx: &ViewContext<Self>, font_size: f32) -> CursorInfo {
+        let window_size = ctx
+            .windows()
+            .platform_window(ctx.window_id())
+            .map(|window| window.size())
+            .unwrap_or_else(|| vec2f(0.0, 0.0));
+        let x = 24.0_f32.min((window_size.x() - font_size).max(0.0));
+        let y = (TITLE_BAR_HEIGHT + 24.0).min((window_size.y() - font_size).max(0.0));
+        CursorInfo {
+            position: pathfinder_geometry::rect::RectF::new(
+                vec2f(x, y),
+                vec2f(font_size, font_size),
+            ),
+            font_size,
+        }
+    }
+
+    fn host_management_cursor_position(
+        &self,
+        ctx: &ViewContext<Self>,
+        font_size: f32,
+    ) -> CursorInfo {
+        let cursor_id = nexshell::text_editor::position_id_for_cursor(self.host_search_editor.id());
+        ctx.element_position_by_id(cursor_id)
+            .map(|position| CursorInfo {
+                position,
+                font_size,
+            })
+            .unwrap_or_else(|| Self::fallback_cursor_info(ctx, font_size))
+    }
+
     fn apply_window_opacity(_ctx: &mut ViewContext<Self>, opacity: u8) {
         #[cfg(target_os = "macos")]
         {
@@ -1451,20 +1498,16 @@ impl View for RootView {
     }
 
     fn active_cursor_position(&self, ctx: &ViewContext<Self>) -> Option<CursorInfo> {
+        let font_size = Appearance::as_ref(ctx).ui_font_size();
         if self.app_page == AppPage::HostManagement {
-            let focused = ctx.focused_view_id(ctx.window_id());
-            if focused == Some(self.host_search_editor.id()) {
-                let cursor_id =
-                    nexshell::text_editor::position_id_for_cursor(self.host_search_editor.id());
-                let font_size = Appearance::as_ref(ctx).ui_font_size();
-                return ctx
-                    .element_position_by_id(cursor_id)
-                    .map(|position| CursorInfo {
-                        position,
-                        font_size,
-                    });
-            }
-            return None;
+            return Some(self.host_management_cursor_position(ctx, font_size));
+        }
+        let active_kind = self
+            .terminal_tabs
+            .get(self.active_tab_index)
+            .map(|tab| tab.kind);
+        if !Self::page_uses_terminal_ime_cursor(self.app_page, active_kind) {
+            return Some(Self::fallback_cursor_info(ctx, font_size));
         }
         if let Some(cursor_info) = self.live_terminal_cursor_position() {
             return Some(cursor_info);
@@ -2568,6 +2611,9 @@ impl RootView {
     }
 
     fn sync_active_terminal_after_tab_list_change(&mut self, ctx: &mut ViewContext<Self>) {
+        if let Ok(mut layout) = self.terminal_ime_layout.lock() {
+            *layout = None;
+        }
         if self.terminal_tabs.is_empty() {
             self.active_tab_index = 0;
             self.terminal = inactive_terminal_runtime();
@@ -2857,5 +2903,55 @@ impl RootView {
             open_file_editor: self.open_file_editor,
             reuse_view_tab: self.reuse_view_tab,
         });
+    }
+}
+
+#[cfg(test)]
+mod ime_tests {
+    use super::*;
+
+    #[test]
+    fn terminal_ime_cursor_is_only_used_for_terminal_grid_tabs() {
+        assert!(RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Local)
+        ));
+        assert!(RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Remote)
+        ));
+        assert!(RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Serial)
+        ));
+        assert!(RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Direct)
+        ));
+
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::Settings,
+            Some(TerminalSessionKind::Local)
+        ));
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::HostManagement,
+            Some(TerminalSessionKind::Local)
+        ));
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::ProcessList)
+        ));
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::CodeViewer)
+        ));
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Rdp)
+        ));
+        assert!(!RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            None
+        ));
     }
 }

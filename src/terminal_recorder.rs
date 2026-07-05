@@ -181,8 +181,7 @@ impl TerminalRecorder {
         };
         let end_banner = format!("===== {end_label} {ended} =====\n");
 
-        let mut out =
-            Vec::with_capacity(start_banner.len() + body.len() + end_banner.len());
+        let mut out = Vec::with_capacity(start_banner.len() + body.len() + end_banner.len());
         out.extend_from_slice(start_banner.as_bytes());
         out.append(&mut body);
         out.extend_from_slice(end_banner.as_bytes());

@@ -196,8 +196,7 @@ fn serialize_custom_theme_path<S>(path: &Path, serializer: S) -> Result<S::Ok, S
 where
     S: Serializer,
 {
-    if let Some(path) =
-        portable_custom_theme_storage_string(path, &warp_core::paths::themes_dir())
+    if let Some(path) = portable_custom_theme_storage_string(path, &warp_core::paths::themes_dir())
     {
         path.serialize(serializer)
     } else {
@@ -351,7 +350,6 @@ impl CustomTheme {
         self.path.clone()
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct WarpThemeConfig {
@@ -628,4 +626,3 @@ pub fn render_preview(
     )
     .finish()
 }
-

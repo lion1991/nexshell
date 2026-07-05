@@ -78,7 +78,9 @@ pub fn list_ssh_keys_with_usage(db_path: &Path) -> Result<Vec<(SshKeyRecord, usi
          (SELECT COUNT(*) FROM hosts h WHERE h.key_id = ssh_keys.id) AS usage
          FROM ssh_keys ORDER BY created_at DESC"
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare keys: {e}"))?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare keys: {e}"))?;
     let rows = stmt
         .query_map([], |row| {
             let record = row_to_record(row)?;
@@ -93,7 +95,9 @@ pub fn list_ssh_keys_with_usage(db_path: &Path) -> Result<Vec<(SshKeyRecord, usi
 pub fn get_ssh_key(db_path: &Path, id: &str) -> Result<Option<SshKeyRecord>, String> {
     let conn = open_rw(db_path)?;
     let sql = format!("SELECT {SELECT_COLS} FROM ssh_keys WHERE id = ?1");
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("prepare key: {e}"))?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("prepare key: {e}"))?;
     let mut rows = stmt
         .query_map(params![id], row_to_record)
         .map_err(|e| format!("query key: {e}"))?;
@@ -118,7 +122,10 @@ pub fn upsert_ssh_key(db_path: &Path, key: &SshKeyRecord) -> Result<(), String> 
             key.id,
             key.name.trim(),
             key.content.trim(),
-            key.passphrase.as_deref().map(str::trim).filter(|p| !p.is_empty()),
+            key.passphrase
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty()),
             key.key_type,
             key.created_at,
             key.updated_at,
@@ -131,7 +138,10 @@ pub fn upsert_ssh_key(db_path: &Path, key: &SshKeyRecord) -> Result<(), String> 
 // 删除密钥：先把引用它的主机 key_id 置空，避免悬空引用。
 pub fn delete_ssh_key(db_path: &Path, id: &str) -> Result<(), String> {
     let conn = open_rw(db_path)?;
-    let _ = conn.execute("UPDATE hosts SET key_id = NULL WHERE key_id = ?1", params![id]);
+    let _ = conn.execute(
+        "UPDATE hosts SET key_id = NULL WHERE key_id = ?1",
+        params![id],
+    );
     conn.execute("DELETE FROM ssh_keys WHERE id = ?1", params![id])
         .map_err(|e| format!("delete ssh key: {e}"))?;
     Ok(())

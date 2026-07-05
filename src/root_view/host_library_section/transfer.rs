@@ -7,8 +7,10 @@ use crate::{host_export, HostPasswordIntent, RootView, TerminalGridAction};
 use nexshell::host_management::{
     default_database_path, upsert_group_in_db, upsert_host_card_in_db_path,
 };
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::color::ColorU;
 use warpui::elements::{
     Border, Container, CornerRadius, CrossAxisAlignment, Expanded, Fill, Flex, Hoverable,

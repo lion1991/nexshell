@@ -963,7 +963,6 @@ impl CodeEditorModel {
         &self.selection_model
     }
 
-
     /// Refresh the diff nav state. When diff navigation is active we expand all diffs, so we show
     /// their removed and added lines. When diff navigation is inactive we don't show any line
     /// decorations for the diffs in the editor. The [`super::element::EditorWrapper`] may still

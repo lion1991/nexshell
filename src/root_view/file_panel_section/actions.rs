@@ -16,8 +16,10 @@ use nexshell::file_panel::{
     SftpRequest,
 };
 use nexshell::sftp_ops::EntryKind;
+use nexshell::text_editor::{
+    EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
+};
 use warp_core::ui::appearance::Appearance;
-use nexshell::text_editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use warpui::clipboard::ClipboardContent;
 use warpui::{SingletonEntity as _, ViewContext};
 
@@ -141,36 +143,33 @@ impl RootView {
             let state = &tab.file_panel_state;
             // 多选场景：右键目标已在 selected_names 集合 → 批量删整个集合；
             // 否则按单个删（与右键行为一致：未在集合内时菜单只针对那一项）
-            let batch: Vec<(String, bool)> =
-                if matches!(tab.kind, TerminalSessionKind::Local)
-                    && state.selected_names.len() > 1
-                    && state.selected_names.contains(&name)
-                {
-                    flatten_file_panel_tree(state)
-                        .into_iter()
-                        .filter(|row| state.selected_names.contains(&row.path))
-                        .map(|row| {
-                            let is_dir = row.is_dir();
-                            (row.path, is_dir)
-                        })
-                        .collect()
-                } else if state.selected_names.len() > 1
-                    && state.selected_names.contains(&name)
-                {
-                    state
-                        .entries
-                        .iter()
-                        .filter(|e| state.selected_names.contains(&e.name))
-                        .map(|e| {
-                            (
-                                join_path(&state.cwd, &e.name),
-                                matches!(e.kind, EntryKind::Dir),
-                            )
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+            let batch: Vec<(String, bool)> = if matches!(tab.kind, TerminalSessionKind::Local)
+                && state.selected_names.len() > 1
+                && state.selected_names.contains(&name)
+            {
+                flatten_file_panel_tree(state)
+                    .into_iter()
+                    .filter(|row| state.selected_names.contains(&row.path))
+                    .map(|row| {
+                        let is_dir = row.is_dir();
+                        (row.path, is_dir)
+                    })
+                    .collect()
+            } else if state.selected_names.len() > 1 && state.selected_names.contains(&name) {
+                state
+                    .entries
+                    .iter()
+                    .filter(|e| state.selected_names.contains(&e.name))
+                    .map(|e| {
+                        (
+                            join_path(&state.cwd, &e.name),
+                            matches!(e.kind, EntryKind::Dir),
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             if batch.is_empty() {
                 let path = join_path(&state.cwd, &name);
                 worker.send(SftpRequest::Delete { path, is_dir });
@@ -213,7 +212,11 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_file_panel_copy_path(&self, name: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_file_panel_copy_path(
+        &self,
+        name: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.file_panel_tab() {
             let path = if name.is_empty() {
                 tab.file_panel_state.cwd.clone()
@@ -242,7 +245,11 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_file_panel_resize_move(&mut self, current_x: f32, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_file_panel_resize_move(
+        &mut self,
+        current_x: f32,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some((anchor_x, anchor_w)) = self.file_panel_resize_anchor {
             // 面板贴右边：mouse 往左移 → 宽度变大
             let new_w = (anchor_w + (anchor_x - current_x))

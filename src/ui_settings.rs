@@ -1,8 +1,6 @@
 //! UI 持久化设置：加载/保存 ui_settings.json 与语言解析。
 
-use nexshell::git_panel::{
-    clamp_git_history_height, GIT_HISTORY_HEIGHT_DEFAULT,
-};
+use nexshell::git_panel::{clamp_git_history_height, GIT_HISTORY_HEIGHT_DEFAULT};
 use nexshell::host_management::default_database_path;
 
 use crate::external_editor::EditorChoice;

@@ -25,9 +25,7 @@ use crate::git_panel_view_helpers::{git_ssh_host_key_prompt_info, git_ssh_host_k
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use nexshell::git_ops::{GitDiffSelection, SshHostKeyPrompt};
-use nexshell::git_panel::{
-    apply_git_event, clear_stale_diff_selection, GitEvent, GitRequest,
-};
+use nexshell::git_panel::{apply_git_event, clear_stale_diff_selection, GitEvent, GitRequest};
 use warpui::elements::{
     Border, ConstrainedBox, Container, CrossAxisAlignment, DragAxis, Draggable, Empty, Expanded,
     Flex, Hoverable, MainAxisSize, ParentElement, Text,
@@ -112,8 +110,8 @@ impl RootView {
     ) {
         if let Some((anchor_x, anchor_w)) = self.git_panel_resize_anchor {
             // 面板贴右边：mouse 往左移 → 宽度变大（同 file_panel 模式）
-            let new_w = (anchor_w + (anchor_x - current_x))
-                .clamp(GIT_PANEL_WIDTH_MIN, GIT_PANEL_WIDTH_MAX);
+            let new_w =
+                (anchor_w + (anchor_x - current_x)).clamp(GIT_PANEL_WIDTH_MIN, GIT_PANEL_WIDTH_MAX);
             if (self.git_panel_width - new_w).abs() > f32::EPSILON {
                 self.git_panel_width = new_w;
                 ctx.notify();
@@ -451,7 +449,6 @@ impl RootView {
 
         Container::new(row).with_padding_bottom(8.0).finish()
     }
-
 }
 
 #[cfg(test)]

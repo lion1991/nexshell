@@ -103,7 +103,12 @@ impl RootView {
         );
     }
 
-    pub(crate) fn kill_remote_process(&mut self, pid: u32, label: String, ctx: &mut ViewContext<Self>) {
+    pub(crate) fn kill_remote_process(
+        &mut self,
+        pid: u32,
+        label: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.show_process_list_context_menu = None;
         let Some(tab) = self.terminal_tabs.get(self.active_tab_index) else {
             return;
@@ -133,7 +138,10 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_toggle_host_network_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_toggle_host_network_dropdown(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             if tab.host_overview.snapshot.networks.len() > 1 {
                 tab.host_overview.network_dropdown_open = !tab.host_overview.network_dropdown_open;
@@ -144,28 +152,44 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_select_host_network(&mut self, interface: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_select_host_network(
+        &mut self,
+        interface: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.host_overview.select_network(interface);
         }
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_sort_host_processes(&mut self, key: ProcessSortKey, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_sort_host_processes(
+        &mut self,
+        key: ProcessSortKey,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.host_overview.cycle_process_sort(key);
         }
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_sort_host_network(&mut self, key: NetworkSortKey, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_sort_host_network(
+        &mut self,
+        key: NetworkSortKey,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.host_overview.cycle_network_sort(key);
         }
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_copy_host_address(&mut self, text: &str, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_copy_host_address(
+        &mut self,
+        text: &str,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if !text.is_empty() {
             ctx.clipboard()
                 .write(ClipboardContent::plain_text(text.to_owned()));

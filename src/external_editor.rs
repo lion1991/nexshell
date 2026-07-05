@@ -237,7 +237,10 @@ mod tests {
 
     #[test]
     fn safe_arg_keeps_absolute_and_non_dash_paths() {
-        assert_eq!(safe_arg("/Users/example/notes.txt"), "/Users/example/notes.txt");
+        assert_eq!(
+            safe_arg("/Users/example/notes.txt"),
+            "/Users/example/notes.txt"
+        );
         assert_eq!(safe_arg("notes.txt"), "notes.txt");
         assert_eq!(safe_arg("./notes.txt"), "./notes.txt");
     }

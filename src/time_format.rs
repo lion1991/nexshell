@@ -117,4 +117,3 @@ fn truncated_quantity_with_unit(num: f64, unit: &str) -> String {
         format!("{truncated_int} {unit}s ago")
     }
 }
-

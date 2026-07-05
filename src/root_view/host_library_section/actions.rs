@@ -14,7 +14,11 @@ use pathfinder_geometry::rect::RectF;
 use warpui::ViewContext;
 
 impl RootView {
-    pub(in crate::root_view) fn handle_host_clipboard_copy(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_clipboard_copy(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(snap) = self.host_state.host_by_id(&host_id).cloned() {
             self.host_state.host_clipboard = Some((snap, HostClipboardOp::Copy));
             self.host_state.notice = Some(rust_i18n::t!("toast_host_copied").to_string());
@@ -22,7 +26,11 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_host_clipboard_cut(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_clipboard_cut(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(snap) = self.host_state.host_by_id(&host_id).cloned() {
             self.host_state.host_clipboard = Some((snap, HostClipboardOp::Cut));
             self.host_state.notice = Some(rust_i18n::t!("toast_host_cut").to_string());
@@ -30,49 +38,85 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_host_clipboard_paste(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_clipboard_paste(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_clipboard_paste(ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_restore_deleted(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_restore_deleted(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_restore_deleted(ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_rename_inline(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_rename_inline(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.show_host_card_context_menu = None;
         self.start_host_rename(host_id, ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_quick_connect(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_quick_connect(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.connect_host(&host_id, ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_toggle_select(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_toggle_select(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.toggle_select_host(&host_id);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_select_single(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_select_single(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.select_single_host(&host_id);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_toggle_select_all(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_toggle_select_all(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.toggle_select_all_filtered();
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_select_group(&mut self, group_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_select_group(
+        &mut self,
+        group_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.select_group(&group_id);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_toggle_tag(&mut self, tag: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_toggle_tag(
+        &mut self,
+        tag: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.toggle_tag(&tag);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_toggle_protocol_dropdown(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_toggle_protocol_dropdown(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         let mut view_states = self.host_view_states.borrow_mut();
         view_states.search_bar.protocol_dropdown_open =
             !view_states.search_bar.protocol_dropdown_open;
@@ -92,7 +136,11 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_set_view_mode(&mut self, mode: HostViewMode, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_set_view_mode(
+        &mut self,
+        mode: HostViewMode,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.set_view_mode(mode);
         // 切换视图复位密钥页瞬时态，避免再回来停在确认 / 展开 / 编辑态
         self.host_state.copy_cmd_expanded = false;
@@ -132,11 +180,8 @@ impl RootView {
 
     /// 重新从库加载密钥列表（含关联主机数）到缓存。
     pub(super) fn reload_host_keys(&mut self) {
-        if let Some(db_path) = nexshell::host_management::default_database_path()
-        {
-            if let Ok(keys) =
-                nexshell::ssh_key_store::list_ssh_keys_with_usage(&db_path)
-            {
+        if let Some(db_path) = nexshell::host_management::default_database_path() {
+            if let Ok(keys) = nexshell::ssh_key_store::list_ssh_keys_with_usage(&db_path) {
                 self.host_keys = keys;
             }
         }
@@ -158,11 +203,8 @@ impl RootView {
 
     /// 记录主机访问时间并刷新最近访问缓存。
     pub(in crate::root_view) fn record_host_access(&mut self, host_id: &str) {
-        if let Some(db_path) = nexshell::host_management::default_database_path()
-        {
-            let _ = nexshell::host_management::record_host_access_in_db(
-                &db_path, host_id,
-            );
+        if let Some(db_path) = nexshell::host_management::default_database_path() {
+            let _ = nexshell::host_management::record_host_access_in_db(&db_path, host_id);
         }
         self.reload_host_recent();
     }
@@ -186,14 +228,12 @@ impl RootView {
                         .find(|g| &g.id == gid)
                         .map(|g| g.label.clone())
                 });
-                Some(
-                    nexshell::host_management::RecentHostSnapshot {
-                        host_id: hid,
-                        name: host.name.clone(),
-                        group_name,
-                        accessed_at: ts,
-                    },
-                )
+                Some(nexshell::host_management::RecentHostSnapshot {
+                    host_id: hid,
+                    name: host.name.clone(),
+                    group_name,
+                    accessed_at: ts,
+                })
             })
             .collect();
         self.host_recent = recent;
@@ -221,11 +261,8 @@ impl RootView {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "private_key".to_string());
-        let record =
-            nexshell::ssh_key_store::build_record(&name, &content, None);
-        if let Err(error) =
-            nexshell::ssh_key_store::upsert_ssh_key(&db_path, &record)
-        {
+        let record = nexshell::ssh_key_store::build_record(&name, &content, None);
+        if let Err(error) = nexshell::ssh_key_store::upsert_ssh_key(&db_path, &record) {
             self.host_state.notice = Some(format!("导入密钥失败: {error}"));
             ctx.notify();
             return;
@@ -358,7 +395,10 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_key_edit_cancel(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_key_edit_cancel(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_key_edit_target = None;
         ctx.focus_self();
         ctx.notify();
@@ -391,8 +431,7 @@ impl RootView {
     pub(in crate::root_view) fn handle_host_refresh(&mut self, ctx: &mut ViewContext<Self>) {
         match self.load_host_snapshot_from_db() {
             Ok(()) => {
-                self.host_state.notice =
-                    Some(rust_i18n::t!("toast_hosts_refreshed").to_string());
+                self.host_state.notice = Some(rust_i18n::t!("toast_hosts_refreshed").to_string());
             }
             Err(error) => {
                 self.host_state.notice = Some(
@@ -416,49 +455,75 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_host_edit_one(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_edit_one(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(card) = self.host_state.host_by_id(&host_id) {
             let draft = HostEditDraft::from_card(card);
             self.open_host_edit_window(draft, false, ctx);
         }
     }
 
-    pub(in crate::root_view) fn handle_host_delete_one(&mut self, host_id: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_delete_one(
+        &mut self,
+        host_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_delete_one(host_id);
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_delete_selected(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_delete_selected(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.delete_selected_hosts();
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_connect_selected(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_connect_selected(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(first_id) = self.host_state.selected_host_ids.iter().next().cloned() {
             self.host_state.clear_selection();
             self.connect_host(&first_id, ctx);
         }
     }
 
-    pub(in crate::root_view) fn handle_host_clear_selection(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_clear_selection(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.clear_selection();
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_enter_reorder_mode(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_enter_reorder_mode(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.reorder_mode = true;
         self.host_state.clear_selection();
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_exit_reorder_mode(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_exit_reorder_mode(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.reorder_mode = false;
         self.host_state.host_drag_in_progress = false;
         self.save_host_sort_orders();
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_start_card_drag(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_start_card_drag(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.host_state.host_drag_in_progress = true;
         ctx.notify();
     }
@@ -478,7 +543,10 @@ impl RootView {
         ctx.notify();
     }
 
-    pub(in crate::root_view) fn handle_host_manage_groups_tags(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_manage_groups_tags(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.open_group_tag_manage_window(ctx);
     }
 
@@ -495,12 +563,17 @@ impl RootView {
         self.start_host_export(ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_password_confirm(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_password_confirm(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.commit_host_password(ctx);
     }
 
-    pub(in crate::root_view) fn handle_host_password_cancel(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_host_password_cancel(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.cancel_host_password(ctx);
     }
-
 }

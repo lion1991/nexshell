@@ -141,8 +141,13 @@ impl RootView {
         }
 
         let menu_items = self.tab_right_click_menu_items(tab_index, ctx);
+        let origin = match anchor {
+            TabContextMenuAnchor::Pointer(position) => Some(position),
+            TabContextMenuAnchor::VerticalTabsKebab => None,
+        };
         self.tab_right_click_menu.update(ctx, |menu, view_ctx| {
             menu.set_items(menu_items, view_ctx);
+            menu.set_origin(origin);
         });
         self.show_tab_right_click_menu = Some((tab_index, anchor));
         self.new_session_menu_open = false;
@@ -169,6 +174,7 @@ impl RootView {
         let menu_items = self.terminal_context_menu_items(has_selection);
         self.terminal_context_menu.update(ctx, |menu, view_ctx| {
             menu.set_items(menu_items, view_ctx);
+            menu.set_origin(Some(position));
         });
         self.show_terminal_context_menu = Some(position);
         self.show_tab_right_click_menu = None;
@@ -308,6 +314,7 @@ impl RootView {
         }
         self.file_panel_context_menu.update(ctx, |menu, view_ctx| {
             menu.set_items(items, view_ctx);
+            menu.set_origin(Some(position));
         });
         self.show_file_panel_context_menu = Some(position);
         self.show_terminal_context_menu = None;
@@ -359,6 +366,7 @@ impl RootView {
         let items = git_panel_context_menu_items(&tab_id, kind, paths, discard_enabled);
         self.git_panel_context_menu.update(ctx, |menu, view_ctx| {
             menu.set_items(items, view_ctx);
+            menu.set_origin(Some(position));
         });
         self.show_git_panel_context_menu = Some(position);
         self.show_file_panel_context_menu = None;
@@ -393,6 +401,7 @@ impl RootView {
         }
         self.host_card_context_menu.update(ctx, |menu, view_ctx| {
             menu.set_items(items, view_ctx);
+            menu.set_origin(Some(position));
         });
         self.show_host_card_context_menu = Some(position);
         self.show_file_panel_context_menu = None;
@@ -510,6 +519,7 @@ impl RootView {
         self.process_list_context_menu
             .update(ctx, |menu, view_ctx| {
                 menu.set_items(items, view_ctx);
+                menu.set_origin(Some(position));
             });
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.process_list_selected_pid = Some(pid);

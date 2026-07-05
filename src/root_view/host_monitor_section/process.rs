@@ -1,9 +1,9 @@
 // host_monitor_section::process — 进程概览段 + 进程列表整页。
 // 本文件只含 impl RootView，无自由函数。
 
+use crate::host_monitor_view_helpers::overview_process_cells;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
-use crate::host_monitor_view_helpers::overview_process_cells;
 use crate::{RootView, TerminalSessionTab};
 use nexshell::host_overview::{
     format_bytes_short, HostOverviewSnapshot, HostOverviewStatus, ProcessMetric, ProcessSortKey,
@@ -287,7 +287,10 @@ impl RootView {
             .finish()
     }
 
-    pub(in crate::root_view) fn render_process_list_page(&self, _app: &AppContext) -> Box<dyn Element> {
+    pub(in crate::root_view) fn render_process_list_page(
+        &self,
+        _app: &AppContext,
+    ) -> Box<dyn Element> {
         let theme = &self.cached_warp_theme;
         let colors = HostOverviewColors::from_theme(theme);
         let active_tab = match self.terminal_tabs.get(self.active_tab_index) {

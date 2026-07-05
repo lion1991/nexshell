@@ -19,9 +19,9 @@ use warp_editor::multiline::{AnyMultilineString, MultilineStr, MultilineString, 
 use warp_editor::render::model::{Decoration, LineCount, LineDecoration};
 use warpui::{Entity, ModelContext};
 
-use warp_core::ui::appearance::Appearance;
 use crate::code_editor::line::EditorLineLocation;
 use crate::code_editor::line_iterator::LineIterator;
+use warp_core::ui::appearance::Appearance;
 
 /// 文件编辑产生的 diff（本地化自 warp/app/src/code/mod.rs）。
 #[derive(Debug, Default, Clone)]

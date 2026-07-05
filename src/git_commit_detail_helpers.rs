@@ -80,11 +80,7 @@ fn format_git_commit_authored_at_for_detail_at(
     )
 }
 
-pub(crate) fn git_commit_stat_label(
-    files_changed: u32,
-    insertions: u32,
-    deletions: u32,
-) -> String {
+pub(crate) fn git_commit_stat_label(files_changed: u32, insertions: u32, deletions: u32) -> String {
     let mut parts = vec![format!(
         "{files_changed} file{} changed",
         if files_changed == 1 { "" } else { "s" }

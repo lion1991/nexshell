@@ -900,8 +900,7 @@ async fn run_host_overview_monitor(
                         let previous = previous_probe.as_ref().map(|(previous, at)| {
                             (previous, started.saturating_duration_since(*at))
                         });
-                        let mut snapshot =
-                            snapshot_from_probe(probe.clone(), previous, latency);
+                        let mut snapshot = snapshot_from_probe(probe.clone(), previous, latency);
                         snapshot.host = host_label.clone();
                         let default_network_interface = snapshot
                             .network

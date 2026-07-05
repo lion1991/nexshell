@@ -31,7 +31,10 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_clear_visible_screen(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_clear_visible_screen(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         let preserve_prompt_prefix = self
             .terminal
             .lock()

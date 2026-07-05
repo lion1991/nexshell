@@ -63,7 +63,11 @@ impl RootView {
         self.save_ui_settings();
     }
 
-    pub(in crate::root_view) fn handle_git_commit_copy_sha(&mut self, sha: String, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_git_commit_copy_sha(
+        &mut self,
+        sha: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
         let sha = sha.trim();
         if !sha.is_empty() {
             ctx.clipboard()

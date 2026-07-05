@@ -2205,7 +2205,8 @@ mod tests {
             &mut state,
             SftpEvent::ListFailed {
                 path: "/Users/example/.Trash".to_string(),
-                message: "read_dir(/Users/example/.Trash) failed: Operation not permitted".to_string(),
+                message: "read_dir(/Users/example/.Trash) failed: Operation not permitted"
+                    .to_string(),
             },
         );
 

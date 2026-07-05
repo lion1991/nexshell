@@ -4,7 +4,9 @@
 // queue_git_push_for_tab 由 mod.rs::show_git_ssh_host_key_prompt 调用；
 // queue_git_discard_worktree_change_for_tab 由 mod.rs::confirm_git_discard_worktree_change 调用。
 
-use crate::git_panel_view_helpers::{animated_push_busy_label, git_panel_footer_kind, GitPanelFooterKind};
+use crate::git_panel_view_helpers::{
+    animated_push_busy_label, git_panel_footer_kind, GitPanelFooterKind,
+};
 use crate::host_management_view::constants::HostUiColors;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
@@ -23,7 +25,10 @@ use warpui::ui_components::text_input::TextInput;
 use warpui::{Element, ViewContext};
 
 impl RootView {
-    pub(in crate::root_view) fn handle_git_commit_editor_focus(&mut self, ctx: &mut ViewContext<Self>) {
+    pub(in crate::root_view) fn handle_git_commit_editor_focus(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
         if let Some(editor) = self
             .active_git_panel_tab_index()
             .and_then(|index| self.terminal_tabs.get(index))

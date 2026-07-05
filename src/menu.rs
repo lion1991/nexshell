@@ -24,15 +24,16 @@ use warpui::platform::Cursor;
 use warpui::text_layout::ClipConfig;
 use warpui::ui_components::components::UiComponent;
 use warpui::{
-    Action, AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, WindowId,
+    Action, AppContext, CursorInfo, Entity, SingletonEntity, TypedActionView, View, ViewContext,
+    WindowId,
 };
 
-use warp_core::ui::appearance::Appearance;
 use crate::safe_triangle::SafeTriangle;
-use warp_core::ui::theme::Fill;
+use crate::time_format::format_approx_duration_from_now_sentence_case;
 use crate::ui_components::buttons::icon_button_with_color;
 use crate::ui_components::icons;
-use crate::time_format::format_approx_duration_from_now_sentence_case;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::Fill;
 
 pub const CHEVRON_RIGHT_ALIGN_SVG_PATH: &str = "bundled/svg/chevron-right-align.svg";
 
@@ -2331,6 +2332,22 @@ impl<A: Action + Clone> Menu<A> {
         self.origin = origin;
     }
 
+    fn cursor_info_for_menu_origin(
+        &self,
+        selected_position: Option<RectF>,
+        font_size: f32,
+    ) -> Option<CursorInfo> {
+        selected_position
+            .or_else(|| {
+                self.origin
+                    .map(|origin| RectF::new(origin, vec2f(font_size, font_size)))
+            })
+            .map(|position| CursorInfo {
+                position,
+                font_size,
+            })
+    }
+
     pub fn set_submenu_being_shown_for_item_index(&mut self, index: Option<usize>) {
         self.submenu_being_shown_for_item_index = index;
     }
@@ -2892,6 +2909,12 @@ impl<A: Action + Clone> View for Menu<A> {
         "Menu"
     }
 
+    fn active_cursor_position(&self, ctx: &ViewContext<Self>) -> Option<CursorInfo> {
+        let font_size = warp_core::ui::appearance::Appearance::as_ref(ctx).ui_font_size();
+        let selected_position = ctx.element_position_by_id(SubMenu::<A>::save_position_id(0));
+        self.cursor_info_for_menu_origin(selected_position, font_size)
+    }
+
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let safe_zone_anchor_row = self
             .safe_triangle
@@ -2971,5 +2994,22 @@ impl<A: Action + Clone> MenuItem<A> {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_cursor_position_uses_origin_when_no_row_is_selected() {
+        let mut menu: Menu<()> = Menu::new();
+        menu.set_origin(Some(vec2f(30.0, 40.0)));
+
+        let cursor = menu.cursor_info_for_menu_origin(None, 13.0).unwrap();
+
+        assert_eq!(cursor.position.origin_x(), 30.0);
+        assert_eq!(cursor.position.origin_y(), 40.0);
+        assert_eq!(cursor.font_size, 13.0);
     }
 }
