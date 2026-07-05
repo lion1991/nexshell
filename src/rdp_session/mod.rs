@@ -9,7 +9,11 @@ mod egfx;
 mod frame_marker;
 mod stats;
 
-pub use egfx::vt_replay_dir;
+pub use egfx::{
+    inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points, replay_wire_dump, vt_replay_dir,
+    ChecksumRect, WatchEvent, WatchPoint, WirePduInfo, WirePduRecord, WirePipelineError,
+    WireReplayFrame, WireReplayOptions, WireReplaySummary,
+};
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 
 use std::net::SocketAddr;
@@ -586,7 +590,11 @@ async fn connect_and_run(
     let mut dbg_last = std::time::Instant::now();
     loop {
         if egfx_dbg && dbg_last.elapsed() >= Duration::from_secs(2) {
-            eprintln!("[rdp] recv_bytes={} frames={}", stats.bytes(), stats.frames());
+            eprintln!(
+                "[rdp] recv_bytes={} frames={}",
+                stats.bytes(),
+                stats.frames()
+            );
             dbg_last = std::time::Instant::now();
         }
         // 有在途累积且未武装截止时武装：单一武装点覆盖帧/输入两路（输入路 continue 后由此处补武装）。

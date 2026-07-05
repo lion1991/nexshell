@@ -84,3 +84,27 @@ region 多拷一行/一列：多数时候多拷的是相邻有效内容（不可
 bottom=1080）时多拷的是 16 对齐解码帧（1920×1088）padding 宏块的未初始化 YUV → 绿色。
 修复：exclusive 语义直取 min 裁剪（fork e311c53），回归测试锁定 padding 行不得泄漏进输出。
 真机 60s 复测零绿线伪影。
+
+## 第⑤步 拖窗描边残留 + 来回闪（2026-07-04）
+
+症状：拖动/移动窗口时 1px 黑色矩形描边在旧位置残留固化，拖动中新旧内容来回闪。
+复现：rdp_probe 新增 RDP_CLICK / RDP_DRAG / RDP_WINMOVE（Alt+Space+M 键盘移窗）/
+RDP_SNAPSHOT_DIR / RDP_WIN_E；键盘移窗（RDP 会话拖动默认只画描边框）+ 30s 采集可间歇复现
+（同参数 2/2），终帧扫近黑竖线判定。注意假阳性：移动必须在采集结束前充分完成，否则截到的
+是合法中间态描边。
+
+根因：nexshell `write_progressive` 把 Progressive tile 整块 64×64 blit 上 surface，未按
+RFX_PROGRESSIVE_REGION 的 rects 裁剪；FreeRDP `progressive_decompress` 对每个 tile 用
+region rects 交集裁剪后才拷贝。混合编码下（服务端对同一 surface 混发 ClearCodec/AVC/cache
+翻贴与 RFX）：描边由 prog 绘制后，擦除走其他 codec——服务端 RFX 编码器的影子状态不随之更新，
+仍含描边；此后该 tile 任意小改动的 prog 更新（rect 只盖 tile 一角）解码出的整 tile 在 rect
+外是陈旧影子内容，整块 blit 把已擦除的描边复活上屏；再被 SurfaceToCache 快照进离屏 cache、
+CacheToSurface 翻贴扩散固化。拖动中「c2s 贴净 ↔ prog 复活」交替即来回闪。逐 PDU trace
+证据：残留像素最后写入者 = c2s 翻贴级联或 prog，全程零解码错误/零 cache miss（"成功地画错"）。
+
+修复：fork `DecodedTile` 新增 `valid_rects`（REGION rects ∩ tile，tile-local，
+`clip_tile_to_region`），rects 全空的 tile 只更新系数状态不上屏；nexshell
+`write_progressive` 改 `blit_sub` 按子矩形上屏。附单测（fork 裁剪语义 + blit_sub 不越界）。
+复测：修复前同参数 2/2 复现的键盘移窗 7 轮 + 鼠标拖动 7 轮全部零残留、零管线错误。
+诊断沉淀：trace 增 prog tile 坐标、c2s 全部 dst 点、s2c/c2s 近黑竖线检测（HASLINE）与
+FNV 内容哈希、`NEXSHELL_RDP_EGFX_SURFDUMP` 周期落盘 surface 原始像素。

@@ -10,6 +10,7 @@
 mod decoder_vt;
 mod diag;
 mod surfaces;
+mod wire_dump;
 
 use std::sync::Arc;
 
@@ -32,6 +33,12 @@ use self::decoder_vt::VtH264Decoder;
 pub use self::decoder_vt::vt_replay_dir;
 use self::diag::EgfxDiag;
 use self::surfaces::{Compositor, SurfaceRect};
+#[doc(hidden)]
+pub use self::wire_dump::{
+    inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points, replay_wire_dump, ChecksumRect,
+    WatchEvent, WatchPoint, WirePduInfo, WirePduRecord, WirePipelineError, WireReplayFrame,
+    WireReplayOptions, WireReplaySummary,
+};
 use super::{DirtyRect, RdpEvent, RdpFramebuffer, RdpStats};
 
 /// 挂 EGFX 合成 handler + VideoToolbox 解码器的 DVC 静态通道。
@@ -46,10 +53,9 @@ pub fn build_dvc_client(
     desktop_height: u16,
 ) -> DrdynvcClient {
     let handler = EgfxHandler::new(framebuffer, event_tx, stats, desktop_width, desktop_height);
-    DrdynvcClient::new().with_dynamic_channel(GraphicsPipelineClient::new(
-        Box::new(handler),
-        Some(Box::new(VtH264Decoder::new())),
-    ))
+    let client =
+        GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
+    DrdynvcClient::new().with_dynamic_channel(wire_dump::wrap_if_enabled(client))
 }
 
 /// EGFX 合成 handler：拥有 surface 合成器 + 共享 framebuffer/事件；帧内累积输出脏区，
@@ -175,10 +181,22 @@ impl EgfxHandler {
             width: (cx1 - cx0) as u16,
             height: (cy1 - cy0) as u16,
         };
+        // 诊断 A/B：NEXSHELL_RDP_FULLCOMPOSE=1 每帧整屏重合成（忽略脏区包围盒），
+        // 用于判定拖窗残留是否为「surface 已对但 framebuffer 该区没被重合成」的合成缺口。
+        let compose_dirty = if std::env::var_os("NEXSHELL_RDP_FULLCOMPOSE").is_some() {
+            DirtyRect {
+                x: 0,
+                y: 0,
+                width: self.desktop.0,
+                height: self.desktop.1,
+            }
+        } else {
+            dirty
+        };
         {
             let mut fb = self.framebuffer.lock();
             for (ox, oy, surf) in self.compositor.mapped_surfaces() {
-                fb.compose_surface(ox, oy, &surf.pixels, surf.width, surf.height, dirty);
+                fb.compose_surface(ox, oy, &surf.pixels, surf.width, surf.height, compose_dirty);
             }
             fb.bump_generation();
         }
@@ -189,19 +207,34 @@ impl EgfxHandler {
 
 impl GraphicsPipelineHandler for EgfxHandler {
     /// 广告 V10.7(AVC420+444) + V8.1(AVC420) + V8 兜底；接上 decoder 后不再被库过滤。
-    /// 不设 SMALL_CACHE：对齐微软 Windows App，让服务端用标准（大）离屏 cache 策略——
-    /// 合成层 cache 是无上限 HashMap，任意 slot 数都撑得住；SMALL_CACHE 会逼服务端退化缓存
-    /// 策略、更早 evict，浏览器滚动/缩略图场景更易出黑块。codec 中立（只影响 cache 尺寸）。
+    /// 默认声明 SMALL_CACHE，避免 Windows 服务端走长生命周期 surface-cache 复用路径。
+    /// 拖窗残留 trace 显示残留像素最终来自旧 s2s 内容被 s2c 捕获后再次 c2s 贴回，
+    /// 且服务端没有后续擦除；small-cache 会促使服务端更早 evict/重发直接擦除更新。
+    /// 需要回到旧 large-cache 行为做 A/B 时，设置 NEXSHELL_RDP_EGFX_LARGE_CACHE=1。
     fn capabilities(&self) -> Vec<CapabilitySet> {
+        let small_cache = std::env::var_os("NEXSHELL_RDP_EGFX_LARGE_CACHE").is_none();
         vec![
             CapabilitySet::V10_7 {
-                flags: CapabilitiesV107Flags::empty(),
+                flags: if small_cache {
+                    CapabilitiesV107Flags::SMALL_CACHE
+                } else {
+                    CapabilitiesV107Flags::empty()
+                },
             },
             CapabilitySet::V8_1 {
-                flags: CapabilitiesV81Flags::AVC420_ENABLED,
+                flags: CapabilitiesV81Flags::AVC420_ENABLED
+                    | if small_cache {
+                        CapabilitiesV81Flags::SMALL_CACHE
+                    } else {
+                        CapabilitiesV81Flags::empty()
+                    },
             },
             CapabilitySet::V8 {
-                flags: CapabilitiesV8Flags::empty(),
+                flags: if small_cache {
+                    CapabilitiesV8Flags::SMALL_CACHE
+                } else {
+                    CapabilitiesV8Flags::empty()
+                },
             },
         ]
     }
@@ -289,6 +322,20 @@ impl GraphicsPipelineHandler for EgfxHandler {
         let rect = self.compositor.write_bitmap(update);
         if let Some(r) = rect {
             self.mark_coverage(&[r], 1);
+            wire_dump::probe_surface_write(
+                &self.compositor,
+                "bitmap",
+                format!(
+                    "codec={:?} surf={} rect=({},{})-({},{})",
+                    update.codec_id,
+                    update.surface_id,
+                    update.destination_rectangle.left,
+                    update.destination_rectangle.top,
+                    update.destination_rectangle.right,
+                    update.destination_rectangle.bottom
+                ),
+                &[r],
+            );
         }
         self.accumulate_one(rect);
     }
@@ -298,24 +345,41 @@ impl GraphicsPipelineHandler for EgfxHandler {
         if self.prog_count % 300 == 1 {
             eprintln!("[egfx] progressive frame #{}", self.prog_count);
         }
-        let (rects, failed) = self.compositor.write_progressive(pdu);
+        let egfx_frame_id = wire_dump::probe_next_wire_to_surface2_frame_id();
+        let (rects, failed) = self.compositor.write_progressive(pdu, egfx_frame_id);
         self.diag.on_progressive(rects.len(), failed);
         if self.trace {
+            let coords: Vec<String> = rects
+                .iter()
+                .map(|r| format!("({},{})+{}x{}", r.x, r.y, r.w, r.h))
+                .collect();
             eprintln!(
-                "[egfx-trace] prog surf={} bytes={} tiles={} failed={}",
+                "[egfx-trace] prog surf={} bytes={} tiles={} failed={} at={}",
+                pdu.surface_id,
+                pdu.bitmap_data.len(),
+                rects.len(),
+                failed,
+                coords.join(",")
+            );
+        }
+        self.mark_coverage(&rects, 2);
+        wire_dump::probe_surface_write(
+            &self.compositor,
+            "prog",
+            format!(
+                "surf={} bytes={} tiles={} failed={}",
                 pdu.surface_id,
                 pdu.bitmap_data.len(),
                 rects.len(),
                 failed
-            );
-        }
-        self.mark_coverage(&rects, 2);
+            ),
+            &rects,
+        );
         self.accumulate(&rects);
     }
 
     fn on_delete_encoding_context(&mut self, pdu: &DeleteEncodingContextPdu) {
-        self.compositor
-            .delete_encoding_context(pdu.surface_id);
+        self.compositor.delete_encoding_context(pdu.surface_id);
     }
 
     fn on_solid_fill(&mut self, pdu: &SolidFillPdu) {
@@ -339,13 +403,46 @@ impl GraphicsPipelineHandler for EgfxHandler {
         }
         let rects = self.compositor.solid_fill(pdu);
         self.mark_coverage(&rects, 4);
+        wire_dump::probe_surface_write(
+            &self.compositor,
+            "fill",
+            format!(
+                "surf={} color=({},{},{}) rects={}",
+                pdu.surface_id,
+                pdu.fill_pixel.r,
+                pdu.fill_pixel.g,
+                pdu.fill_pixel.b,
+                pdu.rectangles.len()
+            ),
+            &rects,
+        );
         self.accumulate(&rects);
     }
 
     fn on_surface_to_surface(&mut self, pdu: &SurfaceToSurfacePdu) {
         self.diag.on_s2s();
+        if self.trace {
+            let r = &pdu.source_rectangle;
+            let dst: Vec<String> = pdu
+                .destination_points
+                .iter()
+                .map(|p| format!("({},{})", p.x, p.y))
+                .collect();
+            eprintln!(
+                "[egfx-trace] s2s src_surf={} dst_surf={} src=({},{})-({},{}) n={} dst={}",
+                pdu.source_surface_id,
+                pdu.destination_surface_id,
+                r.left,
+                r.top,
+                r.right,
+                r.bottom,
+                pdu.destination_points.len(),
+                dst.join(",")
+            );
+        }
         let rects = self.compositor.surface_to_surface(pdu);
         self.mark_coverage(&rects, 8);
+        wire_dump::probe_surface_to_surface(&self.compositor, pdu, &rects);
         self.accumulate(&rects);
     }
 
@@ -363,6 +460,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
             );
         }
         self.compositor.surface_to_cache(pdu);
+        wire_dump::probe_surface_to_cache(&self.compositor, pdu);
     }
 
     fn on_cache_to_surface(&mut self, pdu: &CacheToSurfacePdu) {
@@ -371,7 +469,6 @@ impl GraphicsPipelineHandler for EgfxHandler {
             let pts: Vec<String> = pdu
                 .destination_points
                 .iter()
-                .take(4)
                 .map(|p| format!("({},{})", p.x, p.y))
                 .collect();
             eprintln!(
@@ -384,6 +481,17 @@ impl GraphicsPipelineHandler for EgfxHandler {
         }
         let rects = self.compositor.cache_to_surface(pdu);
         self.mark_coverage(&rects, 16);
+        wire_dump::probe_surface_write(
+            &self.compositor,
+            "c2s",
+            format!(
+                "slot={} surf={} points={}",
+                pdu.cache_slot,
+                pdu.surface_id,
+                pdu.destination_points.len()
+            ),
+            &rects,
+        );
         self.accumulate(&rects);
     }
 
@@ -396,10 +504,22 @@ impl GraphicsPipelineHandler for EgfxHandler {
         self.frames += 1;
         self.diag.on_end_frame();
         self.publish();
-        // 覆盖掩码定期覆写（probe 到点直接退出时 on_close 不一定触发）。
+        // 覆盖掩码/surface 原始像素定期覆写（probe 到点直接退出时 on_close 不一定触发）。
         if self.frames.is_multiple_of(100) {
             if let Some((path, mask)) = &self.coverage {
                 let _ = std::fs::write(path, mask);
+            }
+            if let Some(base) = std::env::var_os("NEXSHELL_RDP_EGFX_SURFDUMP") {
+                for (i, (_, _, s)) in self.compositor.mapped_surfaces().enumerate() {
+                    let p = format!(
+                        "{}_{}_{}x{}.rgba",
+                        base.to_string_lossy(),
+                        i,
+                        s.width,
+                        s.height
+                    );
+                    let _ = std::fs::write(p, &s.pixels);
+                }
             }
         }
     }
@@ -423,6 +543,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
     /// 单个失败绝不拆会话；这里频控打印错误摘要（含 PDU 类型/codec/surface/长度/错误链），
     /// 供真机复测一击定位。
     fn on_pipeline_error(&mut self, detail: &str) {
+        wire_dump::probe_pipeline_error(detail);
         self.diag.on_pipeline_error();
         self.error_count += 1;
         let n = self.error_count;

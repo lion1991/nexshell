@@ -387,6 +387,9 @@ struct RdpTabState {
     last_uploaded_generation: u64,
     /// 当前 letterbox 几何（Element 每帧回写），第 ④ 步鼠标→远端坐标反算用。
     viewport: std::sync::Arc<std::sync::Mutex<Option<rdp_view::RdpViewport>>>,
+    /// 上次发往远端的鼠标坐标；相同则不重发 MouseMove（Element 每帧重建，故存共享层）。
+    /// 拖窗时 AppKit 会持续投递重复/近重复 LeftMouseDragged，去重防窗口在移动循环里抖动。
+    last_mouse: std::sync::Arc<std::sync::Mutex<Option<(u16, u16)>>>,
     /// 显示质量档：true=高清(HiDPI)，用于连接信息面板展示。
     hidpi: bool,
     /// 协议层运行时统计（Arc 与协议线程共享），连接信息面板只读差分。

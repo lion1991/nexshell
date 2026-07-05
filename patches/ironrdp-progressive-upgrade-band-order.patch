@@ -1,0 +1,82 @@
+diff --git a/crates/ironrdp-graphics/src/progressive.rs b/crates/ironrdp-graphics/src/progressive.rs
+index ff4fb52..0000000 100644
+--- a/crates/ironrdp-graphics/src/progressive.rs
++++ b/crates/ironrdp-graphics/src/progressive.rs
+@@ -165,14 +165,14 @@ pub fn decode_upgrade_pass(
+     base_quant: &ComponentCodecQuant,
+     prev_prog_quant: &ComponentCodecQuant,
+     curr_prog_quant: &ComponentCodecQuant,
+-    use_reduce_extrapolate: bool,
++    _use_reduce_extrapolate: bool,
+     coefficients: &mut [i16],
+     sign: &mut [i8],
+ ) {
+     assert!(coefficients.len() >= COEFFICIENTS_PER_COMPONENT);
+     assert!(sign.len() >= COEFFICIENTS_PER_COMPONENT);
+ 
+-    let bands = get_band_layout(use_reduce_extrapolate);
++    let bands = upgrade_band_layout();
+     let mut srl = SrlDecoder::new(srl_data);
+     let mut raw = RawBitReader::new(raw_data);
+ 
+@@ -420,9 +420,9 @@ pub fn encode_upgrade_pass(
+     prev_prog_quant: &ComponentCodecQuant,
+     curr_prog_quant: &ComponentCodecQuant,
+     sign: &[i8],
+-    use_reduce_extrapolate: bool,
++    _use_reduce_extrapolate: bool,
+ ) -> (Vec<u8>, Vec<u8>) {
+-    let bands = get_band_layout(use_reduce_extrapolate);
++    let bands = upgrade_band_layout();
+     let mut srl = SrlEncoder::new();
+     let mut raw_writer = RawBitWriter::new();
+ 
+@@ -568,6 +568,12 @@ fn standard_band_layout() -> [BandInfo; NUM_BANDS] {
+     ]
+ }
+ 
++/// FreeRDP decodes Progressive UPGRADE SRL/raw streams in reduce-extrapolate
++/// band order even when the final IDWT uses the standard transform.
++fn upgrade_band_layout() -> [BandInfo; NUM_BANDS] {
++    crate::dwt_extrapolate::band_layout()
++}
++
+ /// Starting offset of the LL3 subband for delta decoding.
+ fn ll3_offset(use_reduce_extrapolate: bool) -> usize {
+     if use_reduce_extrapolate {
+@@ -1580,6 +1586,35 @@ mod tests {
+         assert_eq!(coefficients[1], -20); // -(5 << 2)
+     }
+ 
++    #[test]
++    fn upgrade_pass_uses_freerdp_band_order_even_without_extrapolate_dwt() {
++        let mut coefficients = vec![0i16; COEFFICIENTS_PER_COMPONENT];
++        let mut sign = vec![SIGN_POSITIVE; COEFFICIENTS_PER_COMPONENT];
++        let base_quant = ComponentCodecQuant {
++            lh1: 1,
++            ..ComponentCodecQuant::LOSSLESS
++        };
++        let prev_prog = ComponentCodecQuant {
++            lh1: 1,
++            ..ComponentCodecQuant::LOSSLESS
++        };
++        let curr_prog = ComponentCodecQuant::LOSSLESS;
++
++        decode_upgrade_pass(
++            &[],
++            &[0x80],
++            &base_quant,
++            &prev_prog,
++            &curr_prog,
++            false,
++            &mut coefficients,
++            &mut sign,
++        );
++
++        assert_eq!(coefficients[1023], 1);
++        assert_eq!(coefficients[1024], 0);
++    }
++
+     #[test]
+     fn progressive_quantize_round_trip() {
+         let mut coefficients = vec![0i16; 4096];

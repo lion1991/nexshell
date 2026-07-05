@@ -32,6 +32,8 @@ pub struct RdpPageElement {
     viewport_out: Arc<Mutex<Option<RdpViewport>>>,
     /// 键鼠事件出口（会话线程消费编码成 FastPath）。满/断开则丢弃。
     input_tx: async_channel::Sender<RdpInputEvent>,
+    /// 上次发出的鼠标远端坐标（跨帧共享；Element 每帧重建）。去重连续 MouseMove 用。
+    last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
     size: Option<Vector2F>,
     origin: Option<Point>,
 }
@@ -43,6 +45,7 @@ impl RdpPageElement {
         background: ColorU,
         viewport_out: Arc<Mutex<Option<RdpViewport>>>,
         input_tx: async_channel::Sender<RdpInputEvent>,
+        last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
     ) -> Self {
         Self {
             asset_id,
@@ -50,6 +53,7 @@ impl RdpPageElement {
             background,
             viewport_out,
             input_tx,
+            last_mouse,
             size: None,
             origin: None,
         }
@@ -64,6 +68,22 @@ impl RdpPageElement {
     fn device_coords(&self, position: Vector2F) -> Option<(u16, u16)> {
         let vp = (*self.viewport_out.lock().ok()?)?;
         viewport_device_coords(&vp, position, self.desktop_size)
+    }
+
+    /// 鼠标移动 → 远端 MouseMove。远端坐标未变则不重发（去抖 + 省流）。返回是否已消费。
+    fn send_mouse_move(&self, position: Vector2F) -> bool {
+        let Some((x, y)) = self.device_coords(position) else {
+            return false;
+        };
+        if let Ok(mut last) = self.last_mouse.lock() {
+            if *last == Some((x, y)) {
+                return true; // 坐标未变，已处理但不重发
+            }
+            *last = Some((x, y));
+        }
+        log_input(position, x, y);
+        self.send(RdpInputEvent::MouseMove { x, y });
+        true
     }
 
     /// 右/中键：warpui 不派发其抬起事件，按下即合成完整 click（down+up）。
@@ -107,6 +127,27 @@ impl RdpPageElement {
             handled = true;
         }
         handled
+    }
+}
+
+/// 诊断（NEXSHELL_RDP_INPUT_LOG=<file>）：把去重后实发的 MouseMove 逐条追加落盘，
+/// 含原始逻辑坐标与反算远端坐标，供真机抖动溯源（看远端坐标是否在静止时仍振荡）。
+fn log_input(pos: Vector2F, x: u16, y: u16) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("NEXSHELL_RDP_INPUT_LOG") else {
+        return;
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(
+            f,
+            "move logical=({:.2},{:.2}) remote=({x},{y})",
+            pos.x(),
+            pos.y()
+        );
     }
 }
 
@@ -242,13 +283,25 @@ impl Element for RdpPageElement {
                 });
                 true
             }
-            // 移动（含左键拖拽）。
-            Event::MouseMoved { position, .. } | Event::LeftMouseDragged { position, .. } => {
-                let Some((x, y)) = self.device_coords(*position) else {
-                    return false;
-                };
-                self.send(RdpInputEvent::MouseMove { x, y });
-                true
+            // 合成 MouseMoved（每帧重绘后 warpui 补发，用于刷新 hover）：拖拽期间其坐标冻结在
+            // 拖拽前的最后一次真实移动处（≈初始位置），透传给远端会与真实拖拽交替，把窗口反复
+            // 拽回初始位（视频/游戏窗每帧重绘时尤甚）→ 丢弃。真实移动 is_synthetic=false 照常。
+            Event::MouseMoved {
+                position,
+                is_synthetic,
+                ..
+            } => {
+                if *is_synthetic {
+                    return true;
+                }
+                self.send_mouse_move(*position)
+            }
+            // 左键拖拽。丢弃平台层合成拖拽（静止自动滚动泵：坐标冻结、每 16ms 重发）。
+            Event::LeftMouseDragged { position, .. } => {
+                if warpui_core::event::is_synthetic_drag() {
+                    return true;
+                }
+                self.send_mouse_move(*position)
             }
             Event::LeftMouseDown { position, .. } => {
                 let Some((x, y)) = self.device_coords(*position) else {

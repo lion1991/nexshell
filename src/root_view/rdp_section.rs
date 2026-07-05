@@ -80,6 +80,7 @@ impl RootView {
                 asset_id,
                 last_uploaded_generation: 0,
                 viewport: Arc::new(Mutex::new(None)),
+                last_mouse: Arc::new(Mutex::new(None)),
                 hidpi,
                 stats,
                 conn_info_open: false,
@@ -269,6 +270,7 @@ impl RootView {
                     ColorU::new(0, 0, 0, 255),
                     rdp.viewport.clone(),
                     rdp.handle.input_tx.clone(),
+                    rdp.last_mouse.clone(),
                 )
                 .finish();
                 Container::new(element)

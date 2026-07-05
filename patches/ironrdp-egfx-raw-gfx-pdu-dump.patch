@@ -1,0 +1,116 @@
+diff --git a/crates/ironrdp-egfx/src/client.rs b/crates/ironrdp-egfx/src/client.rs
+index 2ecd273..e6f48b9 100644
+--- a/crates/ironrdp-egfx/src/client.rs
++++ b/crates/ironrdp-egfx/src/client.rs
+@@ -956,7 +956,7 @@ impl DvcProcessor for GraphicsPipelineClient {
+         self.handler.on_close();
+     }
+ 
+-    fn process(&mut self, _channel_id: u32, payload: &[u8]) -> PduResult<Vec<DvcMessage>> {
++    fn process(&mut self, channel_id: u32, payload: &[u8]) -> PduResult<Vec<DvcMessage>> {
+         // EGFX is a graphics enhancement layer: any decompress / decode / decode-codec
+         // failure is logged and skipped, never propagated. Returning Err here would
+         // bubble up through the DVC/x224 stack and tear down the entire RDP session
+@@ -981,8 +981,16 @@ impl DvcProcessor for GraphicsPipelineClient {
+         {
+             let mut cursor = ReadCursor::new(self.decompressed_buffer.as_slice());
+             while !cursor.is_empty() {
++                let pdu_start = cursor.pos();
+                 match decode_cursor::<GfxPdu>(&mut cursor) {
+-                    Ok(pdu) => pdus.push(pdu),
++                    Ok(pdu) => {
++                        let pdu_end = cursor.pos();
++                        dump::dump_raw_gfx_pdu(
++                            channel_id,
++                            &self.decompressed_buffer[pdu_start..pdu_end],
++                        );
++                        pdus.push(pdu);
++                    }
+                     Err(e) => {
+                         // A parse failure desyncs the cursor, so the rest of this packet
+                         // cannot be safely decoded. Keep the PDUs decoded so far, drop the
+diff --git a/crates/ironrdp-egfx/src/dump.rs b/crates/ironrdp-egfx/src/dump.rs
+index 309f709..4d161c0 100644
+--- a/crates/ironrdp-egfx/src/dump.rs
++++ b/crates/ironrdp-egfx/src/dump.rs
+@@ -9,10 +9,11 @@
+ //! All IO errors are swallowed: dumping must never disturb a live session.
+ 
+ use core::sync::atomic::{AtomicU64, Ordering};
+-use std::fs::{self, OpenOptions};
++use std::fs::{self, File, OpenOptions};
+ use std::io::Write as _;
+ use std::path::PathBuf;
+ use std::sync::OnceLock;
++use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ /// Per-codec cap so a long session doesn't fill the disk; the first frames
+ /// (including the cache-independent first PDU) are the diagnostic ones.
+@@ -22,6 +23,9 @@ const MAX_CLEAR: u64 = 40;
+ /// `IRONRDP_EGFX_DUMP_PROG_CAP`.
+ const MAX_PROG: u64 = 2000;
+ 
++const RAW_GFX_PDU_MAGIC: &[u8; 8] = b"NXEGFXP1";
++const RAW_GFX_PDU_DIRECTION_S2C: u8 = 1;
++
+ fn prog_cap() -> u64 {
+     static CAP: OnceLock<u64> = OnceLock::new();
+     *CAP.get_or_init(|| {
+@@ -63,6 +67,31 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
+ static CLEAR_N: AtomicU64 = AtomicU64::new(0);
+ static PROG_N: AtomicU64 = AtomicU64::new(0);
+ 
++static RAW_GFX_PDU_SEQ: AtomicU64 = AtomicU64::new(0);
++
++fn raw_gfx_pdu_path() -> Option<&'static PathBuf> {
++    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
++    PATH.get_or_init(|| {
++        let raw = std::env::var_os("NEXSHELL_RDP_EGFX_GFXPDU_DUMP")?;
++        let path = PathBuf::from(raw);
++        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
++            fs::create_dir_all(parent).ok()?;
++        }
++        let mut file = File::create(&path).ok()?;
++        file.write_all(RAW_GFX_PDU_MAGIC).ok()?;
++        Some(path)
++    })
++    .as_ref()
++}
++
++fn unix_timestamp_us() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .unwrap_or_default()
++        .as_micros()
++        .min(u128::from(u64::MAX)) as u64
++}
++
+ /// One dumped codec payload plus its metadata.
+ pub(crate) struct DumpRecord<'a> {
+     /// `"clearcodec"` or `"progressive"`.
+@@ -128,6 +157,25 @@ pub(crate) fn dump(rec: &DumpRecord<'_>) {
+     }
+ }
+ 
++/// Dump one exact decompressed GFX PDU byte range after ZGFX unwrap and before
++/// typed handling. Enable with `NEXSHELL_RDP_EGFX_GFXPDU_DUMP=<file>`.
++pub(crate) fn dump_raw_gfx_pdu(channel_id: u32, pdu_bytes: &[u8]) {
++    let Some(path) = raw_gfx_pdu_path() else {
++        return;
++    };
++    let seq = RAW_GFX_PDU_SEQ.fetch_add(1, Ordering::Relaxed);
++    let timestamp_us = unix_timestamp_us();
++    if let Ok(mut file) = OpenOptions::new().append(true).open(path) {
++        let _ = file.write_all(&seq.to_le_bytes());
++        let _ = file.write_all(&timestamp_us.to_le_bytes());
++        let _ = file.write_all(&channel_id.to_le_bytes());
++        let _ = file.write_all(&[RAW_GFX_PDU_DIRECTION_S2C]);
++        let _ = file.write_all(&(pdu_bytes.len() as u32).to_le_bytes());
++        let _ = file.write_all(pdu_bytes);
++        let _ = file.flush();
++    }
++}
++
+ fn json_escape(s: &str) -> String {
+     let mut out = String::with_capacity(s.len());
+     for c in s.chars() {

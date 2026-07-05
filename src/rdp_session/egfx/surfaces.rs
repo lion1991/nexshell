@@ -11,6 +11,10 @@ use ironrdp_egfx::pdu::{
     WireToSurface2Pdu,
 };
 use ironrdp_graphics::progressive::ProgressiveDecoder;
+use ironrdp_pdu::codecs::rfx::progressive::{
+    decode_progressive_stream, ProgressiveBlock, ProgressiveTile,
+};
+use ironrdp_pdu::codecs::rfx::RfxRectangle;
 
 /// surface 上一块脏区（surface-local 坐标，像素）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,12 +53,26 @@ struct CachedBitmap {
     pixels: Vec<u8>,
 }
 
+#[derive(Default)]
+struct ProgressiveFramePaintState {
+    frame_id: Option<u32>,
+    updated_tiles: Vec<(u16, u16)>,
+}
+
+#[derive(Default)]
+struct ProgressivePaintPlan {
+    clip_rects: Vec<RfxRectangle>,
+    updated_tiles: Vec<(u16, u16)>,
+}
+
 /// surface 合成器：surface 表 + cache 表 + 单一 Progressive 解码器（内部按
 /// surfaceId 管理 tile 状态）。ClearCodec 解码器现由库连接级单例持有（见 ADR 0008 / 上游 #1175）。
 pub struct Compositor {
     surfaces: HashMap<u16, Surface>,
     cache: HashMap<u16, CachedBitmap>,
     progressive: ProgressiveDecoder,
+    progressive_frames: HashMap<u16, ProgressiveFramePaintState>,
+    fallback_progressive_frame_id: u32,
     /// Progressive 解码失败累计（供频控日志分类计数）。
     prog_fail_count: u64,
     /// CacheToSurface 引用了不存在的 cache 槽位（静默黑块高嫌疑，频控日志）。
@@ -67,6 +85,8 @@ impl Compositor {
             surfaces: HashMap::new(),
             cache: HashMap::new(),
             progressive: ProgressiveDecoder::new(),
+            progressive_frames: HashMap::new(),
+            fallback_progressive_frame_id: 0,
             prog_fail_count: 0,
             c2s_miss_count: 0,
         }
@@ -105,6 +125,7 @@ impl Compositor {
         self.surfaces.remove(&surface_id);
         // Progressive tile 系数状态随 surface 存亡（对齐 FreeRDP）。
         self.progressive.delete_surface(surface_id);
+        self.progressive_frames.remove(&surface_id);
     }
 
     pub fn map_surface(&mut self, surface_id: u16, origin_x: i32, origin_y: i32) {
@@ -119,6 +140,7 @@ impl Compositor {
     pub fn reset(&mut self) {
         self.surfaces.clear();
         self.progressive.reset();
+        self.progressive_frames.clear();
     }
 
     /// DeleteEncodingContext：**不清** Progressive tile 状态。对齐 FreeRDP（gfx.c 里是
@@ -155,10 +177,15 @@ impl Compositor {
     /// WireToSurface2 + RemoteFX Progressive：解码 tile（RGBA 64x64）→ 写入 surface。
     /// 失败频控日志：每类前 5 次 + 每 300 次汇总（真机上失败会刷屏，见 ADR 0008）。
     /// 返回 `(脏矩形, 解码是否真失败)`；后者用于诊断区分真 Err 与正常 0-tile PDU。
-    pub fn write_progressive(&mut self, pdu: &WireToSurface2Pdu) -> (Vec<SurfaceRect>, bool) {
+    pub fn write_progressive(
+        &mut self,
+        pdu: &WireToSurface2Pdu,
+        egfx_frame_id: Option<u32>,
+    ) -> (Vec<SurfaceRect>, bool) {
         let Some(surface) = self.surfaces.get_mut(&pdu.surface_id) else {
             return (Vec::new(), false);
         };
+        let paint_plan = progressive_paint_plan(&pdu.bitmap_data);
         let tiles = match self.progressive.decode_bitmap(
             pdu.surface_id,
             surface.width,
@@ -178,27 +205,93 @@ impl Compositor {
                 return (Vec::new(), true);
             }
         };
-        let mut dirties = Vec::with_capacity(tiles.len());
-        for tile in tiles {
-            let tx = i32::from(tile.x_idx) * 64;
-            let ty = i32::from(tile.y_idx) * 64;
-            if let Some((x, y, w, h)) = blit(
-                &mut surface.pixels,
-                surface.width,
-                surface.height,
-                tx,
-                ty,
-                &tile.pixels,
-                64,
-                64,
-            ) {
-                dirties.push(SurfaceRect {
-                    surface_id: pdu.surface_id,
-                    x,
-                    y,
-                    w,
-                    h,
-                });
+        drop(tiles);
+
+        let frame_id = egfx_frame_id.unwrap_or_else(|| {
+            self.fallback_progressive_frame_id = self.fallback_progressive_frame_id.wrapping_add(1);
+            self.fallback_progressive_frame_id
+        });
+        let frame = self.progressive_frames.entry(pdu.surface_id).or_default();
+        if frame.frame_id != Some(frame_id) {
+            frame.frame_id = Some(frame_id);
+            frame.updated_tiles.clear();
+        }
+        let mut pdu_tiles = Vec::new();
+        for tile in paint_plan.updated_tiles {
+            if !pdu_tiles.contains(&tile) {
+                pdu_tiles.push(tile);
+                frame.updated_tiles.push(tile);
+            }
+        }
+
+        let trace = std::env::var_os("NEXSHELL_RDP_EGFX_TRACE").is_some();
+        // 诊断 A/B 开关：设 NEXSHELL_RDP_PROG_NOCLIP=1 回退整块 64x64 blit（不按 REGION rects
+        // 裁剪）。用于判定拖窗轨迹残留是否由 tile 裁剪漏掉擦除更新所致（对照旧行为）。
+        let noclip = std::env::var_os("NEXSHELL_RDP_PROG_NOCLIP").is_some();
+        let mut dirties = Vec::with_capacity(frame.updated_tiles.len());
+        let mut painted_tiles = Vec::new();
+        for &(tile_x, tile_y) in &frame.updated_tiles {
+            if painted_tiles.contains(&(tile_x, tile_y)) {
+                continue;
+            }
+            painted_tiles.push((tile_x, tile_y));
+            let Some(tile_state) = self
+                .progressive
+                .surface_tile(pdu.surface_id, tile_x, tile_y)
+                .filter(|tile| tile.pass > 0)
+            else {
+                continue;
+            };
+            let tx = i32::from(tile_x) * 64;
+            let ty = i32::from(tile_y) * 64;
+            let mut pixels = vec![0u8; 64 * 64 * 4];
+            tile_state.reconstruct_to_rgba(&mut pixels);
+            if trace && has_dark_vline(&pixels, 64, 64, 16) {
+                eprintln!("[egfx] prog HASLINE tile=({tx},{ty})");
+            }
+            if noclip {
+                if let Some((x, y, w, h)) = blit(
+                    &mut surface.pixels,
+                    surface.width,
+                    surface.height,
+                    tx,
+                    ty,
+                    &pixels,
+                    64,
+                    64,
+                ) {
+                    dirties.push(SurfaceRect {
+                        surface_id: pdu.surface_id,
+                        x,
+                        y,
+                        w,
+                        h,
+                    });
+                }
+                continue;
+            }
+            // 只把 REGION rects 裁出的子矩形上屏（对齐 FreeRDP progressive_decompress）：
+            // 整块 blit 会把 RFX 影子状态里已被其他 codec 重绘区域的陈旧内容复活
+            // （拖窗描边残留/闪烁根因，ADR 0008 第⑤步）。
+            for sr in clip_tile_to_rects(tile_x, tile_y, &paint_plan.clip_rects) {
+                if let Some((x, y, w, h)) = blit_sub(
+                    &mut surface.pixels,
+                    surface.width,
+                    surface.height,
+                    tx + i32::from(sr.x),
+                    ty + i32::from(sr.y),
+                    &pixels,
+                    64,
+                    (sr.x, sr.y, sr.w, sr.h),
+                ) {
+                    dirties.push(SurfaceRect {
+                        surface_id: pdu.surface_id,
+                        x,
+                        y,
+                        w,
+                        h,
+                    });
+                }
             }
         }
         (dirties, false)
@@ -246,6 +339,21 @@ impl Compositor {
             let Some(src) = self.surfaces.get(&pdu.source_surface_id) else {
                 return Vec::new();
             };
+            // 源矩形越界诊断：extract_region 零填充会造成"擦除缺失"型残留
+            if rect.right > src.width || rect.bottom > src.height {
+                eprintln!(
+                    "[egfx] s2s SRC-OOB src_surf={} dst_surf={} src=({},{})-({},{}) src_size={}x{} n={}",
+                    pdu.source_surface_id,
+                    pdu.destination_surface_id,
+                    rect.left,
+                    rect.top,
+                    rect.right,
+                    rect.bottom,
+                    src.width,
+                    src.height,
+                    pdu.destination_points.len()
+                );
+            }
             extract_region(
                 &src.pixels,
                 src.width,
@@ -299,14 +407,25 @@ impl Compositor {
             w,
             h,
         );
-        if std::env::var_os("NEXSHELL_RDP_EGFX_TRACE").is_some()
-            && pixels
+        if std::env::var_os("NEXSHELL_RDP_EGFX_TRACE").is_some() {
+            if pixels
                 .chunks_exact(4)
                 .all(|p| p[0] < 8 && p[1] < 8 && p[2] < 8)
-        {
+            {
+                eprintln!(
+                    "[egfx] s2c captured ALL-BLACK slot={} rect=({},{})-({},{})",
+                    pdu.cache_slot, rect.left, rect.top, rect.right, rect.bottom
+                );
+            } else if has_dark_vline(&pixels, w, h, 16) {
+                eprintln!(
+                    "[egfx] s2c HASLINE slot={} rect=({},{})-({},{})",
+                    pdu.cache_slot, rect.left, rect.top, rect.right, rect.bottom
+                );
+            }
             eprintln!(
-                "[egfx] s2c captured ALL-BLACK slot={} rect=({},{})-({},{})",
-                pdu.cache_slot, rect.left, rect.top, rect.right, rect.bottom
+                "[egfx-trace] s2c-hash slot={} h={:016x}",
+                pdu.cache_slot,
+                fnv_hash(&pixels)
             );
         }
         self.cache.insert(
@@ -334,17 +453,25 @@ impl Compositor {
             return Vec::new();
         };
         let (cw, ch, pixels) = (entry.width, entry.height, entry.pixels.clone());
-        if std::env::var_os("NEXSHELL_RDP_EGFX_TRACE").is_some()
-            && pixels
+        if std::env::var_os("NEXSHELL_RDP_EGFX_TRACE").is_some() {
+            if pixels
                 .chunks_exact(4)
                 .all(|p| p[0] < 8 && p[1] < 8 && p[2] < 8)
-        {
-            eprintln!(
-                "[egfx] c2s stamping ALL-BLACK slot={} surf={} n={}",
-                pdu.cache_slot,
-                pdu.surface_id,
-                pdu.destination_points.len()
-            );
+            {
+                eprintln!(
+                    "[egfx] c2s stamping ALL-BLACK slot={} surf={} n={}",
+                    pdu.cache_slot,
+                    pdu.surface_id,
+                    pdu.destination_points.len()
+                );
+            } else if has_dark_vline(&pixels, cw, ch, 16) {
+                eprintln!(
+                    "[egfx] c2s HASLINE slot={} surf={} n={}",
+                    pdu.cache_slot,
+                    pdu.surface_id,
+                    pdu.destination_points.len()
+                );
+            }
         }
         let Some(dst) = self.surfaces.get_mut(&pdu.surface_id) else {
             return Vec::new();
@@ -376,6 +503,94 @@ impl Compositor {
     pub fn evict_cache(&mut self, cache_slot: u16) {
         self.cache.remove(&cache_slot);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TileSubRect {
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+}
+
+fn progressive_paint_plan(bitmap_data: &[u8]) -> ProgressivePaintPlan {
+    let Ok(blocks) = decode_progressive_stream(bitmap_data) else {
+        return ProgressivePaintPlan::default();
+    };
+    let mut plan = ProgressivePaintPlan::default();
+    for block in &blocks {
+        let ProgressiveBlock::Region(region) = block else {
+            continue;
+        };
+        plan.clip_rects = region.rects.clone();
+        for tile in &region.tiles {
+            plan.updated_tiles.push(progressive_tile_coord(tile));
+        }
+    }
+    plan
+}
+
+fn progressive_tile_coord(tile: &ProgressiveTile<'_>) -> (u16, u16) {
+    match tile {
+        ProgressiveTile::Simple(tile) => (tile.x_idx, tile.y_idx),
+        ProgressiveTile::First(tile) => (tile.x_idx, tile.y_idx),
+        ProgressiveTile::Upgrade(tile) => (tile.x_idx, tile.y_idx),
+    }
+}
+
+fn clip_tile_to_rects(x_idx: u16, y_idx: u16, rects: &[RfxRectangle]) -> Vec<TileSubRect> {
+    let tx = u32::from(x_idx) * 64;
+    let ty = u32::from(y_idx) * 64;
+    let mut out = Vec::new();
+    for rect in rects {
+        let x0 = u32::from(rect.x).max(tx);
+        let y0 = u32::from(rect.y).max(ty);
+        let x1 = (u32::from(rect.x) + u32::from(rect.width)).min(tx + 64);
+        let y1 = (u32::from(rect.y) + u32::from(rect.height)).min(ty + 64);
+        if x1 <= x0 || y1 <= y0 {
+            continue;
+        }
+        out.push(TileSubRect {
+            x: (x0 - tx) as u16,
+            y: (y0 - ty) as u16,
+            w: (x1 - x0) as u16,
+            h: (y1 - y0) as u16,
+        });
+    }
+    out
+}
+
+/// 诊断（TRACE 用）：FNV-1a 内容哈希，用于跨时点比对 cache/tile 内容一致性。
+pub fn fnv_hash(data: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in data {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// 诊断（TRACE 用）：RGBA 块内是否存在近黑竖线段（某列连续 >=min_run 个暗像素）。
+pub fn has_dark_vline(pixels: &[u8], w: u16, h: u16, min_run: usize) -> bool {
+    let (w, h) = (usize::from(w), usize::from(h));
+    for x in 0..w {
+        let mut run = 0;
+        for y in 0..h {
+            let o = (y * w + x) * 4;
+            let dark = pixels
+                .get(o..o + 3)
+                .is_some_and(|p| p[0] < 40 && p[1] < 40 && p[2] < 40);
+            if dark {
+                run += 1;
+                if run >= min_run {
+                    return true;
+                }
+            } else {
+                run = 0;
+            }
+        }
+    }
+    false
 }
 
 // ============================================================================
@@ -415,6 +630,45 @@ fn blit(
     for row in y0..y1 {
         let src_row = (row - dy) as usize;
         let src_col = (x0 - dx) as usize;
+        let so = src_row * src_stride + src_col * 4;
+        let dofs = row as usize * dst_stride + x0 as usize * 4;
+        let n = copy_w * 4;
+        if so + n > src.len() || dofs + n > dst.len() {
+            continue;
+        }
+        dst[dofs..dofs + n].copy_from_slice(&src[so..so + n]);
+    }
+    Some((x0 as u16, y0 as u16, (x1 - x0) as u16, (y1 - y0) as u16))
+}
+
+/// 把 `src`（src_w 行宽 RGBA）内的子矩形 (sx,sy,sw,sh) 拷进 `dst` (dx,dy) 处，
+/// 裁剪越界。返回实际写入的 dst 脏区，全裁剪则 None。（Progressive tile 按
+/// REGION rects 局部上屏用。）
+fn blit_sub(
+    dst: &mut [u8],
+    dst_w: u16,
+    dst_h: u16,
+    dx: i32,
+    dy: i32,
+    src: &[u8],
+    src_w: u16,
+    sub: (u16, u16, u16, u16),
+) -> Option<(u16, u16, u16, u16)> {
+    let (sx, sy, sw, sh) = sub;
+    let (dst_w, dst_h) = (i32::from(dst_w), i32::from(dst_h));
+    let x0 = dx.max(0);
+    let y0 = dy.max(0);
+    let x1 = (dx + i32::from(sw)).min(dst_w);
+    let y1 = (dy + i32::from(sh)).min(dst_h);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let copy_w = (x1 - x0) as usize;
+    let dst_stride = dst_w as usize * 4;
+    let src_stride = usize::from(src_w) * 4;
+    for row in y0..y1 {
+        let src_row = usize::from(sy) + (row - dy) as usize;
+        let src_col = usize::from(sx) + (x0 - dx) as usize;
         let so = src_row * src_stride + src_col * 4;
         let dofs = row as usize * dst_stride + x0 as usize * 4;
         let n = copy_w * 4;
@@ -510,6 +764,27 @@ mod tests {
             .iter()
             .all(|&b| b == 7));
         assert!(dst[0..4].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn blit_sub_copies_only_subrect() {
+        // src 4x4：全 9；dst 8x8 全 0。只拷 src 子矩形 (1,1,2,2) 到 dst (3,3)。
+        let mut dst = vec![0u8; 8 * 8 * 4];
+        let mut src = vec![0u8; 4 * 4 * 4];
+        for y in 1..3usize {
+            for x in 1..3usize {
+                src[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4].copy_from_slice(&[9, 9, 9, 9]);
+            }
+        }
+        let d = blit_sub(&mut dst, 8, 8, 3, 3, &src, 4, (1, 1, 2, 2)).unwrap();
+        assert_eq!(d, (3, 3, 2, 2));
+        let at = |x: usize, y: usize| (y * 8 + x) * 4;
+        // 子矩形内容落在 (3,3)-(4,4)。
+        assert!(dst[at(3, 3)..at(3, 3) + 4].iter().all(|&b| b == 9));
+        assert!(dst[at(4, 4)..at(4, 4) + 4].iter().all(|&b| b == 9));
+        // 子矩形之外（如 (2,3)、(5,5)）未被写——整块 blit 会污染这里。
+        assert!(dst[at(2, 3)..at(2, 3) + 4].iter().all(|&b| b == 0));
+        assert!(dst[at(5, 5)..at(5, 5) + 4].iter().all(|&b| b == 0));
     }
 
     #[test]
