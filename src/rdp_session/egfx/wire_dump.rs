@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -39,7 +38,6 @@ where
 pub struct WireDumpingProcessor<T> {
     inner: T,
     writer: Option<WireDumpWriter>,
-    frame_probe: WireToSurface2FrameProbe,
 }
 
 impl<T> WireDumpingProcessor<T>
@@ -63,11 +61,7 @@ where
                     None
                 }
             });
-        Self {
-            inner,
-            writer,
-            frame_probe: WireToSurface2FrameProbe::new(),
-        }
+        Self { inner, writer }
     }
 }
 
@@ -94,7 +88,6 @@ where
     }
 
     fn process(&mut self, channel_id: u32, payload: &[u8]) -> PduResult<Vec<DvcMessage>> {
-        self.frame_probe.prepare(payload);
         if let Some(writer) = &mut self.writer {
             if let Err(e) = writer.write_s2c(channel_id, payload) {
                 eprintln!("[egfx] wire dump write failed; disabling dump: {e}");
@@ -308,7 +301,6 @@ where
     let handler = EgfxHandler::new(framebuffer.clone(), event_tx, stats, 1, 1);
     let mut client =
         GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
-    let mut frame_probe = WireToSurface2FrameProbe::new();
     let mut summary = WireReplaySummary::default();
     let frame_every = options.frame_every.max(1);
     let watch_points = options.watch_points.clone();
@@ -326,7 +318,6 @@ where
         }
         summary.records += 1;
         probe_set_record(rec.seq);
-        frame_probe.prepare(&rec.payload);
         client.process(rec.channel_id, &rec.payload).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -439,52 +430,6 @@ pub fn inspect_wire_dump_pdus_with_points(
     }
 
     Ok(out)
-}
-
-struct WireToSurface2FrameProbe {
-    decompressor: Decompressor,
-    decompressed: Vec<u8>,
-    current_frame_id: Option<u32>,
-}
-
-impl WireToSurface2FrameProbe {
-    fn new() -> Self {
-        Self {
-            decompressor: Decompressor::new(),
-            decompressed: Vec::new(),
-            current_frame_id: None,
-        }
-    }
-
-    fn prepare(&mut self, payload: &[u8]) {
-        clear_wire_to_surface2_frame_queue();
-        self.decompressed.clear();
-        if self
-            .decompressor
-            .decompress(payload, &mut self.decompressed)
-            .is_err()
-        {
-            return;
-        }
-        let mut cursor = ReadCursor::new(self.decompressed.as_slice());
-        while !cursor.is_empty() {
-            let Ok(pdu) = decode_cursor::<GfxPdu>(&mut cursor) else {
-                return;
-            };
-            match pdu {
-                GfxPdu::StartFrame(pdu) => self.current_frame_id = Some(pdu.frame_id),
-                GfxPdu::WireToSurface2(_) => {
-                    push_wire_to_surface2_frame_id(self.current_frame_id);
-                }
-                GfxPdu::EndFrame(pdu) => {
-                    if self.current_frame_id == Some(pdu.frame_id) {
-                        self.current_frame_id = None;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
 }
 
 fn summarize_gfx_pdu(index: usize, pdu: &GfxPdu, watch_points: &[WatchPoint]) -> WirePduInfo {
@@ -924,19 +869,6 @@ struct ProbeState {
 
 thread_local! {
     static PROBE: RefCell<Option<ProbeState>> = const { RefCell::new(None) };
-    static WIRE_TO_SURFACE2_FRAME_IDS: RefCell<VecDeque<Option<u32>>> = const { RefCell::new(VecDeque::new()) };
-}
-
-fn clear_wire_to_surface2_frame_queue() {
-    WIRE_TO_SURFACE2_FRAME_IDS.with(|queue| queue.borrow_mut().clear());
-}
-
-fn push_wire_to_surface2_frame_id(frame_id: Option<u32>) {
-    WIRE_TO_SURFACE2_FRAME_IDS.with(|queue| queue.borrow_mut().push_back(frame_id));
-}
-
-pub(super) fn probe_next_wire_to_surface2_frame_id() -> Option<u32> {
-    WIRE_TO_SURFACE2_FRAME_IDS.with(|queue| queue.borrow_mut().pop_front().flatten())
 }
 
 fn probe_begin(watch_points: Vec<WatchPoint>) {
@@ -1391,56 +1323,5 @@ mod tests {
         assert_eq!(errors[0].record_seq, 42);
         assert_eq!(errors[0].detail, "decode failed");
         let _ = probe_take_events();
-    }
-
-    #[test]
-    fn wire_to_surface2_frame_probe_queues_current_egfx_frame_id() {
-        use ironrdp_core::{Encode as _, WriteCursor};
-        use ironrdp_egfx::pdu::{
-            Codec2Type, EndFramePdu, GfxPdu, PixelFormat, StartFramePdu, Timestamp,
-            WireToSurface2Pdu,
-        };
-        use ironrdp_graphics::zgfx::wrap_uncompressed;
-
-        fn encode_many(pdus: &[GfxPdu]) -> Vec<u8> {
-            let mut bytes = vec![0u8; pdus.iter().map(GfxPdu::size).sum()];
-            let mut cursor = WriteCursor::new(&mut bytes);
-            for pdu in pdus {
-                pdu.encode(&mut cursor).unwrap();
-            }
-            wrap_uncompressed(&bytes)
-        }
-
-        clear_wire_to_surface2_frame_queue();
-        let wts = || {
-            GfxPdu::WireToSurface2(WireToSurface2Pdu {
-                surface_id: 0,
-                codec_id: Codec2Type::RemoteFxProgressive,
-                codec_context_id: 1,
-                pixel_format: PixelFormat::XRgb,
-                bitmap_data: Vec::new(),
-            })
-        };
-        let payload = encode_many(&[
-            GfxPdu::StartFrame(StartFramePdu {
-                timestamp: Timestamp {
-                    milliseconds: 0,
-                    seconds: 0,
-                    minutes: 0,
-                    hours: 0,
-                },
-                frame_id: 77,
-            }),
-            wts(),
-            wts(),
-            GfxPdu::EndFrame(EndFramePdu { frame_id: 77 }),
-        ]);
-        let mut probe = WireToSurface2FrameProbe::new();
-
-        probe.prepare(&payload);
-
-        assert_eq!(probe_next_wire_to_surface2_frame_id(), Some(77));
-        assert_eq!(probe_next_wire_to_surface2_frame_id(), Some(77));
-        assert_eq!(probe_next_wire_to_surface2_frame_id(), None);
     }
 }

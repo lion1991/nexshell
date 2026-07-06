@@ -11,3 +11,10 @@
 
 # AI 指令文档（本地保留，不发布）
 CLAUDE.md
+
+# RDP/EGFX 调试产物（NEXSHELL_RDP_EGFX_DUMP 的 fork dump.rs 会把 env 值当目录写入 CWD）
+egfx*.log
+meta.jsonl
+*_progressive_s*_w*_h*_ctx*.bin
+*_avc420_*B.bin
+*_clearcodec_*.bin

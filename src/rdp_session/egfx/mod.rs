@@ -345,7 +345,9 @@ impl GraphicsPipelineHandler for EgfxHandler {
         if self.prog_count % 300 == 1 {
             eprintln!("[egfx] progressive frame #{}", self.prog_count);
         }
-        let egfx_frame_id = wire_dump::probe_next_wire_to_surface2_frame_id();
+        // frame 边界分组 id：直接用 handler 帧计数（一帧内恒定、帧间递增），不再靠 wire_dump
+        // 探针重解压整条 payload——那是视频卡帧根因（每帧多解压一遍，见热路径计时）。
+        let egfx_frame_id = Some(self.frames as u32);
         let (rects, failed) = self.compositor.write_progressive(pdu, egfx_frame_id);
         self.diag.on_progressive(rects.len(), failed);
         if self.trace {

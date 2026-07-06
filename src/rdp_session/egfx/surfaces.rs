@@ -235,6 +235,16 @@ impl Compositor {
                 continue;
             }
             painted_tiles.push((tile_x, tile_y));
+            // 先算裁剪子矩形：与本 PDU region 不相交的累积 tile，其重建结果本会被下方 clip 丢弃，
+            // 故跳过重建（reconstruct_to_rgba 是 IDWT，最重的活）。上屏像素逐字节不变。
+            let sub_rects = if noclip {
+                Vec::new()
+            } else {
+                clip_tile_to_rects(tile_x, tile_y, &paint_plan.clip_rects)
+            };
+            if !noclip && sub_rects.is_empty() {
+                continue;
+            }
             let Some(tile_state) = self
                 .progressive
                 .surface_tile(pdu.surface_id, tile_x, tile_y)
@@ -272,8 +282,8 @@ impl Compositor {
             }
             // 只把 REGION rects 裁出的子矩形上屏（对齐 FreeRDP progressive_decompress）：
             // 整块 blit 会把 RFX 影子状态里已被其他 codec 重绘区域的陈旧内容复活
-            // （拖窗描边残留/闪烁根因，ADR 0008 第⑤步）。
-            for sr in clip_tile_to_rects(tile_x, tile_y, &paint_plan.clip_rects) {
+            // （拖窗描边残留/闪烁根因，ADR 0008 第⑤步）。sub_rects 已在重建前算好。
+            for sr in sub_rects {
                 if let Some((x, y, w, h)) = blit_sub(
                     &mut surface.pixels,
                     surface.width,
