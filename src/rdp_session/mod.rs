@@ -51,6 +51,8 @@ pub struct RdpSessionConfig {
     /// 开 EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第①步）。
     /// 第①步临时用 NEXSHELL_RDP_EGFX 环境变量门控，出画面后（第②步）改默认开。
     pub enable_egfx: bool,
+    /// 远端 DPI 缩放百分比（[100,500] 有效，0=不请求，HiDPI 下=物理/逻辑×100）。
+    pub desktop_scale_factor: u32,
 }
 
 fn default_enable_egfx_from_env(disable_egfx: Option<std::ffi::OsString>) -> bool {
@@ -447,7 +449,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
             width: config.width,
             height: config.height,
         },
-        desktop_scale_factor: 0,
+        desktop_scale_factor: config.desktop_scale_factor,
         bitmap: Some(BitmapConfig {
             color_depth: 32,
             lossy_compression: true,

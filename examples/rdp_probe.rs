@@ -3,7 +3,7 @@
 //!
 //! 用法（凭据只走环境变量，绝不入代码/文件）：
 //!   RDP_HOST=1.2.3.4 RDP_USER='DOMAIN\me' RDP_PASS='***' cargo run --example rdp_probe
-//! 可选：RDP_PORT(默认3389) RDP_WIDTH(默认1280) RDP_HEIGHT(默认800)
+//! 可选：RDP_PORT(默认3389) RDP_WIDTH(默认1280) RDP_HEIGHT(默认800) RDP_SCALE(远端DPI%,默认0=不请求)
 
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,8 @@ fn main() {
     let port: u16 = env_or("RDP_PORT", 3389);
     let width: u16 = env_or("RDP_WIDTH", 1280);
     let height: u16 = env_or("RDP_HEIGHT", 800);
+    // RDP_SCALE：请求远端 DPI 缩放百分比（如 200），默认 0=不请求。
+    let desktop_scale_factor: u32 = env_or("RDP_SCALE", 0);
 
     println!("[probe] connecting {host}:{port} as {username} ({width}x{height})");
     let started = Instant::now();
@@ -35,6 +37,7 @@ fn main() {
         height,
         // 与主程序同策略：默认走 EGFX；设 NEXSHELL_RDP_DISABLE_EGFX=1 可回退旧管线对照。
         enable_egfx: default_enable_egfx(),
+        desktop_scale_factor,
     });
 
     // RDP_DURATION：采集秒数，缺省 5（长跑抓 EGFX dump 用）。

@@ -73,6 +73,16 @@ pub fn rdp_desktop_size(content_area: Vector2F, scale: f32, hidpi: bool) -> (u16
     (clamp_even(w), clamp_even(h))
 }
 
+/// 请求远端主机 DPI 缩放百分比（对齐 Windows App）。HiDPI 下按物理/逻辑比例×100，
+/// clamp 到 connector 有效区间 [100,500]（2.0→200，1.0→100）；非 HiDPI 返回 0=不请求。
+pub fn rdp_desktop_scale_factor(scale: f32, hidpi: bool) -> u32 {
+    if hidpi {
+        ((scale.max(1.0) * 100.0).round() as u32).clamp(100, 500)
+    } else {
+        0
+    }
+}
+
 fn clamp_even(value: i64) -> u16 {
     let clamped = value.clamp(640, 8192) as u16;
     clamped & !1
@@ -198,5 +208,20 @@ mod tests {
         assert_eq!((w, h), (640, 640));
         let (w, _) = rdp_desktop_size(vec2f(1001.0, 700.0), 1.0, false);
         assert_eq!((w, w % 2), (1000, 0));
+    }
+
+    #[test]
+    fn scale_factor_hidpi_retina_is_200() {
+        assert_eq!(rdp_desktop_scale_factor(2.0, true), 200);
+    }
+
+    #[test]
+    fn scale_factor_hidpi_unity_is_100() {
+        assert_eq!(rdp_desktop_scale_factor(1.0, true), 100);
+    }
+
+    #[test]
+    fn scale_factor_standard_is_zero() {
+        assert_eq!(rdp_desktop_scale_factor(2.0, false), 0);
     }
 }

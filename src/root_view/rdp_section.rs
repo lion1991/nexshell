@@ -18,7 +18,7 @@ use warpui::image_cache::{CustomImageFormat, CustomImageHeader, ImageType};
 use warpui::r#async::Timer;
 use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
 
-use crate::rdp_view::{rdp_desktop_size, RdpPageElement};
+use crate::rdp_view::{rdp_desktop_scale_factor, rdp_desktop_size, RdpPageElement};
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{
@@ -51,6 +51,8 @@ impl RootView {
             height,
             // EGFX 默认开启；必要时用 NEXSHELL_RDP_DISABLE_EGFX=1 回退旧管线。
             enable_egfx: default_enable_egfx(),
+            // HiDPI 下请求远端 DPI 缩放（对齐 Windows App）；标准画质=0 不请求。
+            desktop_scale_factor: rdp_desktop_scale_factor(scale, hidpi),
         };
 
         let handle = spawn_rdp_session(rdp_config.clone());
