@@ -245,12 +245,16 @@ impl GraphicsPipelineHandler for EgfxHandler {
     }
 
     fn on_capabilities_confirmed(&mut self, caps: &CapabilitySet) {
-        eprintln!("[egfx] caps_confirmed {caps:?}");
+        if self.trace {
+            eprintln!("[egfx] caps_confirmed {caps:?}");
+        }
         self.stats.set_pipeline_egfx();
     }
 
     fn on_reset_graphics(&mut self, width: u32, height: u32) {
-        eprintln!("[egfx] reset_graphics {width}x{height}");
+        if self.trace {
+            eprintln!("[egfx] reset_graphics {width}x{height}");
+        }
         self.compositor.reset();
         let (w, h) = (
             width.min(u16::MAX as u32) as u16,
@@ -278,10 +282,12 @@ impl GraphicsPipelineHandler for EgfxHandler {
 
     fn on_surface_created(&mut self, surface: &EgfxSurface) {
         self.diag.on_surf_create();
-        eprintln!(
-            "[egfx] create_surface id={} {}x{}",
-            surface.id, surface.width, surface.height
-        );
+        if self.trace {
+            eprintln!(
+                "[egfx] create_surface id={} {}x{}",
+                surface.id, surface.width, surface.height
+            );
+        }
         self.compositor.create_surface(surface);
     }
 
@@ -299,14 +305,16 @@ impl GraphicsPipelineHandler for EgfxHandler {
     fn on_map_surface_to_scaled_output(&mut self, pdu: &MapSurfaceToScaledOutputPdu) {
         // 缩放输出：v1 只取原点，忽略 target 缩放（少见；缩放渲染后续再做）。
         self.diag.on_map(true);
-        eprintln!(
-            "[egfx] map_scaled surface={} origin=({},{}) target={}x{}",
-            pdu.surface_id,
-            pdu.output_origin_x,
-            pdu.output_origin_y,
-            pdu.target_width,
-            pdu.target_height
-        );
+        if self.trace {
+            eprintln!(
+                "[egfx] map_scaled surface={} origin=({},{}) target={}x{}",
+                pdu.surface_id,
+                pdu.output_origin_x,
+                pdu.output_origin_y,
+                pdu.target_width,
+                pdu.target_height
+            );
+        }
         self.compositor.map_surface(
             pdu.surface_id,
             pdu.output_origin_x as i32,
@@ -358,7 +366,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
 
     fn on_wire_to_surface2(&mut self, pdu: &WireToSurface2Pdu) {
         self.prog_count += 1;
-        if self.prog_count % 300 == 1 {
+        if self.trace && self.prog_count % 300 == 1 {
             eprintln!("[egfx] progressive frame #{}", self.prog_count);
         }
         // frame 边界分组 id：直接用 handler 帧计数（一帧内恒定、帧间递增），不再靠 wire_dump
