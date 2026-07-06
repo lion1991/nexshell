@@ -203,3 +203,6 @@ ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c
 # 依赖编译一次即缓存，增量编译速度不受影响。
 [profile.dev.package."*"]
 opt-level = 3
+# 依赖不带 DWARF：不进依赖断点，换 debug 产物瘦身+链接提速。panic 回溯中依赖帧只剩
+# 函数名无行号；要深挖某依赖时临时对该包单独开回 debug = true。
+debug = false
