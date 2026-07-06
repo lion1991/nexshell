@@ -197,3 +197,9 @@ ironrdp-session = { git = "https://github.com/lion1991/IronRDP", rev = "243bb842
 ironrdp-svc = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
 ironrdp-tls = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
 ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
+
+# debug 构建只优化依赖（本 crate 保持 debug 可断点）：RDP 视频软解热点（RLGR/IDWT）
+# 在 fork ironrdp-graphics 里，无优化时慢 20-50 倍致 cargo run 下视频卡帧。
+# 依赖编译一次即缓存，增量编译速度不受影响。
+[profile.dev.package."*"]
+opt-level = 3
