@@ -405,6 +405,8 @@ struct RdpTabState {
     /// 最近算出的接收码率 Mbps / 发布帧率 fps（渲染直接用）。
     conn_info_mbps: f64,
     conn_info_fps: f64,
+    /// 动态分辨率防抖：窗口尺寸/全屏变化稳定后才请求远端重设分辨率。
+    resize_debounce: rdp_view::ResizeDebounce,
 }
 
 struct TerminalSessionTab {

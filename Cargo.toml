@@ -71,6 +71,9 @@ ironrdp-cliprdr = "0.6"
 # egfx 0.2 是 EGFX DVC 处理器。不开 openh264 feature（解码走 VideoToolbox，第②步）。
 ironrdp-dvc = "0.7"
 ironrdp-egfx = "0.2"
+# Display Control 动态通道（MS-RDPEDISP，见 docs/adr/0008）：窗口尺寸/全屏变化时
+# 实时重设远端分辨率，消除 letterbox 黑边。0.7.0 依赖 dvc 0.7/svc 0.7/pdu 0.8/core 0.2，与树内一致。
+ironrdp-displaycontrol = "0.7"
 # Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
 # macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
 # 只在单一 RDP 线程访问 NSPasteboard，无并发。

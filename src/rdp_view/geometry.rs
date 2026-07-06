@@ -88,6 +88,54 @@ fn clamp_even(value: i64) -> u16 {
     clamped & !1
 }
 
+/// 动态分辨率防抖状态机（无 Instant，按 tick 计数，可离线单测）。
+/// 每 tick 喂入观测目标分辨率；连续稳定够 `required` tick 且 ≠ 当前会话分辨率才触发一次。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResizeDebounce {
+    /// 正在计稳的候选目标；观测值变化即重置。
+    pending: Option<(u16, u16)>,
+    /// 候选已连续稳定的 tick 数。
+    ticks: u8,
+    /// 已请求的目标：等待服务端生效期间不重发（防刷屏）。
+    sent: Option<(u16, u16)>,
+}
+
+impl ResizeDebounce {
+    /// 推进一 tick。`observed`=本 tick 换算出的目标分辨率，`current`=当前会话分辨率。
+    /// 返回 `Some(target)` 表示应发一次 resize 请求。
+    pub fn tick(
+        &mut self,
+        observed: (u16, u16),
+        current: (u16, u16),
+        required: u8,
+    ) -> Option<(u16, u16)> {
+        // 目标已等于当前分辨率：无需变更，复位（服务端生效后清 sent，允许后续再请求）。
+        if observed == current {
+            self.pending = None;
+            self.ticks = 0;
+            self.sent = None;
+            return None;
+        }
+        // 已请求过同一目标：等服务端换分辨率，期间不重发。
+        if self.sent == Some(observed) {
+            return None;
+        }
+        if self.pending == Some(observed) {
+            self.ticks = self.ticks.saturating_add(1);
+            if self.ticks >= required {
+                self.pending = None;
+                self.ticks = 0;
+                self.sent = Some(observed);
+                return Some(observed);
+            }
+        } else {
+            self.pending = Some(observed);
+            self.ticks = 1;
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +271,50 @@ mod tests {
     #[test]
     fn scale_factor_standard_is_zero() {
         assert_eq!(rdp_desktop_scale_factor(2.0, false), 0);
+    }
+
+    #[test]
+    fn debounce_fires_after_stable_ticks() {
+        let mut d = ResizeDebounce::default();
+        let cur = (1280, 800);
+        let target = (1600, 900);
+        // 前两 tick 计稳未达阈值。
+        assert_eq!(d.tick(target, cur, 3), None);
+        assert_eq!(d.tick(target, cur, 3), None);
+        // 第三 tick 达阈值 → 触发一次。
+        assert_eq!(d.tick(target, cur, 3), Some(target));
+        // 目标未生效（current 仍旧）也不重发。
+        assert_eq!(d.tick(target, cur, 3), None);
+    }
+
+    #[test]
+    fn debounce_resets_when_observed_changes() {
+        let mut d = ResizeDebounce::default();
+        let cur = (1280, 800);
+        assert_eq!(d.tick((1600, 900), cur, 3), None);
+        // 尺寸变动（仍在拖）→ 重新计稳，不因累计触发。
+        assert_eq!(d.tick((1700, 950), cur, 3), None);
+        assert_eq!(d.tick((1700, 950), cur, 3), None);
+        assert_eq!(d.tick((1700, 950), cur, 3), Some((1700, 950)));
+    }
+
+    #[test]
+    fn debounce_no_fire_when_equal_current() {
+        let mut d = ResizeDebounce::default();
+        assert_eq!(d.tick((1280, 800), (1280, 800), 3), None);
+    }
+
+    #[test]
+    fn debounce_reallows_after_server_applies() {
+        let mut d = ResizeDebounce::default();
+        let target = (1600, 900);
+        assert_eq!(d.tick(target, (1280, 800), 2), None);
+        assert_eq!(d.tick(target, (1280, 800), 2), Some(target));
+        // 服务端生效：current 变为 target → sent 清空。
+        assert_eq!(d.tick(target, target, 2), None);
+        // 再次放大到新目标可重新触发。
+        let bigger = (1920, 1080);
+        assert_eq!(d.tick(bigger, target, 2), None);
+        assert_eq!(d.tick(bigger, target, 2), Some(bigger));
     }
 }

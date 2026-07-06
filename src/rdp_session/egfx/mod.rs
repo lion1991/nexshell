@@ -14,6 +14,7 @@ mod wire_dump;
 
 use std::sync::Arc;
 
+use ironrdp_displaycontrol::client::DisplayControlClient;
 use ironrdp_dvc::DrdynvcClient;
 use ironrdp_egfx::client::{
     BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler, Surface as EgfxSurface,
@@ -55,7 +56,11 @@ pub fn build_dvc_client(
     let handler = EgfxHandler::new(framebuffer, event_tx, stats, desktop_width, desktop_height);
     let client =
         GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
-    DrdynvcClient::new().with_dynamic_channel(wire_dump::wrap_if_enabled(client))
+    // 同挂 Display Control（MS-RDPEDISP）：caps 回调只标记 ready、不主动回消息，
+    // 动态分辨率由主循环经 encode_resize 发 MonitorLayout。
+    DrdynvcClient::new()
+        .with_dynamic_channel(wire_dump::wrap_if_enabled(client))
+        .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())))
 }
 
 /// EGFX 合成 handler：拥有 surface 合成器 + 共享 framebuffer/事件；帧内累积输出脏区，
@@ -254,9 +259,20 @@ impl GraphicsPipelineHandler for EgfxHandler {
         self.desktop = (w, h);
         self.acc = None;
         // 桌面尺寸不匹配则按权威尺寸重建 framebuffer（UI 侧 letterbox 自适应）。
-        let mut fb = self.framebuffer.lock();
-        if fb.width != w || fb.height != h {
-            *fb = RdpFramebuffer::new(w, h);
+        let changed = {
+            let mut fb = self.framebuffer.lock();
+            let changed = fb.width != w || fb.height != h;
+            if changed {
+                *fb = RdpFramebuffer::new(w, h);
+            }
+            changed
+        };
+        // 动态分辨率主路径：EGFX ResetGraphics 换尺寸后通知 UI（更新桌面分辨率 + 重置上传代号）。
+        if changed {
+            let _ = self.event_tx.try_send(RdpEvent::Resized {
+                width: w,
+                height: h,
+            });
         }
     }
 

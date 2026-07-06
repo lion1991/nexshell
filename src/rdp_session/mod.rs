@@ -26,16 +26,21 @@ use std::time::Duration;
 use ironrdp_async::FramedWrite;
 use ironrdp_cliprdr::backend::ClipboardMessage;
 use ironrdp_cliprdr::CliprdrClient;
+use ironrdp_connector::connection_activation::{
+    ConnectionActivationSequence, ConnectionActivationState,
+};
 use ironrdp_connector::sspi::generator::NetworkRequest;
 use ironrdp_connector::{
     BitmapConfig, ClientConnector, Config, ConnectorResult, Credentials, DesktopSize, ServerName,
 };
+use ironrdp_core::WriteBuf;
+use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp_graphics::image_processing::PixelFormat;
 use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::input::fast_path::FastPathInputEvent;
 use ironrdp_pdu::rdp::capability_sets::BitmapCodecs;
 use ironrdp_session::image::DecodedImage;
-use ironrdp_session::{ActiveStage, ActiveStageOutput};
+use ironrdp_session::{fast_path, ActiveStage, ActiveStageOutput};
 use parking_lot::Mutex;
 use tokio::net::TcpStream;
 
@@ -84,6 +89,19 @@ pub enum RdpEvent {
     Disconnected { reason: String },
     /// 远端光标形态变化：本地据此接管/隐藏/复原鼠标（accelerated 模式，不合成进帧）。
     PointerChanged(RdpPointer),
+    /// 远端分辨率已变（动态分辨率生效：EGFX ResetGraphics 或 Deactivation-Reactivation）。
+    /// framebuffer 已按新尺寸重建，UI 据此刷新桌面分辨率并重置上传代号。
+    Resized { width: u16, height: u16 },
+}
+
+/// UI → 会话线程的分辨率重设请求（物理像素，UI 已按 HiDPI 换算好）。
+/// 走独立通道而非 RdpInputEvent（后者是 Copy 的 FastPath 输入热路径）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RdpResizeRequest {
+    pub width: u16,
+    pub height: u16,
+    /// 远端 DPI 缩放百分比（[100,500] 有效，0=不请求）。
+    pub scale_factor: u32,
 }
 
 /// 远端下发的光标形态。语义对齐 mstsc/FreeRDP：
@@ -333,6 +351,8 @@ pub struct RdpSessionHandle {
     pub framebuffer: Arc<Mutex<RdpFramebuffer>>,
     /// 输入通道占位（本步不消费）。
     pub input_tx: async_channel::Sender<RdpInputEvent>,
+    /// 分辨率重设请求通道（动态分辨率）。UI 防抖后发，会话侧只做去重。
+    pub resize_tx: async_channel::Sender<RdpResizeRequest>,
     /// 运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
     pub stats: Arc<RdpStats>,
     close_tx: async_channel::Sender<()>,
@@ -359,6 +379,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
     let id = RDP_SESSION_SEQ.fetch_add(1, Ordering::Relaxed);
     let (event_tx, frame_rx) = async_channel::unbounded::<RdpEvent>();
     let (input_tx, input_rx) = async_channel::unbounded::<RdpInputEvent>();
+    let (resize_tx, resize_rx) = async_channel::unbounded::<RdpResizeRequest>();
     let (close_tx, close_rx) = async_channel::unbounded::<()>();
     let framebuffer = Arc::new(Mutex::new(RdpFramebuffer::new(config.width, config.height)));
     let stats = Arc::new(RdpStats::new());
@@ -388,6 +409,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
                     event_tx,
                     close_rx,
                     input_rx,
+                    resize_rx,
                 ));
             }
         })
@@ -397,6 +419,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
         frame_rx,
         framebuffer,
         input_tx,
+        resize_tx,
         stats,
         close_tx,
         _thread: thread,
@@ -492,6 +515,7 @@ async fn run_rdp_event_loop(
     event_tx: async_channel::Sender<RdpEvent>,
     close_rx: async_channel::Receiver<()>,
     input_rx: async_channel::Receiver<RdpInputEvent>,
+    resize_rx: async_channel::Receiver<RdpResizeRequest>,
 ) {
     let reason = match connect_and_run(
         &config,
@@ -500,6 +524,7 @@ async fn run_rdp_event_loop(
         &event_tx,
         &close_rx,
         &input_rx,
+        &resize_rx,
     )
     .await
     {
@@ -516,6 +541,7 @@ async fn connect_and_run(
     event_tx: &async_channel::Sender<RdpEvent>,
     close_rx: &async_channel::Receiver<()>,
     input_rx: &async_channel::Receiver<RdpInputEvent>,
+    resize_rx: &async_channel::Receiver<RdpResizeRequest>,
 ) -> Result<(), String> {
     // rustls 0.23 需显式选 provider（树内 ring/aws-lc-rs 共存），已装则忽略。
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -615,7 +641,10 @@ async fn connect_and_run(
     }
 
     // 阶段四：收图形更新解码合成 + 并发消费键鼠输入，编码成 FastPath 发回。
-    let (dw, dh) = (desktop.width, desktop.height);
+    // dw/dh 为可变权威桌面尺寸（Deactivation-Reactivation 后更新）。
+    let (mut dw, mut dh) = (desktop.width, desktop.height);
+    // 分辨率去重：记上次已请求的目标尺寸，相同不重发（防抖在 UI 侧）。初值=当前分辨率。
+    let mut last_requested_size = (dw, dh);
     // 帧聚合状态提升到循环外持久化：acc 跨迭代累积脏区，真帧边界/兜底才发布。
     let mut acc: Option<DirtyRect> = None;
     // 远端光标去重：记上次发出的 PointerBitmap cache_key，连续同指针不重发。
@@ -680,8 +709,32 @@ async fn connect_and_run(
                     .process_fastpath_input(&mut image, &events)
                     .map_err(|e| format!("encode input failed: {e}"))?;
                 // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
-                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key).await? {
+                let mut reactivate = None;
+                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key, &mut reactivate).await? {
                     return Ok(());
+                }
+                continue;
+            }
+            // 分辨率重设：UI 防抖后发；与上次请求相同则去重。经 Display Control 发 MonitorLayout；
+            // 通道未就绪（legacy/未协商）时 encode_resize 返回 None，静默忽略。
+            req = resize_rx.recv() => {
+                let Ok(req) = req else { continue; };
+                if (req.width, req.height) == last_requested_size {
+                    continue;
+                }
+                let (aw, ah) =
+                    MonitorLayoutEntry::adjust_display_size(u32::from(req.width), u32::from(req.height));
+                let scale = (req.scale_factor > 0).then_some(req.scale_factor);
+                match active_stage.encode_resize(aw, ah, scale, None) {
+                    Some(Ok(frame)) => {
+                        upgraded_framed
+                            .write_all(&frame)
+                            .await
+                            .map_err(|e| format!("write resize failed: {e}"))?;
+                        last_requested_size = (req.width, req.height);
+                    }
+                    Some(Err(e)) => eprintln!("[rdp] encode_resize failed: {e}"),
+                    None => {} // Display Control 通道未就绪，忽略。
                 }
                 continue;
             }
@@ -720,6 +773,8 @@ async fn connect_and_run(
             }
         }
 
+        // 本轮捕获的 Deactivation-Reactivation 序列（服务端换分辨率的兜底路径，见 drain_outputs）。
+        let mut pending_reactivation: Option<Box<ConnectionActivationSequence>> = None;
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
@@ -731,10 +786,22 @@ async fn connect_and_run(
             dh,
             event_tx,
             &mut last_pointer_key,
+            &mut pending_reactivation,
         )
         .await?
         {
             return Ok(());
+        }
+        if let Some(seq) = pending_reactivation.take() {
+            let (nw, nh) =
+                run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image).await?;
+            reset_after_resize(framebuffer, nw, nh, event_tx);
+            dw = nw;
+            dh = nh;
+            last_requested_size = (nw, nh);
+            acc = None;
+            frame_deadline = None;
+            continue;
         }
 
         if marker_support {
@@ -770,10 +837,14 @@ async fn connect_and_run(
                             dh,
                             event_tx,
                             &mut last_pointer_key,
+                            &mut pending_reactivation,
                         )
                         .await?
                         {
                             return Ok(());
+                        }
+                        if pending_reactivation.is_some() {
+                            break; // 收到 DeactivateAll：跳出 drain，下方走重激活。
                         }
                         drained += 1;
                     }
@@ -787,10 +858,90 @@ async fn connect_and_run(
                     }
                 }
             }
+            if let Some(seq) = pending_reactivation.take() {
+                let (nw, nh) =
+                    run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image)
+                        .await?;
+                reset_after_resize(framebuffer, nw, nh, event_tx);
+                dw = nw;
+                dh = nh;
+                last_requested_size = (nw, nh);
+                acc = None;
+                frame_deadline = None;
+                continue;
+            }
             publish_frame(framebuffer, &image, &mut acc, stats, event_tx);
             frame_deadline = None;
         }
     }
+}
+
+/// Deactivation-Reactivation 序列（照 ironrdp-client）：动态分辨率的兜底路径，
+/// 服务端不走 EGFX ResetGraphics 而是重激活时用。逐步读写握手 PDU，Finalized 后
+/// 按新桌面尺寸重建 DecodedImage 并复位 fastpath processor，返回新 (宽, 高)。
+async fn run_reactivation<S>(
+    framed: &mut ironrdp_tokio::TokioFramed<S>,
+    active_stage: &mut ActiveStage,
+    mut sequence: Box<ConnectionActivationSequence>,
+    image: &mut DecodedImage,
+) -> Result<(u16, u16), String>
+where
+    S: Send + Sync + Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite,
+{
+    let mut buf = WriteBuf::new();
+    loop {
+        let written = ironrdp_tokio::single_sequence_step_read(framed, &mut *sequence, &mut buf)
+            .await
+            .map_err(|e| format!("reactivation step read failed: {e}"))?;
+        if written.size().is_some() {
+            framed
+                .write_all(buf.filled())
+                .await
+                .map_err(|e| format!("reactivation step write failed: {e}"))?;
+        }
+        if let ConnectionActivationState::Finalized {
+            io_channel_id,
+            user_channel_id,
+            desktop_size,
+            share_id,
+            enable_server_pointer,
+            pointer_software_rendering,
+        } = sequence.connection_activation_state()
+        {
+            *image =
+                DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
+            active_stage.set_fastpath_processor(
+                fast_path::ProcessorBuilder {
+                    io_channel_id,
+                    user_channel_id,
+                    share_id,
+                    enable_server_pointer,
+                    pointer_software_rendering,
+                    bulk_decompressor: None,
+                }
+                .build(),
+            );
+            active_stage.set_share_id(share_id);
+            active_stage.set_enable_server_pointer(enable_server_pointer);
+            return Ok((desktop_size.width, desktop_size.height));
+        }
+    }
+}
+
+/// 分辨率变更后按新尺寸重建共享 framebuffer 并通知 UI（重激活路径用；EGFX 路径在 handler 内做）。
+fn reset_after_resize(
+    framebuffer: &Arc<Mutex<RdpFramebuffer>>,
+    width: u16,
+    height: u16,
+    event_tx: &async_channel::Sender<RdpEvent>,
+) {
+    {
+        let mut fb = framebuffer.lock();
+        if fb.width != width || fb.height != height {
+            *fb = RdpFramebuffer::new(width, height);
+        }
+    }
+    let _ = event_tx.try_send(RdpEvent::Resized { width, height });
 }
 
 /// 把 backend 回递的 cliprdr 消息编码成 SVC 帧写回服务端。
@@ -869,6 +1020,7 @@ async fn drain_outputs<W: FramedWrite>(
     desktop_h: u16,
     event_tx: &async_channel::Sender<RdpEvent>,
     last_pointer_key: &mut Option<u64>,
+    reactivation: &mut Option<Box<ConnectionActivationSequence>>,
 ) -> Result<bool, String> {
     for out in outputs {
         match out {
@@ -919,7 +1071,11 @@ async fn drain_outputs<W: FramedWrite>(
                 });
                 return Ok(true);
             }
-            // PointerPosition（本地光标本就跟手）/ DeactivateAll 等忽略。
+            // 动态分辨率兜底：服务端以重激活换分辨率时回传序列，交主循环 run_reactivation 走完。
+            ActiveStageOutput::DeactivateAll(sequence) => {
+                *reactivation = Some(sequence);
+            }
+            // PointerPosition（本地光标本就跟手）等忽略。
             _ => {}
         }
     }

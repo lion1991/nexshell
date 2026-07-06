@@ -205,6 +205,8 @@ pub(crate) struct RootView {
     show_tab_right_click_menu: Option<(usize, TabContextMenuAnchor)>,
     /// RDP 连接信息面板 1s 刷新定时器是否在跑（防重复起）。
     rdp_conn_info_refreshing: bool,
+    /// RDP 动态分辨率检测定时器是否在跑（防重复起）。
+    rdp_resize_ticking: bool,
     terminal_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_terminal_context_menu: Option<Vector2F>,
     file_panel_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
@@ -559,6 +561,7 @@ impl RootView {
             },
             show_tab_right_click_menu: None,
             rdp_conn_info_refreshing: false,
+            rdp_resize_ticking: false,
             terminal_context_menu: {
                 // warp: view.rs:3696-3702
                 let menu = ctx.add_typed_action_view(|_| {

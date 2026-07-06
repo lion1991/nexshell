@@ -26,7 +26,9 @@ use crate::{
     TITLE_BAR_HEIGHT,
 };
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
-use nexshell::rdp_session::{default_enable_egfx, spawn_rdp_session, RdpEvent, RdpSessionConfig};
+use nexshell::rdp_session::{
+    default_enable_egfx, spawn_rdp_session, RdpEvent, RdpResizeRequest, RdpSessionConfig,
+};
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
 impl RootView {
@@ -90,6 +92,7 @@ impl RootView {
                 conn_info_last_sample: None,
                 conn_info_mbps: 0.0,
                 conn_info_fps: 0.0,
+                resize_debounce: Default::default(),
             });
         }
         self.attach_rdp_frame_stream(tab_id, frame_rx, ctx);
@@ -173,6 +176,20 @@ impl RootView {
             RdpEvent::Connected => {
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
                     rdp.phase = RdpConnectionPhase::Connected;
+                }
+                // 已连接：启动动态分辨率检测（窗口尺寸/全屏变化 → 重设远端分辨率）。
+                if !self.rdp_resize_ticking {
+                    self.rdp_resize_ticking = true;
+                    Self::schedule_rdp_resize_tick(ctx);
+                }
+                ctx.notify();
+            }
+            RdpEvent::Resized { .. } => {
+                // 远端分辨率已换（framebuffer 已按新尺寸重建）：复位上传代号强制重传，
+                // 复位防抖使新分辨率成为「当前」基线。桌面分辨率显示随 framebuffer 自动更新。
+                if let Some(rdp) = self.rdp_state_mut(tab_id) {
+                    rdp.last_uploaded_generation = 0;
+                    rdp.resize_debounce = Default::default();
                 }
                 ctx.notify();
             }
@@ -404,6 +421,47 @@ impl RootView {
             }
             ctx.notify();
             Self::schedule_rdp_conn_info_tick(ctx);
+        });
+    }
+
+    /// 动态分辨率检测定时器（~100ms tick）：内容区尺寸稳定 ~400ms 且换算 ≠ 当前会话分辨率
+    /// 时向会话发 resize 请求（防抖在 ResizeDebounce）。无已连接 RDP tab 即停表。
+    fn schedule_rdp_resize_tick(ctx: &mut ViewContext<Self>) {
+        ctx.spawn(Timer::after(Duration::from_millis(100)), |me, _, ctx| {
+            let any_connected = me.terminal_tabs.iter().any(|t| {
+                t.rdp
+                    .as_ref()
+                    .map_or(false, |r| matches!(r.phase, RdpConnectionPhase::Connected))
+            });
+            if !any_connected {
+                me.rdp_resize_ticking = false;
+                return;
+            }
+            // 内容区逻辑尺寸 + 窗口 scale（全窗口共享，随尺寸/全屏实时变化）。
+            let (content_area, scale) = me.rdp_content_area(ctx);
+            for tab in me.terminal_tabs.iter_mut() {
+                let Some(rdp) = tab.rdp.as_mut() else {
+                    continue;
+                };
+                // 仅 EGFX 会话支持 Display Control 动态分辨率；legacy 不请求。
+                if !matches!(rdp.phase, RdpConnectionPhase::Connected) || !rdp.config.enable_egfx {
+                    continue;
+                }
+                let target = rdp_desktop_size(content_area, scale, rdp.hidpi);
+                let current = {
+                    let fb = rdp.handle.framebuffer.lock();
+                    (fb.width, fb.height)
+                };
+                // 4 tick ≈ 400ms 稳定才发。
+                if let Some((width, height)) = rdp.resize_debounce.tick(target, current, 4) {
+                    let _ = rdp.handle.resize_tx.try_send(RdpResizeRequest {
+                        width,
+                        height,
+                        scale_factor: rdp_desktop_scale_factor(scale, rdp.hidpi),
+                    });
+                }
+            }
+            Self::schedule_rdp_resize_tick(ctx);
         });
     }
 

@@ -65,6 +65,29 @@ fn main() {
         });
     }
 
+    // RDP_RESIZE="WxH[,delay_ms]"：到点（默认3000ms）发一次动态分辨率请求，验证 MS-RDPEDISP。
+    if let Ok(spec) = std::env::var("RDP_RESIZE") {
+        let (wh, delay) = spec.split_once(',').unwrap_or((spec.as_str(), "3000"));
+        if let Some((w, h)) = wh.split_once('x') {
+            if let (Ok(w), Ok(h), Ok(delay)) = (
+                w.trim().parse::<u16>(),
+                h.trim().parse::<u16>(),
+                delay.trim().parse::<u64>(),
+            ) {
+                let tx = handle.resize_tx.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(delay));
+                    let _ = tx.send_blocking(nexshell::rdp_session::RdpResizeRequest {
+                        width: w,
+                        height: h,
+                        scale_factor: desktop_scale_factor,
+                    });
+                    println!("[probe] sent resize {w}x{h}");
+                });
+            }
+        }
+    }
+
     // RDP_SNAPSHOT_DIR=<dir>：每 RDP_SNAPSHOT_MS（默认200）把 framebuffer 落 PNG，闪烁/残留判定用。
     if let Ok(dir) = std::env::var("RDP_SNAPSHOT_DIR") {
         let fb = handle.framebuffer.clone();
@@ -452,6 +475,9 @@ fn main() {
                 }
             }
             Ok(RdpEvent::PointerChanged(_)) => {} // probe 不关心指针形状
+            Ok(RdpEvent::Resized { width, height }) => {
+                println!("[probe] resized {width}x{height}");
+            }
             Ok(RdpEvent::Disconnected { reason }) => {
                 println!("[probe] disconnected: {reason}");
                 break;
