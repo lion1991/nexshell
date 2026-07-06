@@ -4,6 +4,7 @@
 //! 本步只做：TCP → NLA(CredSSP) → 能力协商 → 收图形更新 → 合成 framebuffer。
 //! 输入/剪贴板留占位（RdpInputEvent + input_tx），后续步骤实现。
 
+mod audio_diag;
 mod clipboard;
 mod egfx;
 mod frame_marker;
@@ -56,6 +57,8 @@ pub struct RdpSessionConfig {
     /// 开 EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第①步）。
     /// 第①步临时用 NEXSHELL_RDP_EGFX 环境变量门控，出画面后（第②步）改默认开。
     pub enable_egfx: bool,
+    /// RDPSND 音频重定向开关（仅输出方向，cpal 播放 + Opus 解码）。
+    pub enable_audio: bool,
     /// 远端 DPI 缩放百分比（[100,500] 有效，0=不请求，HiDPI 下=物理/逻辑×100）。
     pub desktop_scale_factor: u32,
 }
@@ -491,7 +494,8 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         // IronRDP 只发 PointerBitmap 事件、不把光标合成进 framebuffer（避免双光标）。
         enable_server_pointer: true,
         autologon: false,
-        enable_audio_playback: false,
+        // false 会在 Client Info 带 INFO_NOAUDIOPLAYBACK，服务端不建音频端点。
+        enable_audio_playback: config.enable_audio,
         request_data: None,
         // false=accelerated：产出非预乘 RGBA 的 PointerBitmap，用系统光标绘制。
         pointer_software_rendering: false,
@@ -505,6 +509,22 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         // 让服务端可协商 Microsoft::Windows::RDS::Graphics 通道。
         support_dyn_vc_gfx_protocol: config.enable_egfx,
     }
+}
+
+fn attach_audio_static_channels(
+    mut connector: ClientConnector,
+    rdpsnd: ironrdp_rdpsnd::client::Rdpsnd,
+) -> ClientConnector {
+    if audio_diag::enabled() {
+        eprintln!("[rdp-audio] registering legacy rdpsnd static channel");
+        eprintln!("[rdp-audio] registering no-op rdpdr static channel required by rdpsnd");
+    }
+
+    connector = connector.with_static_channel(rdpsnd);
+    connector.with_static_channel(ironrdp_rdpdr::Rdpdr::new(
+        Box::new(ironrdp_rdpdr::NoopRdpdrBackend),
+        "nexshell".to_string(),
+    ))
 }
 
 /// 事件循环：连接 → NLA → 激活 → 收帧。任何阶段出错都发 Disconnected 收尾。
@@ -565,6 +585,12 @@ async fn connect_and_run(
     let clip_backend = clipboard::TextCliprdrBackend::new(clip_tx, &clip_shared);
 
     let connector_config = build_connector_config(config);
+    if audio_diag::enabled() {
+        eprintln!(
+            "[rdp-audio] config enable_audio={} enable_egfx={} desktop={}x{}",
+            config.enable_audio, config.enable_egfx, config.width, config.height
+        );
+    }
     let mut connector = ClientConnector::new(connector_config, client_addr)
         .with_static_channel(CliprdrClient::new(Box::new(clip_backend)));
     // EGFX：门控开时挂 drdynvc 静态通道 + EGFX 合成动态通道（docs/adr/0008 第②步，出画面）。
@@ -578,6 +604,19 @@ async fn connect_and_run(
             config.height,
         ));
     }
+
+    // RDPSND：门控开时挂音频重定向静态通道（仅输出，cpal 播放 + Opus 解码）。
+    if config.enable_audio {
+        connector = attach_audio_static_channels(
+            connector,
+            ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(
+                ironrdp_rdpsnd_native::cpal::RdpsndBackend::new(),
+            )),
+        );
+    } else if audio_diag::enabled() {
+        eprintln!("[rdp-audio] legacy rdpsnd static channel disabled by config");
+    }
+    audio_diag::log_advertised_static_channels(&connector.static_channels);
 
     // 阶段一：明文协商到 TLS 升级点。
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
@@ -609,6 +648,7 @@ async fn connect_and_run(
     )
     .await
     .map_err(|e| format!("connect_finalize (NLA) failed: {e}"))?;
+    audio_diag::log_negotiated_rdpsnd_channel(&connection_result.static_channels);
 
     // 激活分辨率可能被服务端改；据此重建 framebuffer + DecodedImage。
     let desktop = connection_result.desktop_size;
@@ -1165,6 +1205,39 @@ mod tests {
         assert!(!default_enable_egfx_from_env(Some(
             std::ffi::OsString::from("1")
         )));
+    }
+
+    #[test]
+    fn audio_static_channels_include_rdpdr_dependency() {
+        let config = RdpSessionConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3389,
+            username: "alice".to_string(),
+            password: "secret".to_string(),
+            width: 1024,
+            height: 768,
+            enable_egfx: false,
+            enable_audio: true,
+            desktop_scale_factor: 100,
+        };
+        let connector = ClientConnector::new(
+            build_connector_config(&config),
+            "127.0.0.1:0".parse().expect("valid loopback socket addr"),
+        );
+        let connector = attach_audio_static_channels(
+            connector,
+            ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(
+                ironrdp_rdpsnd::client::NoopRdpsndBackend,
+            )),
+        );
+
+        let names = audio_diag::static_channel_names(&connector.static_channels);
+
+        assert!(names.iter().any(|name| name == "rdpsnd"));
+        assert!(
+            names.iter().any(|name| name == "rdpdr"),
+            "FreeRDP enables rdpdr when rdpsnd is present; got {names:?}"
+        );
     }
 
     #[test]

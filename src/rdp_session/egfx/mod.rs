@@ -58,9 +58,11 @@ pub fn build_dvc_client(
         GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
     // 同挂 Display Control（MS-RDPEDISP）：caps 回调只标记 ready、不主动回消息，
     // 动态分辨率由主循环经 encode_resize 发 MonitorLayout。
-    DrdynvcClient::new()
+    let client = DrdynvcClient::new()
         .with_dynamic_channel(wire_dump::wrap_if_enabled(client))
-        .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())))
+        .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
+
+    super::audio_diag::attach_audio_dvc_probes(client)
 }
 
 /// EGFX 合成 handler：拥有 surface 合成器 + 共享 framebuffer/事件；帧内累积输出脏区，

@@ -53,6 +53,8 @@ impl RootView {
             height,
             // EGFX 默认开启；必要时用 NEXSHELL_RDP_DISABLE_EGFX=1 回退旧管线。
             enable_egfx: default_enable_egfx(),
+            // RDPSND 音频重定向默认开启。
+            enable_audio: true,
             // HiDPI 下请求远端 DPI 缩放（对齐 Windows App）；标准画质=0 不请求。
             desktop_scale_factor: rdp_desktop_scale_factor(scale, hidpi),
         };

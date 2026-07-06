@@ -37,6 +37,8 @@ fn main() {
         height,
         // 与主程序同策略：默认走 EGFX；设 NEXSHELL_RDP_DISABLE_EGFX=1 可回退旧管线对照。
         enable_egfx: default_enable_egfx(),
+        // RDPSND 音频重定向：默认开，RDP_AUDIO=0 可关闭对照。
+        enable_audio: std::env::var("RDP_AUDIO").map(|v| v != "0").unwrap_or(true),
         desktop_scale_factor,
     });
 

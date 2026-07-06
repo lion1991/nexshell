@@ -882,6 +882,14 @@ fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Arc<At
 }
 
 fn main() -> Result<()> {
+    // 设了 RUST_LOG 才接管 tracing（看 IronRDP 内部日志，如 RUST_LOG=ironrdp_rdpsnd=debug）。
+    if std::env::var_os("RUST_LOG").is_some() {
+        use tracing_subscriber::EnvFilter;
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .try_init();
+    }
     nexshell::features::init_feature_flags();
     warp_core::features::FeatureFlag::ImeMarkedText.set_enabled(true);
     #[cfg(target_os = "macos")]

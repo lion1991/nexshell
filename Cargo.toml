@@ -1,6 +1,6 @@
 [package]
 name = "nexshell"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 publish = false
 
@@ -44,6 +44,8 @@ russh = "0.46"
 russh-sftp = "2.1"
 ssh-key = "0.6"
 tokio = { version = "1", features = ["net", "rt", "sync", "time", "io-util", "fs"] }
+# IronRDP 内部日志（tracing）出口：设 RUST_LOG 时才初始化，平时零开销。
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # 加密导出（主机库导出文件）：AES-256-GCM + PBKDF2-HMAC-SHA256
 aes-gcm = "0.10"
@@ -71,9 +73,16 @@ ironrdp-cliprdr = "0.6"
 # egfx 0.2 是 EGFX DVC 处理器。不开 openh264 feature（解码走 VideoToolbox，第②步）。
 ironrdp-dvc = "0.7"
 ironrdp-egfx = "0.2"
+ironrdp-svc = "0.7"
 # Display Control 动态通道（MS-RDPEDISP，见 docs/adr/0008）：窗口尺寸/全屏变化时
 # 实时重设远端分辨率，消除 letterbox 黑边。0.7.0 依赖 dvc 0.7/svc 0.7/pdu 0.8/core 0.2，与树内一致。
 ironrdp-displaycontrol = "0.7"
+# RDPSND 音频重定向（仅输出方向）：rdpsnd 0.8 协议层 + rdpsnd-native 0.6 cpal 播放后端
+# （默认 feature 含 Opus 解码）。与树内 pdu 0.8/svc 0.7/core 0.2 一致。
+ironrdp-rdpsnd = "0.8"
+ironrdp-rdpsnd-native = "0.6"
+# RDPDR 设备重定向通道；音频开启时只挂 no-op 后端，用于满足 rdpsnd 的通道依赖。
+ironrdp-rdpdr = "0.6"
 # Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
 # macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
 # 只在单一 RDP 线程访问 NSPasteboard，无并发。
@@ -177,26 +186,27 @@ core-text = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844c
 objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
 yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
 
-# EGFX 临时 fork（docs/adr/0008）：connector 加 SUPPORT_DYN_VC_GFX_PROTOCOL 早期能力标志
-# （等价上游 PR #1237）+ cherry-pick 上游 PR #1175（ClearCodec 客户端派发 + RLEX/vbar 解码器
-# 修复，连接级单例）。git workspace 内部是 path 依赖，只 patch 单个 crate 会与 crates.io
-# 拉的其余 ironrdp crate 出现同名两份 → 类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到
-# 同一 fork rev（版本号与 crates.io 发布版逐一一致，无 bump）。退出条件：#1237+#1175 合并发版后删 patch。
-ironrdp-async = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-connector = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-core = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-error = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-session = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-svc = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-tls = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
-ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP", rev = "243bb8422c75af5847f3861ecd2003d347aee2d1" }
+# IronRDP fork（docs/adr/0008）：保留 EGFX/ClearCodec 修复，并包含 rdpsnd 音频协商修复。
+# git workspace 内部是同一组 crate，只 patch 单个 crate 会与 crates.io 拉的其余 ironrdp crate
+# 出现同名两份导致类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到同一 fork rev。
+ironrdp-async = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-connector = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-core = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-error = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-rdpsnd = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-rdpsnd-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-rdpdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-session = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-svc = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-tls = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
 
 # debug 构建只优化依赖（本 crate 保持 debug 可断点）：RDP 视频软解热点（RLGR/IDWT）
 # 在 fork ironrdp-graphics 里，无优化时慢 20-50 倍致 cargo run 下视频卡帧。

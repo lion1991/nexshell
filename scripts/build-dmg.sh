@@ -89,7 +89,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>NexShell 需要访问局域网，以便连接你的 SSH / Serial 主机。</string>
+    <string>NexShell 需要访问局域网，以便连接你的 SSH / RDP / Serial 主机。</string>
 </dict>
 </plist>
 PLIST
