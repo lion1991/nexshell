@@ -81,8 +81,10 @@ ironrdp-displaycontrol = "0.7"
 # （默认 feature 含 Opus 解码）。与树内 pdu 0.8/svc 0.7/core 0.2 一致。
 ironrdp-rdpsnd = "0.8"
 ironrdp-rdpsnd-native = "0.6"
-# RDPDR 设备重定向通道；音频开启时只挂 no-op 后端，用于满足 rdpsnd 的通道依赖。
+# RDPDR 设备重定向通道；驱动器重定向做文件互拷，音频开启时也用它满足 rdpsnd 依赖。
 ironrdp-rdpdr = "0.6"
+# rdpdr-native：macOS 驱动器重定向后端（NixRdpdrBackend，完整读写文件系统），文件互拷。
+ironrdp-rdpdr-native = "0.6"
 # Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
 # macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
 # 只在单一 RDP 线程访问 NSPasteboard，无并发。
@@ -189,24 +191,25 @@ yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "516847
 # IronRDP fork（docs/adr/0008）：保留 EGFX/ClearCodec 修复，并包含 rdpsnd 音频协商修复。
 # git workspace 内部是同一组 crate，只 patch 单个 crate 会与 crates.io 拉的其余 ironrdp crate
 # 出现同名两份导致类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到同一 fork rev。
-ironrdp-async = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-connector = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-core = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-error = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-rdpsnd = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-rdpsnd-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-rdpdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-session = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-svc = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-tls = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
-ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP.git", rev = "6908d0c0050162f95b3b1c3d1fdf6d53e100fc25" }
+ironrdp-async = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-connector = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-core = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-error = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-rdpsnd = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-rdpsnd-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-rdpdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-rdpdr-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-session = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-svc = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-tls = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
+ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP.git", rev = "f12092863ecb4e0443fd8da2d78eb9c6ac0afe21" }
 
 # debug 构建只优化依赖（本 crate 保持 debug 可断点）：RDP 视频软解热点（RLGR/IDWT）
 # 在 fork ironrdp-graphics 里，无优化时慢 20-50 倍致 cargo run 下视频卡帧。

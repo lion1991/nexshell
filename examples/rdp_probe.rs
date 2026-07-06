@@ -39,6 +39,8 @@ fn main() {
         enable_egfx: default_enable_egfx(),
         // RDPSND 音频重定向：默认开，RDP_AUDIO=0 可关闭对照。
         enable_audio: std::env::var("RDP_AUDIO").map(|v| v != "0").unwrap_or(true),
+        // rdpdr 驱动器重定向（~/NexShell RDP → \\tsclient\NexShell）：默认开，RDP_DRIVE=0 可关。
+        enable_drive: std::env::var("RDP_DRIVE").map(|v| v != "0").unwrap_or(true),
         desktop_scale_factor,
     });
 

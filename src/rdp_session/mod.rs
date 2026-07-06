@@ -8,6 +8,7 @@ mod audio_diag;
 mod clipboard;
 mod egfx;
 mod frame_marker;
+mod rdpdr;
 mod stats;
 
 pub use egfx::{
@@ -59,6 +60,8 @@ pub struct RdpSessionConfig {
     pub enable_egfx: bool,
     /// RDPSND 音频重定向开关（仅输出方向，cpal 播放 + Opus 解码）。
     pub enable_audio: bool,
+    /// RDPDR 驱动器重定向开关（`~/NexShell RDP` ↔ 远端 \\tsclient\NexShell 文件互拷）。
+    pub enable_drive: bool,
     /// 远端 DPI 缩放百分比（[100,500] 有效，0=不请求，HiDPI 下=物理/逻辑×100）。
     pub desktop_scale_factor: u32,
 }
@@ -511,20 +514,23 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
     }
 }
 
+/// rdpsnd 伴随规则：audio 或 drive 任一开都必须挂 rdpsnd。
+/// MS-RDPEFS（IronRDP rdpdr/src/lib.rs:29）——rdpdr 须与 rdpsnd 同时 advertise，
+/// 否则服务端不回 rdpdr 响应，盘符静默失效。
+fn needs_rdpsnd(enable_audio: bool, enable_drive: bool) -> bool {
+    enable_audio || enable_drive
+}
+
 fn attach_audio_static_channels(
-    mut connector: ClientConnector,
+    connector: ClientConnector,
     rdpsnd: ironrdp_rdpsnd::client::Rdpsnd,
 ) -> ClientConnector {
+    // rdpdr（rdpsnd 依赖）已拆到独立门控 rdpdr::build_channel，此处只挂 rdpsnd。
     if audio_diag::enabled() {
         eprintln!("[rdp-audio] registering legacy rdpsnd static channel");
-        eprintln!("[rdp-audio] registering no-op rdpdr static channel required by rdpsnd");
     }
 
-    connector = connector.with_static_channel(rdpsnd);
-    connector.with_static_channel(ironrdp_rdpdr::Rdpdr::new(
-        Box::new(ironrdp_rdpdr::NoopRdpdrBackend),
-        "nexshell".to_string(),
-    ))
+    connector.with_static_channel(rdpsnd)
 }
 
 /// 事件循环：连接 → NLA → 激活 → 收帧。任何阶段出错都发 Disconnected 收尾。
@@ -572,6 +578,10 @@ async fn connect_and_run(
     let tcp = TcpStream::connect(&addr)
         .await
         .map_err(|e| format!("TCP connect failed: {e}"))?;
+    // 关 Nagle：rdpdr 是请求-响应式小包，Nagle+延迟ACK 把每个响应压 ~40ms，
+    // 驱动器传文件吞吐锁死在百 KB/s。mstsc/FreeRDP/IronRDP 官方 client 同样开。
+    tcp.set_nodelay(true)
+        .map_err(|e| format!("set TCP_NODELAY failed: {e}"))?;
     let client_addr: SocketAddr = tcp
         .local_addr()
         .map_err(|e| format!("local_addr failed: {e}"))?;
@@ -605,17 +615,27 @@ async fn connect_and_run(
         ));
     }
 
-    // RDPSND：门控开时挂音频重定向静态通道（仅输出，cpal 播放 + Opus 解码）。
-    if config.enable_audio {
-        connector = attach_audio_static_channels(
-            connector,
+    // RDPSND：MS-RDPEFS 要求 rdpdr 必须与 rdpsnd 一起 advertise，否则服务端不回 rdpdr。
+    // 故 audio 或 drive 任一开就挂：audio 用真实 cpal 播放后端，仅 drive 用 Noop 静默伴随。
+    if needs_rdpsnd(config.enable_audio, config.enable_drive) {
+        let rdpsnd = if config.enable_audio {
             ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(
                 ironrdp_rdpsnd_native::cpal::RdpsndBackend::new(),
-            )),
-        );
+            ))
+        } else {
+            ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(ironrdp_rdpsnd::client::NoopRdpsndBackend))
+        };
+        connector = attach_audio_static_channels(connector, rdpsnd);
     } else if audio_diag::enabled() {
-        eprintln!("[rdp-audio] legacy rdpsnd static channel disabled by config");
+        eprintln!("[rdp-audio] rdpsnd static channel disabled (no audio, no drive)");
     }
+
+    // RDPDR：驱动器重定向（文件互拷）独立门控；audio 开时也需它满足 rdpsnd 依赖。
+    // 只注册一次，与 audio 解耦。
+    if let Some(rdpdr_channel) = rdpdr::build_channel(config.enable_drive, config.enable_audio) {
+        connector = connector.with_static_channel(rdpdr_channel);
+    }
+
     audio_diag::log_advertised_static_channels(&connector.static_channels);
 
     // 阶段一：明文协商到 TLS 升级点。
@@ -1209,6 +1229,7 @@ mod tests {
 
     #[test]
     fn audio_static_channels_include_rdpdr_dependency() {
+        // 重构后 rdpsnd 与 rdpdr 分别注册：照 connect_and_run 的组装方式验证「audio 开时 rdpdr 在场」。
         let config = RdpSessionConfig {
             host: "127.0.0.1".to_string(),
             port: 3389,
@@ -1218,18 +1239,22 @@ mod tests {
             height: 768,
             enable_egfx: false,
             enable_audio: true,
+            enable_drive: false,
             desktop_scale_factor: 100,
         };
         let connector = ClientConnector::new(
             build_connector_config(&config),
             "127.0.0.1:0".parse().expect("valid loopback socket addr"),
         );
-        let connector = attach_audio_static_channels(
+        let mut connector = attach_audio_static_channels(
             connector,
             ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(
                 ironrdp_rdpsnd::client::NoopRdpsndBackend,
             )),
         );
+        if let Some(channel) = rdpdr::build_channel(config.enable_drive, config.enable_audio) {
+            connector = connector.with_static_channel(channel);
+        }
 
         let names = audio_diag::static_channel_names(&connector.static_channels);
 
@@ -1237,6 +1262,58 @@ mod tests {
         assert!(
             names.iter().any(|name| name == "rdpdr"),
             "FreeRDP enables rdpdr when rdpsnd is present; got {names:?}"
+        );
+    }
+
+    #[test]
+    fn rdpsnd_companion_follows_audio_or_drive() {
+        // 核心修复：drive 单开（audio 关）也必须挂 rdpsnd 伴随通道。
+        assert!(needs_rdpsnd(true, false));
+        assert!(needs_rdpsnd(false, true));
+        assert!(needs_rdpsnd(true, true));
+        assert!(!needs_rdpsnd(false, false));
+    }
+
+    #[test]
+    fn drive_only_advertises_rdpsnd_and_rdpdr() {
+        // audio 关、drive 开：照 connect_and_run 组装，验证 rdpsnd 伴随 + rdpdr 同时在场。
+        let config = RdpSessionConfig {
+            host: "127.0.0.1".to_string(),
+            port: 3389,
+            username: "alice".to_string(),
+            password: "secret".to_string(),
+            width: 1024,
+            height: 768,
+            enable_egfx: false,
+            enable_audio: false,
+            enable_drive: true,
+            desktop_scale_factor: 100,
+        };
+        let mut connector = ClientConnector::new(
+            build_connector_config(&config),
+            "127.0.0.1:0".parse().expect("valid loopback socket addr"),
+        );
+        // drive 开、audio 关 → Noop rdpsnd 静默伴随（单测里避免真实 cpal 设备）。
+        if needs_rdpsnd(config.enable_audio, config.enable_drive) {
+            connector = attach_audio_static_channels(
+                connector,
+                ironrdp_rdpsnd::client::Rdpsnd::new(Box::new(
+                    ironrdp_rdpsnd::client::NoopRdpsndBackend,
+                )),
+            );
+        }
+        if let Some(channel) = rdpdr::build_channel(config.enable_drive, config.enable_audio) {
+            connector = connector.with_static_channel(channel);
+        }
+
+        let names = audio_diag::static_channel_names(&connector.static_channels);
+        assert!(
+            names.iter().any(|name| name == "rdpsnd"),
+            "drive needs rdpsnd companion (MS-RDPEFS); got {names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "rdpdr"),
+            "drive registers rdpdr; got {names:?}"
         );
     }
 
