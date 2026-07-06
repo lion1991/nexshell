@@ -84,6 +84,7 @@ impl RootView {
                 last_uploaded_generation: 0,
                 viewport: Arc::new(Mutex::new(None)),
                 last_mouse: Arc::new(Mutex::new(None)),
+                mod_tracker: Arc::new(Mutex::new(Default::default())),
                 current_pointer: warpui::platform::Cursor::Arrow,
                 pointer_cursor_cache: std::collections::HashMap::new(),
                 hidpi,
@@ -303,6 +304,10 @@ impl RootView {
         for event in crate::rdp_view::keymap::modifier_release_events() {
             let _ = rdp.handle.input_tx.try_send(event);
         }
+        // 全量抬起后清账，tracker 与远端复位同步（避免残留状态误判后续对账）。
+        if let Ok(mut tracker) = rdp.mod_tracker.lock() {
+            tracker.clear();
+        }
     }
 
     /// RDP 整页 body：连接中 / 已连接（嵌画面 Element）/ 已断开（reason + 重连按钮）。
@@ -338,6 +343,7 @@ impl RootView {
                     rdp.viewport.clone(),
                     rdp.handle.input_tx.clone(),
                     rdp.last_mouse.clone(),
+                    rdp.mod_tracker.clone(),
                     rdp.current_pointer,
                 )
                 .finish();

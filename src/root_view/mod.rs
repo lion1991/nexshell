@@ -1510,6 +1510,7 @@ impl View for RootView {
             self.report_terminal_focus(false);
             self.window_key_focused.set(false);
             self.sync_rdp_hotkey_guard(); // 失焦：主动 Pop 兜底（不只靠系统前台自动恢复）。
+            self.release_rdp_modifiers(self.active_tab_index); // 失焦兜底抬起远端修饰键，防卡键（非 RDP tab 内部静默跳过）。
         }
     }
 

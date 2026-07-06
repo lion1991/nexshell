@@ -34,6 +34,8 @@ pub struct RdpPageElement {
     input_tx: async_channel::Sender<RdpInputEvent>,
     /// 上次发出的鼠标远端坐标（跨帧共享；Element 每帧重建）。去重连续 MouseMove 用。
     last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
+    /// 修饰键持续对账器（与 RdpTabState 共用）：每个键鼠事件按本地 flags 补发丢失的 keyup，防 Alt 粘滞。
+    mod_tracker: Arc<Mutex<keymap::ModifierTracker>>,
     /// 远端接管光标：鼠标在画面内时套用（每帧由 RootView 传入当前值）。
     cursor: warpui_core::platform::Cursor,
     size: Option<Vector2F>,
@@ -48,6 +50,7 @@ impl RdpPageElement {
         viewport_out: Arc<Mutex<Option<RdpViewport>>>,
         input_tx: async_channel::Sender<RdpInputEvent>,
         last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
+        mod_tracker: Arc<Mutex<keymap::ModifierTracker>>,
         cursor: warpui_core::platform::Cursor,
     ) -> Self {
         Self {
@@ -57,6 +60,7 @@ impl RdpPageElement {
             viewport_out,
             input_tx,
             last_mouse,
+            mod_tracker,
             cursor,
             size: None,
             origin: None,
@@ -66,6 +70,19 @@ impl RdpPageElement {
     /// 发一个输入事件；满或断开则丢弃（丢新的），绝不阻塞 UI 线程。返回 try_send 是否成功。
     fn send(&self, event: RdpInputEvent) -> bool {
         self.input_tx.try_send(event).is_ok()
+    }
+
+    /// 对账：本地 flags 显示某修饰键未按而 tracker 记为按下 → 立即补发 release。防远端修饰键粘滞。
+    fn reconcile_modifiers(&self, flags: keymap::ModifierFlags) {
+        let Ok(mut tracker) = self.mod_tracker.lock() else {
+            return;
+        };
+        for event in tracker.reconcile(flags) {
+            self.send(event);
+            if key_trace() {
+                eprintln!("[nexshell key-debug] page reconcile 补发 release {event:?}");
+            }
+        }
     }
 
     /// 远端光标接管：鼠标在画面内套用远端下发光标，画面外（黑边）恢复箭头。
@@ -275,6 +292,13 @@ impl Element for RdpPageElement {
                     }
                     return false;
                 }
+                // keystroke 自带完整修饰键 flags，借普通键按下对账补发丢失的 keyup。
+                self.reconcile_modifiers(keymap::ModifierFlags::full(
+                    keystroke.shift,
+                    keystroke.ctrl,
+                    keystroke.alt,
+                    keystroke.cmd,
+                ));
                 let scancode = details
                     .key_without_modifiers
                     .as_deref()
@@ -324,6 +348,10 @@ impl Element for RdpPageElement {
                     extended,
                     pressed,
                 });
+                // 记账：本键 down/up 已发，供后续事件对账。
+                if let Ok(mut tracker) = self.mod_tracker.lock() {
+                    tracker.on_sent(scancode, extended, pressed);
+                }
                 if key_trace() {
                     eprintln!(
                         "[nexshell key-debug] page Modifier code={:?} scancode=0x{:02X} ext={} pressed={} try_send={}",
@@ -337,25 +365,37 @@ impl Element for RdpPageElement {
             // 拽回初始位（视频/游戏窗每帧重绘时尤甚）→ 丢弃。真实移动 is_synthetic=false 照常。
             Event::MouseMoved {
                 position,
+                cmd,
+                shift,
                 is_synthetic,
-                ..
             } => {
                 // 合成 MouseMoved 每帧补发：借它把远端光标持续套用（画面内）/恢复（画面外）。
                 self.apply_cursor(*position, ctx);
                 if *is_synthetic {
                     return true;
                 }
+                // 真实移动只带 cmd/shift（无 ctrl/alt）：仅对账这两类，避免误抬 Alt。
+                self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
                 self.send_mouse_move(*position)
             }
             // 左键拖拽。丢弃平台层合成拖拽（静止自动滚动泵：坐标冻结、每 16ms 重发）。
-            Event::LeftMouseDragged { position, .. } => {
+            Event::LeftMouseDragged {
+                position,
+                modifiers,
+            } => {
                 self.apply_cursor(*position, ctx);
                 if warpui_core::event::is_synthetic_drag() {
                     return true;
                 }
+                self.reconcile_modifiers(mods_flags(*modifiers));
                 self.send_mouse_move(*position)
             }
-            Event::LeftMouseDown { position, .. } => {
+            Event::LeftMouseDown {
+                position,
+                modifiers,
+                ..
+            } => {
+                self.reconcile_modifiers(mods_flags(*modifiers));
                 let Some((x, y)) = self.device_coords(*position) else {
                     return false;
                 };
@@ -367,7 +407,11 @@ impl Element for RdpPageElement {
                 });
                 true
             }
-            Event::LeftMouseUp { position, .. } => {
+            Event::LeftMouseUp {
+                position,
+                modifiers,
+            } => {
+                self.reconcile_modifiers(mods_flags(*modifiers));
                 let Some((x, y)) = self.device_coords(*position) else {
                     return false;
                 };
@@ -379,21 +423,41 @@ impl Element for RdpPageElement {
                 });
                 true
             }
-            Event::RightMouseDown { position, .. } => {
+            Event::RightMouseDown {
+                position,
+                cmd,
+                shift,
+                ..
+            } => {
+                self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
                 self.send_synthetic_click(*position, RdpButton::Right)
             }
-            Event::MiddleMouseDown { position, .. } => {
+            Event::MiddleMouseDown {
+                position,
+                cmd,
+                shift,
+                ..
+            } => {
+                self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
                 self.send_synthetic_click(*position, RdpButton::Middle)
             }
             Event::ScrollWheel {
                 position,
                 delta,
                 precise,
-                ..
-            } => self.send_wheel(*position, *delta, *precise),
+                modifiers,
+            } => {
+                self.reconcile_modifiers(mods_flags(*modifiers));
+                self.send_wheel(*position, *delta, *precise)
+            }
             _ => false,
         }
     }
+}
+
+/// warpui 完整 ModifiersState → keymap 对账 flags（⌘→Win 归入 command 类）。
+fn mods_flags(m: warpui_core::event::ModifiersState) -> keymap::ModifierFlags {
+    keymap::ModifierFlags::full(m.shift, m.ctrl, m.alt, m.cmd)
 }
 
 /// 按键链路追踪开关（NEXSHELL_DEBUG_KEYS=1，与 warpui 平台层同开关）。

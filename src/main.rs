@@ -390,6 +390,9 @@ struct RdpTabState {
     /// 上次发往远端的鼠标坐标；相同则不重发 MouseMove（Element 每帧重建，故存共享层）。
     /// 拖窗时 AppKit 会持续投递重复/近重复 LeftMouseDragged，去重防窗口在移动循环里抖动。
     last_mouse: std::sync::Arc<std::sync::Mutex<Option<(u16, u16)>>>,
+    /// 修饰键持续对账器（与 page_element 共用）：跟踪已发 down 未发 up 的修饰键，
+    /// 每个键鼠事件按本地 flags 对账补发丢失的 keyup，防远端「Alt 粘滞」卡键。
+    mod_tracker: std::sync::Arc<std::sync::Mutex<rdp_view::keymap::ModifierTracker>>,
     /// 远端光标接管：当前应显示的本地光标（PointerChanged 时更新，画面 hover 时套用）。
     current_pointer: warpui::platform::Cursor,
     /// 远端指针备忘：cache_key → (注册时 scale, Cursor)。同指针反复切换不重复注册。

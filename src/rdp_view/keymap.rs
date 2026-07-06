@@ -156,9 +156,166 @@ pub fn modifier_release_events() -> [RdpInputEvent; 8] {
     })
 }
 
+/// tracker 跟踪的 8 个修饰键：(scancode, extended, 类别)。类别 0=Shift 1=Ctrl 2=Alt 3=Cmd/Win。
+/// 顺序与 modifier_release_events 一致。
+const MOD_KEYS: [(u8, bool, usize); 8] = [
+    (0x2A, NORM, 0), // LShift
+    (0x36, NORM, 0), // RShift
+    (0x1D, NORM, 1), // LCtrl
+    (0x1D, EXT, 1),  // RCtrl
+    (0x38, NORM, 2), // LAlt
+    (0x38, EXT, 2),  // RAlt
+    (0x5B, EXT, 3),  // LWin
+    (0x5C, EXT, 3),  // RWin
+];
+
+/// 本地 modifiers 快照（供对账）。`None`=该类别本事件不携带、不参与对账（如 MouseMoved 无 ctrl/alt）。
+#[derive(Clone, Copy, Default, Debug)]
+pub struct ModifierFlags {
+    pub shift: Option<bool>,
+    pub control: Option<bool>,
+    pub alt: Option<bool>,
+    pub command: Option<bool>,
+}
+
+impl ModifierFlags {
+    /// 完整 flags（ScrollWheel / LeftMouse* / KeyDown 均可给全 4 类）。
+    pub fn full(shift: bool, control: bool, alt: bool, command: bool) -> Self {
+        Self {
+            shift: Some(shift),
+            control: Some(control),
+            alt: Some(alt),
+            command: Some(command),
+        }
+    }
+
+    /// 仅 cmd/shift 已知（MouseMoved / Right / Middle 只带这两个 bool）；ctrl/alt 未知不对账。
+    pub fn cmd_shift(command: bool, shift: bool) -> Self {
+        Self {
+            shift: Some(shift),
+            command: Some(command),
+            control: None,
+            alt: None,
+        }
+    }
+}
+
+/// 修饰键持续对账器：记「已发 down 未发 up」的 8 键；本地 flags 显示某类未按而 tracker 记为按下时，
+/// 补发该键 release。左右无法从 flags 区分，故按类别（该类 flag=false 则左右都补）。
+#[derive(Default)]
+pub struct ModifierTracker {
+    down: [bool; 8],
+}
+
+impl ModifierTracker {
+    /// 记账一次修饰键的 down/up 发送。非修饰 scancode 静默忽略。
+    pub fn on_sent(&mut self, scancode: u8, extended: bool, pressed: bool) {
+        if let Some(i) = MOD_KEYS
+            .iter()
+            .position(|&(s, e, _)| s == scancode && e == extended)
+        {
+            self.down[i] = pressed;
+        }
+    }
+
+    /// 对账：类别 flag 明确为 false 而 tracker 记为按下 → 补发 release 并清账。`None` 类别跳过。
+    /// flag 为 true（用户真按着）绝不误发。
+    pub fn reconcile(&mut self, flags: ModifierFlags) -> Vec<RdpInputEvent> {
+        let cats = [flags.shift, flags.control, flags.alt, flags.command];
+        let mut out = Vec::new();
+        for (i, &(scancode, extended, cat)) in MOD_KEYS.iter().enumerate() {
+            if self.down[i] && cats[cat] == Some(false) {
+                out.push(RdpInputEvent::Key {
+                    scancode,
+                    extended,
+                    pressed: false,
+                });
+                self.down[i] = false;
+            }
+        }
+        out
+    }
+
+    /// 全量抬起（切 tab / 失焦）后清账，与 RootView 侧全量 release 同步复位。
+    pub fn clear(&mut self) {
+        self.down = [false; 8];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key_up(scancode: u8, extended: bool) -> RdpInputEvent {
+        RdpInputEvent::Key {
+            scancode,
+            extended,
+            pressed: false,
+        }
+    }
+
+    #[test]
+    fn reconcile_releases_lost_keyup() {
+        // 发了 LAlt down，随后本地 flags 显示 alt 未按 → 补发 LAlt release 一次。
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x38, NORM, true);
+        let out = t.reconcile(ModifierFlags::full(false, false, false, false));
+        assert_eq!(out, vec![key_up(0x38, NORM)]);
+        // 已清账：再对账不重复补发。
+        assert!(t
+            .reconcile(ModifierFlags::full(false, false, false, false))
+            .is_empty());
+    }
+
+    #[test]
+    fn reconcile_keeps_held_modifier() {
+        // 用户真按着 Alt（flags.alt=true）：绝不误发 release。
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x38, NORM, true);
+        assert!(t
+            .reconcile(ModifierFlags::full(false, false, true, false))
+            .is_empty());
+    }
+
+    #[test]
+    fn reconcile_releases_both_sides_of_category() {
+        // 左右 Ctrl 都记为按下，flags.ctrl=false → 左右都补 release。
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x1D, NORM, true);
+        t.on_sent(0x1D, EXT, true);
+        let out = t.reconcile(ModifierFlags::full(false, false, false, false));
+        assert_eq!(out, vec![key_up(0x1D, NORM), key_up(0x1D, EXT)]);
+    }
+
+    #[test]
+    fn reconcile_skips_unknown_category() {
+        // MouseMoved 只带 cmd/shift：ctrl/alt 为 None，不对账（不误抬 Alt）。
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x38, NORM, true);
+        assert!(t
+            .reconcile(ModifierFlags::cmd_shift(false, false))
+            .is_empty());
+    }
+
+    #[test]
+    fn on_sent_up_clears_account() {
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x2A, NORM, true);
+        t.on_sent(0x2A, NORM, false);
+        assert!(t
+            .reconcile(ModifierFlags::full(false, false, false, false))
+            .is_empty());
+    }
+
+    #[test]
+    fn clear_resets_all() {
+        let mut t = ModifierTracker::default();
+        t.on_sent(0x5B, EXT, true);
+        t.clear();
+        assert!(t
+            .reconcile(ModifierFlags::full(false, false, false, false))
+            .is_empty());
+    }
 
     #[test]
     fn letters_map_to_set1() {
