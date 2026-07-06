@@ -106,13 +106,19 @@ else
 fi
 
 # ── 3. 签名 ──
-# 有开发者证书就正式签（DR 锚 Team ID，TCC 授权重建不掉）；否则回退 ad-hoc。可用 NEXSHELL_SIGN_IDENTITY 覆盖。
+# 有开发者证书就正式签（DR 锚 Team ID，TCC 授权重建不掉）；否则回退 ad-hoc。可用 NEXSHELL_SIGN_IDENTITY 覆盖（名字或 SHA-1）。
+# 按 SHA-1 指纹签而非名字：login keychain 常有同名重复证书（如多张同名 Apple Development），按名字 codesign 会 ambiguous 报错中断。
 SIGN_IDENTITY="${NEXSHELL_SIGN_IDENTITY:-}"
+SIGN_LABEL="$SIGN_IDENTITY"
 if [ -z "$SIGN_IDENTITY" ]; then
-    SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | grep -oE '"(Developer ID Application|Apple Development): [^"]+"' | head -1 | tr -d '"' || true)"
+    IDENTITY_LINE="$(security find-identity -v -p codesigning 2>/dev/null | grep -E '"(Developer ID Application|Apple Development): ' | head -1 || true)"
+    if [ -n "$IDENTITY_LINE" ]; then
+        SIGN_IDENTITY="$(echo "$IDENTITY_LINE" | awk '{print $2}')"            # 唯一指纹，消除同名歧义
+        SIGN_LABEL="$(echo "$IDENTITY_LINE" | sed -E 's/.*"(.*)".*/\1/') ($SIGN_IDENTITY)"
+    fi
 fi
 if [ -n "$SIGN_IDENTITY" ]; then
-    echo "▸ 正式签名: ${SIGN_IDENTITY}"
+    echo "▸ 正式签名: ${SIGN_LABEL}"
     codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 else
     echo "▸ 无开发者证书，回退 Ad-hoc 签名 …"
@@ -139,7 +145,10 @@ hdiutil create \
 
 rm -rf "$STAGING"
 
-DMG_SIZE=$(du -h "$DMG_DIR/$DMG_NAME" | cut -f1)
+DMG_PATH="$DMG_DIR/$DMG_NAME"
+DMG_SIZE=$(du -h "$DMG_PATH" | cut -f1)
 echo ""
-echo "✔ 完成: $DMG_DIR/$DMG_NAME ($DMG_SIZE)"
-echo "  双击 DMG → 拖拽 $APP_NAME 到 Applications 即可"
+echo "✔ 完成 ($DMG_SIZE)，双击 DMG → 拖拽 $APP_NAME 到 Applications 即可"
+# 末行单独输出绝对路径：便于复制 / 终端点击 / tail -1 脚本取用
+echo ""
+echo "$DMG_PATH"
