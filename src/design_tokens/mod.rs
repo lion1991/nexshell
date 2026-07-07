@@ -10,7 +10,7 @@ pub mod semantic;
 use warp_core::ui::theme::WarpTheme;
 use warpui_core::color::ColorU;
 
-pub use elevation::Elevation;
+pub use elevation::{Elevation, Glass};
 pub use palette::ThemePalette;
 pub use semantic::{SemanticColors, TRANSPARENT, WINDOWS_CLOSE_HOVER};
 

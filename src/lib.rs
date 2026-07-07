@@ -37,6 +37,7 @@ pub mod file_panel;
 pub mod frame_export;
 pub mod git_ops;
 pub mod git_panel;
+pub mod glass_backdrop;
 pub mod history_suggester;
 pub mod host_management;
 pub mod host_overview;

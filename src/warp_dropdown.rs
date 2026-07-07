@@ -21,6 +21,7 @@ const MENU_ITEM_VERTICAL_PADDING: f32 = 5.0;
 const MENU_ITEM_HORIZONTAL_PADDING: f32 = 14.0;
 const DEFAULT_MENU_MAX_HEIGHT: f32 = 300.0;
 use nexshell::design_tokens::Elevation;
+use nexshell::glass_backdrop::GlassBackdrop;
 
 #[derive(Clone)]
 pub struct WarpDropdownOption<A: Action + Clone> {
@@ -224,6 +225,7 @@ where
     .with_overlayed_scrollbar()
     .finish();
 
+    // 玻璃背景：菜单盒不铺实色，底色由 GlassBackdrop 的模糊+tint 提供。
     let menu = Container::new(
         ConstrainedBox::new(scrollable)
             .with_width(menu_width)
@@ -232,10 +234,14 @@ where
     )
     .with_padding_top(MENU_VERTICAL_PADDING)
     .with_padding_bottom(MENU_VERTICAL_PADDING)
-    .with_background(theme.surface_2())
     .with_border(Border::all(1.0).with_border_fill(theme.outline()))
     .with_corner_radius(CornerRadius::with_all(Radius::Pixels(5.0)));
-    Elevation::overlay().apply_container(menu).finish()
+    GlassBackdrop::new(
+        Elevation::overlay().apply_container(menu).finish(),
+        5.0,
+        theme.surface_2().into_solid(),
+    )
+    .finish()
 }
 
 fn render_dropdown_menu_item<A>(

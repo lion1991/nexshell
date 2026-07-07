@@ -45,6 +45,7 @@ const MINIMUM_MENU_ITEM_FONT_SIZE: f32 = 5.;
 const PADDING_TO_ICON_SIZE_MULTIPLIER: f32 = 3.;
 const MENU_ITEM_LEFT_PADDING_MULTIPLIER: f32 = 1.5;
 use crate::design_tokens::Elevation;
+use crate::glass_backdrop::GlassBackdrop;
 const SECONDARY_TEXT_RATIO: f32 = 0.9;
 
 #[derive(Clone, Debug)]
@@ -2827,10 +2828,10 @@ impl<A: Action + Clone> SubMenu<A> {
                     (submenu, MENU_VERTICAL_PADDING, MENU_VERTICAL_PADDING)
                 };
 
+                // 玻璃背景：菜单盒不再铺实色，底色由 GlassBackdrop 的模糊+tint 提供。
                 let mut container = Container::new(content)
                     .with_padding_top(top_padding)
                     .with_padding_bottom(bottom_padding)
-                    .with_background(background_color)
                     .with_corner_radius(corner_radius);
 
                 if let Some(border) = border {
@@ -2847,13 +2848,23 @@ impl<A: Action + Clone> SubMenu<A> {
                     menu = Elevation::overlay().apply_container(menu);
                 }
 
+                // 玻璃圆角随菜单盒：压平底角时取 0，避免圆角玻璃在方角盒外露/缺角。
+                let glass_radius = if flatten_bottom_corners && depth == 0 {
+                    0.0
+                } else {
+                    5.0
+                };
+                let menu =
+                    GlassBackdrop::new(menu.finish(), glass_radius, background_color.into_solid())
+                        .finish();
+
                 if depth == 0 {
-                    row.add_child(menu.finish());
+                    row.add_child(menu);
                 } else {
                     let saved_position_id = Self::save_position_id(depth - 1);
 
                     stack.add_positioned_overlay_child(
-                        menu.finish(),
+                        menu,
                         OffsetPositioning::offset_from_save_position_element(
                             saved_position_id,
                             vec2f(

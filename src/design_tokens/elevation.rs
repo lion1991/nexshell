@@ -5,8 +5,9 @@
 
 use warpui_core::color::ColorU;
 use warpui_core::elements::Container;
+use warpui_core::geometry::rect::RectF;
 use warpui_core::geometry::vector::vec2f;
-use warpui_core::scene::{self, DropShadow};
+use warpui_core::scene::{self, BackdropBlur, DropShadow};
 
 const fn black(a: u8) -> ColorU {
     ColorU {
@@ -63,5 +64,38 @@ impl Elevation {
     pub fn apply_container(&self, c: Container) -> Container {
         c.with_drop_shadow(self.key)
             .with_drop_shadow_ambient(self.ambient)
+    }
+}
+
+/// 玻璃系 backdrop blur 预设：只定模糊半径/饱和度/tint alpha，
+/// tint 色相由调用方传浮层主题色，保证各浮层玻璃质感一致。
+pub struct Glass {
+    pub radius: f32,
+    pub saturation: f32,
+    pub tint_alpha: u8,
+}
+
+impl Glass {
+    /// 最高浮层（右键菜单/下拉/命令面板）。
+    pub fn overlay() -> Self {
+        Self {
+            radius: 24.0,
+            saturation: 1.4,
+            tint_alpha: 0xc0,
+        }
+    }
+
+    /// 组玻璃 scene 原语；tint_base 取浮层背景主题色（alpha 被预设覆盖）。
+    pub fn backdrop(&self, rect: RectF, corner_radius: f32, tint_base: ColorU) -> BackdropBlur {
+        BackdropBlur {
+            rect,
+            corner_radius,
+            radius: self.radius,
+            tint: ColorU {
+                a: self.tint_alpha,
+                ..tint_base
+            },
+            saturation: self.saturation,
+        }
     }
 }
