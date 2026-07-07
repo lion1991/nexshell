@@ -6,7 +6,6 @@
 //! app/src/code_review/git_dialog（render_file_changes_box / render_file_list）。
 
 use chrono::{Datelike, Timelike};
-use warpui::color::ColorU;
 use warpui::elements::{
     Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
     CrossAxisAlignment, DispatchEventResult, DropShadow, Empty, EventHandler, Expanded, Fill, Flex,
@@ -237,7 +236,7 @@ pub(crate) fn render_git_commit_detail_card(
         let bg = if mouse.is_hovered() {
             colors.metric_track
         } else {
-            ColorU::new(0, 0, 0, 0)
+            nexshell::design_tokens::TRANSPARENT
         };
         ConstrainedBox::new(
             Container::new(

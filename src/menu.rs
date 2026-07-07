@@ -45,12 +45,7 @@ pub const SEPARATOR_VERTICAL_MARGIN: f32 = 4.;
 const MINIMUM_MENU_ITEM_FONT_SIZE: f32 = 5.;
 const PADDING_TO_ICON_SIZE_MULTIPLIER: f32 = 3.;
 const MENU_ITEM_LEFT_PADDING_MULTIPLIER: f32 = 1.5;
-const DROP_SHADOW_COLOR: ColorU = ColorU {
-    r: 0,
-    g: 0,
-    b: 0,
-    a: 48,
-};
+use crate::design_tokens::DROP_SHADOW_COLOR;
 const SECONDARY_TEXT_RATIO: f32 = 0.9;
 
 #[derive(Clone, Debug)]

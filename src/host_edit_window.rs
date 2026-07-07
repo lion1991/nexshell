@@ -1149,36 +1149,8 @@ impl warpui::TypedActionView for HostEditView {
 
 // ── 渲染函数 ──
 
-const FORM_BG: ColorU = ColorU {
-    r: 0x11,
-    g: 0x16,
-    b: 0x22,
-    a: 0xff,
-};
-const FIELD_BORDER: ColorU = ColorU {
-    r: 0x1e,
-    g: 0x25,
-    b: 0x35,
-    a: 0xff,
-};
-const ADVANCED_CARD_BG: ColorU = ColorU {
-    r: 0x20,
-    g: 0x20,
-    b: 0x28,
-    a: 0xff,
-};
-const LABEL_COLOR: ColorU = ColorU {
-    r: 0x8b,
-    g: 0x95,
-    b: 0xa5,
-    a: 0xff,
-};
 const TEXT_FIELD_HEIGHT: f32 = 38.0;
 const SETTINGS_TEXT_FIELD_HEIGHT: f32 = TEXT_FIELD_HEIGHT;
-
-fn appearance_panel_black() -> ColorU {
-    ColorU::new(0x0b, 0x0b, 0x0c, 0xff)
-}
 
 fn digits_only(text: &str) -> String {
     text.chars().filter(|ch| ch.is_ascii_digit()).collect()
@@ -1346,20 +1318,25 @@ fn render_form(
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-    col.add_child(render_field_label(&rust_i18n::t!("form_protocol"), ui_font));
+    col.add_child(render_field_label(
+        &rust_i18n::t!("form_protocol"),
+        ui_font,
+        hc,
+    ));
     col.add_child(render_protocol_toggle(&draft.protocol, states, ui_font, hc));
 
-    col.add_child(render_field_label(&rust_i18n::t!("form_name"), ui_font));
+    col.add_child(render_field_label(&rust_i18n::t!("form_name"), ui_font, hc));
     col.add_child(render_text_field(&view.name_editor, appearance));
 
     if draft.protocol == "RDP" {
         col.add_child(render_field_label(
             &rust_i18n::t!("form_host_address"),
             ui_font,
+            hc,
         ));
         col.add_child(render_text_field(&view.host_editor, appearance));
 
-        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font));
+        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font, hc));
         col.add_child(render_port_stepper(
             draft.port,
             &view.port_editor,
@@ -1369,10 +1346,18 @@ fn render_form(
             hc,
         ));
 
-        col.add_child(render_field_label(&rust_i18n::t!("form_username"), ui_font));
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_username"),
+            ui_font,
+            hc,
+        ));
         col.add_child(render_text_field(&view.username_editor, appearance));
 
-        col.add_child(render_field_label(&rust_i18n::t!("form_password"), ui_font));
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_password"),
+            ui_font,
+            hc,
+        ));
         col.add_child(render_password_field(
             &view.password_editor,
             &states.password_eye_state,
@@ -1384,6 +1369,7 @@ fn render_form(
         col.add_child(render_field_label(
             &rust_i18n::t!("form_display_quality"),
             ui_font,
+            hc,
         ));
         col.add_child(render_rdp_quality_toggle(
             draft.rdp_display_quality,
@@ -1396,10 +1382,11 @@ fn render_form(
         col.add_child(render_field_label(
             &rust_i18n::t!("form_host_address"),
             ui_font,
+            hc,
         ));
         col.add_child(render_text_field(&view.host_editor, appearance));
 
-        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font));
+        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font, hc));
         col.add_child(render_port_stepper(
             draft.port,
             &view.port_editor,
@@ -1409,12 +1396,17 @@ fn render_form(
             hc,
         ));
 
-        col.add_child(render_field_label(&rust_i18n::t!("form_username"), ui_font));
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_username"),
+            ui_font,
+            hc,
+        ));
         col.add_child(render_text_field(&view.username_editor, appearance));
 
         col.add_child(render_field_label(
             &rust_i18n::t!("form_auth_method"),
             ui_font,
+            hc,
         ));
         col.add_child(render_auth_method_toggle(
             &draft.auth_method,
@@ -1425,7 +1417,7 @@ fn render_form(
         ));
 
         if draft.auth_method == "key" {
-            col.add_child(render_field_label("私钥", ui_font));
+            col.add_child(render_field_label("私钥", ui_font, hc));
             col.add_child(render_dropdown_select_field(
                 HostDropdownKind::Key,
                 key_label(draft.key_id.as_deref(), key_options),
@@ -1440,10 +1432,15 @@ fn render_form(
             col.add_child(render_field_label(
                 &rust_i18n::t!("form_certificate"),
                 ui_font,
+                hc,
             ));
             col.add_child(render_text_field(&view.ca_cert_editor, appearance));
         } else {
-            col.add_child(render_field_label(&rust_i18n::t!("form_password"), ui_font));
+            col.add_child(render_field_label(
+                &rust_i18n::t!("form_password"),
+                ui_font,
+                hc,
+            ));
             col.add_child(render_password_field(
                 &view.password_editor,
                 &states.password_eye_state,
@@ -1456,6 +1453,7 @@ fn render_form(
         col.add_child(render_field_label(
             &rust_i18n::t!("form_serial_device"),
             ui_font,
+            hc,
         ));
         col.add_child(render_text_field_with_dropdown(
             HostDropdownKind::SerialDevice,
@@ -1471,6 +1469,7 @@ fn render_form(
         col.add_child(render_field_label(
             &rust_i18n::t!("form_baud_rate"),
             ui_font,
+            hc,
         ));
         col.add_child(render_text_field_with_dropdown(
             HostDropdownKind::SerialBaudRate,
@@ -1487,10 +1486,15 @@ fn render_form(
     col.add_child(render_field_label(
         &rust_i18n::t!("form_description"),
         ui_font,
+        hc,
     ));
     col.add_child(render_text_field(&view.description_editor, appearance));
 
-    col.add_child(render_field_label(&rust_i18n::t!("form_group"), ui_font));
+    col.add_child(render_field_label(
+        &rust_i18n::t!("form_group"),
+        ui_font,
+        hc,
+    ));
     col.add_child(render_dropdown_select_field(
         HostDropdownKind::Group,
         group_label(draft.group_id.as_deref(), group_options),
@@ -1502,7 +1506,7 @@ fn render_form(
         480.0,
     ));
 
-    col.add_child(render_field_label(&rust_i18n::t!("form_tags"), ui_font));
+    col.add_child(render_field_label(&rust_i18n::t!("form_tags"), ui_font, hc));
     col.add_child(render_tag_box(
         available_tags,
         &draft.tags,
@@ -1523,10 +1527,14 @@ fn render_form(
         .finish()
 }
 
-fn render_field_label(label: &str, ui_font: fonts::FamilyId) -> Box<dyn Element> {
+fn render_field_label(
+    label: &str,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
     Container::new(
         Text::new_inline(label.to_string(), ui_font, UI_FONT_SIZE)
-            .with_color(LABEL_COLOR)
+            .with_color(hc.text_secondary)
             .finish(),
     )
     .with_margin_top(16.0)
@@ -1556,24 +1564,20 @@ fn render_auth_method_toggle(
     let hc = *hc;
     let is_key = method == "key";
     let password_bg = if !is_key {
-        ColorU::new(0x20, 0x2a, 0x3e, 0xff)
+        hc.badge_ssh_bg
     } else {
-        appearance_panel_black()
+        hc.panel_bg
     };
-    let key_bg = if is_key {
-        ColorU::new(0x20, 0x2a, 0x3e, 0xff)
-    } else {
-        appearance_panel_black()
-    };
+    let key_bg = if is_key { hc.badge_ssh_bg } else { hc.panel_bg };
     let password_border = if !is_key {
-        ColorU::new(0x70, 0x8b, 0xc5, 0xff)
+        hc.text_accent
     } else {
-        FIELD_BORDER
+        hc.card_border
     };
     let key_border = if is_key {
-        ColorU::new(0x70, 0x8b, 0xc5, 0xff)
+        hc.text_accent
     } else {
-        FIELD_BORDER
+        hc.card_border
     };
 
     let password_button = Hoverable::new(password_state, move |_mouse| {
@@ -1924,8 +1928,8 @@ fn render_tag_box(
         )
         .with_horizontal_padding(10.0)
         .with_vertical_padding(8.0)
-        .with_background_color(FORM_BG)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_background_color(hc.search_bar_bg)
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
         .finish();
     }
@@ -1946,8 +1950,8 @@ fn render_tag_box(
     Container::new(wrap.finish())
         .with_horizontal_padding(8.0)
         .with_vertical_padding(6.0)
-        .with_background_color(FORM_BG)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_background_color(hc.search_bar_bg)
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
         .finish()
 }
@@ -1968,14 +1972,14 @@ fn render_tag_chip(
         } else if mouse.is_hovered() {
             (
                 hc.card_bg_hover,
-                FIELD_BORDER,
+                hc.card_border,
                 hc.text_secondary,
                 hc.text_secondary,
             )
         } else {
             (
                 ColorU::transparent_black(),
-                FIELD_BORDER,
+                hc.card_border,
                 hc.text_secondary,
                 hc.text_secondary,
             )
@@ -2219,7 +2223,7 @@ fn render_inline_number_field(
         .ui_builder()
         .text_input(editor.clone())
         .with_style(UiComponentStyles {
-            background: Some(FORM_BG.into()),
+            background: Some(hc.search_bar_bg.into()),
             border_width: Some(0.0),
             font_color: Some(hc.text_primary),
             height: Some(TEXT_FIELD_HEIGHT),
@@ -2306,12 +2310,9 @@ fn protocol_segment(
     let target = label.to_string();
     let label = label.to_string();
     let (bg, border) = if selected {
-        (
-            ColorU::new(0x20, 0x2a, 0x3e, 0xff),
-            ColorU::new(0x70, 0x8b, 0xc5, 0xff),
-        )
+        (hc.badge_ssh_bg, hc.text_accent)
     } else {
-        (appearance_panel_black(), FIELD_BORDER)
+        (hc.panel_bg, hc.card_border)
     };
 
     Hoverable::new(state, move |_mouse| {
@@ -2393,12 +2394,9 @@ fn rdp_quality_segment(
     let hc = *hc;
     let label = label.to_string();
     let (bg, border) = if selected {
-        (
-            ColorU::new(0x20, 0x2a, 0x3e, 0xff),
-            ColorU::new(0x70, 0x8b, 0xc5, 0xff),
-        )
+        (hc.badge_ssh_bg, hc.text_accent)
     } else {
-        (appearance_panel_black(), FIELD_BORDER)
+        (hc.panel_bg, hc.card_border)
     };
 
     Hoverable::new(state, move |_mouse| {
@@ -2496,8 +2494,8 @@ fn render_port_stepper(
                 .with_child(inc_btn)
                 .finish(),
         )
-        .with_background_color(FORM_BG)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_background_color(hc.search_bar_bg)
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
         .finish(),
     )
@@ -2520,7 +2518,7 @@ fn render_advanced_settings(
     section.add_child(
         Container::new(warpui::elements::Empty::new().finish())
             .with_margin_top(26.0)
-            .with_border(Border::top(1.0).with_border_color(FIELD_BORDER))
+            .with_border(Border::top(1.0).with_border_color(hc.card_border))
             .finish(),
     );
 
@@ -2531,7 +2529,7 @@ fn render_advanced_settings(
         let text_color = if mouse.is_hovered() {
             hc_copy.text_primary
         } else {
-            LABEL_COLOR
+            hc.text_secondary
         };
         Container::new(
             Flex::row()
@@ -2651,7 +2649,7 @@ fn render_advanced_card(
         .finish(),
     );
 
-    card.add_child(render_card_divider());
+    card.add_child(render_card_divider(hc));
     card.add_child(render_settings_section_title(
         &rust_i18n::t!("form_connection_timeout"),
         ui_font,
@@ -2682,7 +2680,7 @@ fn render_advanced_card(
         .finish(),
     );
 
-    card.add_child(render_card_divider());
+    card.add_child(render_card_divider(hc));
     card.add_child(render_settings_section_title(
         &rust_i18n::t!("form_terminal_encoding"),
         ui_font,
@@ -2718,8 +2716,8 @@ fn render_advanced_card(
 
     Container::new(card.finish())
         .with_uniform_padding(16.0)
-        .with_background_color(ADVANCED_CARD_BG)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_background_color(hc.card_bg)
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
         .finish()
 }
@@ -2839,8 +2837,8 @@ fn render_serial_advanced_card(
 
     Container::new(card.finish())
         .with_uniform_padding(16.0)
-        .with_background_color(ADVANCED_CARD_BG)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_background_color(hc.card_bg)
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
         .finish()
 }
@@ -2902,11 +2900,11 @@ fn render_settings_section_title(
         .finish()
 }
 
-fn render_card_divider() -> Box<dyn Element> {
+fn render_card_divider(hc: &HostUiColors) -> Box<dyn Element> {
     Container::new(warpui::elements::Empty::new().finish())
         .with_margin_top(20.0)
         .with_margin_bottom(20.0)
-        .with_border(Border::top(1.0).with_border_color(FIELD_BORDER))
+        .with_border(Border::top(1.0).with_border_color(hc.card_border))
         .finish()
 }
 
@@ -2974,9 +2972,9 @@ fn render_serial_toggle_item(
     let hc = *hc;
     Hoverable::new(state, move |mouse| {
         let bg = if mouse.is_hovered() {
-            ColorU::new(0x16, 0x1d, 0x2b, 0xff)
+            hc.panel_bg
         } else {
-            appearance_panel_black()
+            hc.panel_bg
         };
         Container::new(
             Flex::row()
@@ -3010,7 +3008,7 @@ fn render_serial_toggle_item(
         .with_horizontal_padding(12.0)
         .with_vertical_padding(9.0)
         .with_background_color(bg)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
         .finish()
     })
@@ -3031,7 +3029,7 @@ fn render_number_text_field(
         .ui_builder()
         .text_input(editor.clone())
         .with_style(UiComponentStyles {
-            background: Some(appearance_panel_black().into()),
+            background: Some(hc.panel_bg.into()),
             border_width: Some(0.0),
             font_color: Some(hc.text_primary),
             height: Some(SETTINGS_TEXT_FIELD_HEIGHT),
@@ -3139,7 +3137,7 @@ fn render_footer(
         )
         .with_horizontal_padding(20.0)
         .with_vertical_padding(8.0)
-        .with_border(Border::all(1.0).with_border_color(FIELD_BORDER))
+        .with_border(Border::all(1.0).with_border_color(hc.card_border))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
         .finish()
     })
@@ -3151,7 +3149,7 @@ fn render_footer(
 
     let save_btn = Hoverable::new(save_state, move |mouse| {
         let bg = if mouse.is_hovered() {
-            ColorU::new(0x15, 0x90, 0xb8, 0xff)
+            hc.text_accent
         } else {
             hc.accent_bg
         };

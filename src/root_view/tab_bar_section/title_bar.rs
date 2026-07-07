@@ -343,7 +343,7 @@ impl RootView {
         let uc = self.ui_colors();
         let icon_color = uc.icon_color_active;
         let hover_bg = if kind == WindowControlKind::Close {
-            ColorU::new(232, 17, 32, 0xff)
+            self.design_tokens.semantic.windows_close_hover
         } else {
             uc.icon_button_hover_bg
         };

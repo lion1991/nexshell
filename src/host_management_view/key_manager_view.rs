@@ -56,18 +56,6 @@ impl KeyManagerStates {
     }
 }
 
-fn red() -> ColorU {
-    ColorU::new(0xe5, 0x4d, 0x42, 0xff)
-}
-
-fn green() -> ColorU {
-    ColorU::new(0x6d, 0xc2, 0x8a, 0xff)
-}
-
-fn transparent() -> ColorU {
-    ColorU::new(0, 0, 0, 0)
-}
-
 fn bold(content: String, ui_font: fonts::FamilyId, size: f32, color: ColorU) -> Box<dyn Element> {
     Text::new_inline(content, ui_font, size)
         .with_color(color)
@@ -248,7 +236,7 @@ fn render_key_row(
         } else if mouse.is_hovered() {
             hc.card_bg_hover
         } else {
-            transparent()
+            nexshell::design_tokens::TRANSPARENT
         };
 
         let meta = Flex::row()
@@ -563,7 +551,7 @@ fn render_copy_to_server(
         };
         let trailing: Box<dyn Element> = if expanded {
             Text::new_inline("已复制".to_string(), ui_font, UI_FONT_SIZE_SMALL)
-                .with_color(green())
+                .with_color(hc.semantic.ok)
                 .finish()
         } else {
             icon_box(ICON_COPY, hc.text_secondary, ICON_SIZE_SM)
@@ -600,7 +588,7 @@ fn render_copy_to_server(
             Text::new(command, ui_font, UI_FONT_SIZE_SMALL)
                 .soft_wrap(true)
                 .with_selectable(true)
-                .with_color(green())
+                .with_color(hc.semantic.ok)
                 .finish(),
         );
     }
@@ -641,14 +629,19 @@ fn render_delete_button(
     let state = state.clone();
     Hoverable::new(state, move |mouse| {
         let color = if mouse.is_hovered() {
-            red()
+            hc.semantic.danger
         } else {
             hc.text_secondary
         };
         let bg = if mouse.is_hovered() {
-            ColorU::new(0xe5, 0x4d, 0x42, 0x18)
+            ColorU::new(
+                hc.semantic.danger.r,
+                hc.semantic.danger.g,
+                hc.semantic.danger.b,
+                0x18,
+            )
         } else {
-            transparent()
+            nexshell::design_tokens::TRANSPARENT
         };
         Container::new(
             Flex::row()
@@ -709,8 +702,8 @@ fn render_delete_section(
             .with_child(pill_button(
                 &states.delete_state,
                 "确认删除",
-                red(),
-                red(),
+                hc.semantic.danger,
+                hc.semantic.danger,
                 ColorU::new(0xff, 0xff, 0xff, 0xff),
                 None,
                 TerminalGridAction::HostDeleteKey(key_id.to_string()),
@@ -762,8 +755,8 @@ fn render_detail_editing(
         .with_child(pill_button(
             &states.save_state,
             "保存",
-            red(),
-            red(),
+            hc.semantic.danger,
+            hc.semantic.danger,
             ColorU::new(0xff, 0xff, 0xff, 0xff),
             None,
             TerminalGridAction::HostKeyEditSave,

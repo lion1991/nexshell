@@ -1007,7 +1007,14 @@ impl ActionButtonTheme for DangerPrimaryTheme {
     fn background(&self, hovered: bool, appearance: &Appearance) -> Option<Fill> {
         let red_color = appearance.theme().ansi_fg_red();
         if hovered {
-            Some(Fill::Solid(ColorU::new(255, 130, 114, 255)))
+            // hover 由 fg_red 向白提亮 ~25% 派生，跟随主题，消除写死双色源。
+            let lighten = |c: u8| (c as u16 + (255 - c as u16) * 64 / 256) as u8;
+            Some(Fill::Solid(ColorU::new(
+                lighten(red_color.r),
+                lighten(red_color.g),
+                lighten(red_color.b),
+                255,
+            )))
         } else {
             Some(Fill::Solid(red_color))
         }

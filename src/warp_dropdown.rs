@@ -20,12 +20,7 @@ const MENU_VERTICAL_PADDING: f32 = 9.0;
 const MENU_ITEM_VERTICAL_PADDING: f32 = 5.0;
 const MENU_ITEM_HORIZONTAL_PADDING: f32 = 14.0;
 const DEFAULT_MENU_MAX_HEIGHT: f32 = 300.0;
-const DROP_SHADOW_COLOR: warpui::color::ColorU = warpui::color::ColorU {
-    r: 0,
-    g: 0,
-    b: 0,
-    a: 48,
-};
+use nexshell::design_tokens::DROP_SHADOW_COLOR;
 
 #[derive(Clone)]
 pub struct WarpDropdownOption<A: Action + Clone> {

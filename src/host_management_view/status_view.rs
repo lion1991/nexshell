@@ -22,24 +22,14 @@ use crate::terminal_grid_element::TerminalGridAction;
 const GRID_COLUMNS: usize = 3;
 const BAR_HEIGHT: f32 = 9.0;
 
-fn c_green() -> ColorU {
-    ColorU::new(0x3f, 0xb9, 0x50, 0xff)
-}
-fn c_yellow() -> ColorU {
-    ColorU::new(0xcc, 0x99, 0x19, 0xff)
-}
-fn c_red() -> ColorU {
-    ColorU::new(0xe5, 0x4d, 0x42, 0xff)
-}
-
-/// 指标百分比 → 颜色档位（绿 / 黄 / 红）。
-fn level_color(percent: f32) -> ColorU {
+/// 指标百分比 → 语义色档位（ok / warn / danger）。
+fn level_color(percent: f32, hc: &HostUiColors) -> ColorU {
     if percent >= 85.0 {
-        c_red()
+        hc.semantic.danger
     } else if percent >= 60.0 {
-        c_yellow()
+        hc.semantic.warn
     } else {
-        c_green()
+        hc.semantic.ok
     }
 }
 
@@ -320,7 +310,7 @@ fn render_bar(value: Option<f32>, hc: &HostUiColors) -> Box<dyn Element> {
         0.001
     };
     let rest_weight = (100.0 - percent).max(0.001);
-    let fill_color = level_color(percent);
+    let fill_color = level_color(percent, hc);
 
     let track = Flex::row()
         .with_main_axis_size(MainAxisSize::Max)
@@ -435,7 +425,7 @@ fn render_rate_value(
     let (num, unit, num_color) = match value {
         Some(v) if v > 0 => {
             let (n, u) = split_rate(v);
-            (n, format!("{u}/s"), c_green())
+            (n, format!("{u}/s"), hc.semantic.ok)
         }
         Some(_) => ("0".to_string(), "K/s".to_string(), hc.text_secondary),
         None => ("—".to_string(), String::new(), hc.text_secondary),
@@ -477,9 +467,9 @@ fn status_indicator(
     hc: &HostUiColors,
 ) -> (String, ColorU) {
     match snapshot.map(|s| &s.status) {
-        Some(HostOverviewStatus::Error(_)) => ("连接失败".to_string(), c_red()),
+        Some(HostOverviewStatus::Error(_)) => ("连接失败".to_string(), hc.semantic.danger),
         Some(HostOverviewStatus::Ready) | Some(HostOverviewStatus::Collecting) => {
-            ("● 在线".to_string(), c_green())
+            ("● 在线".to_string(), hc.semantic.ok)
         }
         _ => ("连接中…".to_string(), hc.text_secondary),
     }
