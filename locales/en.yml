@@ -84,6 +84,7 @@ host_overview_section_disk: Disks
 host_overview_load: Load
 host_overview_memory: Memory
 host_overview_swap: Swap
+host_overview_cores: "%{count} cores"
 host_overview_col_memory: Mem
 host_overview_col_cpu: CPU
 host_overview_col_command: Command

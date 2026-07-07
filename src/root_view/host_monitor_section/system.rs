@@ -10,6 +10,7 @@ use crate::{RootView, TerminalSessionTab};
 use nexshell::host_overview::{
     format_bytes_short, DiskMetric, HostOverviewSnapshot, HostOverviewStatus,
 };
+use nexshell::stat_widgets::RingGauge;
 use warpui::color::ColorU;
 use warpui::elements::{
     Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
@@ -38,38 +39,128 @@ impl RootView {
             &load,
             colors,
         ));
-        column.add_child(self.render_overview_usage_bar(
-            "CPU",
-            snapshot.cpu_percent,
-            None,
-            colors.cpu_accent,
-            colors,
-        ));
-        column.add_child(self.render_overview_usage_bar(
-            rust_i18n::t!("host_overview_memory").as_ref(),
-            snapshot.memory.as_ref().map(|metric| metric.percent),
-            snapshot.memory.as_ref().map(format_usage_metric),
-            colors.memory_accent,
-            colors,
-        ));
+        let mut ring_row = Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            .with_child(
+                Expanded::new(
+                    1.0,
+                    self.render_overview_ring_stat(
+                        "CPU",
+                        snapshot.cpu_percent,
+                        snapshot.cpu_cores.map(|count| {
+                            rust_i18n::t!("host_overview_cores", count = count).into_owned()
+                        }),
+                        colors.cpu_accent,
+                        colors,
+                    ),
+                )
+                .finish(),
+            );
+        ring_row.add_child(
+            Expanded::new(
+                1.0,
+                self.render_overview_ring_stat(
+                    rust_i18n::t!("host_overview_memory").as_ref(),
+                    snapshot.memory.as_ref().map(|metric| metric.percent),
+                    snapshot.memory.as_ref().map(format_usage_metric),
+                    colors.memory_accent,
+                    colors,
+                ),
+            )
+            .finish(),
+        );
         if let Some(swap) = snapshot
             .swap
             .as_ref()
             .filter(|metric| metric.total_bytes > 0)
         {
-            column.add_child(self.render_overview_usage_bar(
-                rust_i18n::t!("host_overview_swap").as_ref(),
-                Some(swap.percent),
-                Some(format_usage_metric(swap)),
-                colors.swap_accent,
-                colors,
-            ));
+            ring_row.add_child(
+                Expanded::new(
+                    1.0,
+                    self.render_overview_ring_stat(
+                        rust_i18n::t!("host_overview_swap").as_ref(),
+                        Some(swap.percent),
+                        Some(format_usage_metric(swap)),
+                        colors.swap_accent,
+                        colors,
+                    ),
+                )
+                .finish(),
+            );
         }
+        column.add_child(
+            Container::new(ring_row.finish())
+                .with_padding_top(2.0)
+                .with_padding_bottom(9.0)
+                .finish(),
+        );
 
-        // 末条用量条自带 pb 9，补 4 与其他节的分隔线留白对齐
         Container::new(column.finish())
             .with_padding_bottom(4.0)
             .finish()
+    }
+
+    // 环形仪表 + 底部标签（+ 可选明细行），列内居中；≥90% 数值弧切警告色。
+    fn render_overview_ring_stat(
+        &self,
+        label: &str,
+        percent: Option<f32>,
+        detail: Option<String>,
+        accent: ColorU,
+        colors: &HostOverviewColors,
+    ) -> Box<dyn Element> {
+        const RING_DIAMETER: f32 = 56.0;
+        const RING_THICKNESS: f32 = 7.0;
+        let value = percent.unwrap_or(0.0).clamp(0.0, 100.0);
+        let percent_text = percent
+            .map(|value| format!("{value:.0}%"))
+            .unwrap_or_else(|| "--".to_string());
+
+        let center_label = Text::new_inline(percent_text, self.monospace_font, 12.0)
+            .with_color(colors.text_primary)
+            .finish();
+        // 轨道比通用 metric_track 再淡一档，让数值弧成为主角。
+        let track = ColorU::new(
+            colors.metric_track.r,
+            colors.metric_track.g,
+            colors.metric_track.b,
+            0x4a,
+        );
+        let mut gauge = RingGauge::new(
+            RING_DIAMETER,
+            RING_THICKNESS,
+            track,
+            usage_fill_color(value, accent, colors),
+        )
+        .with_label(center_label);
+        if percent.is_some() {
+            gauge = gauge.with_fraction(value / 100.0);
+        }
+
+        let mut column = Flex::column()
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(gauge.finish())
+            .with_child(
+                Container::new(
+                    Text::new_inline(label.to_string(), self.ui_font, 11.0)
+                        .with_color(colors.text_muted)
+                        .finish(),
+                )
+                .with_padding_top(5.0)
+                .finish(),
+            );
+        if let Some(detail) = detail {
+            column.add_child(
+                Container::new(
+                    Text::new_inline(detail, self.monospace_font, 10.0)
+                        .with_color(colors.text_muted)
+                        .finish(),
+                )
+                .with_padding_top(2.0)
+                .finish(),
+            );
+        }
+        column.finish()
     }
 
     fn render_overview_system_title(
@@ -85,90 +176,6 @@ impl RootView {
             TerminalGridAction::OpenSystemInfo,
             colors,
         )
-    }
-
-    // 两行布局：标签/数值一行，全宽细条一行；≥90% 填充切警告色
-    fn render_overview_usage_bar(
-        &self,
-        label: &str,
-        percent: Option<f32>,
-        detail: Option<String>,
-        accent: ColorU,
-        colors: &HostOverviewColors,
-    ) -> Box<dyn Element> {
-        const BAR_HEIGHT: f32 = 6.0;
-        const BAR_RADIUS: f32 = 3.0;
-        let value = percent.unwrap_or(0.0).clamp(0.0, 100.0);
-        // 显示为 0% 的不画填充；画则最小 = 直径，避免圆角被挤成异形
-        let fill_width = if value >= 0.5 {
-            (OVERVIEW_CONTENT_WIDTH * value / 100.0).max(BAR_HEIGHT)
-        } else {
-            0.0
-        };
-        let percent_text = percent
-            .map(|value| format!("{value:.0}%"))
-            .unwrap_or_else(|| "--".to_string());
-
-        let mut label_row = Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(
-                Text::new_inline(label.to_string(), self.ui_font, 12.0)
-                    .with_color(colors.text_muted)
-                    .finish(),
-            );
-        label_row.add_child(Shrinkable::new(1.0, Empty::new().finish()).finish());
-        if let Some(detail) = detail {
-            label_row.add_child(
-                Container::new(
-                    Text::new_inline(detail, self.monospace_font, 11.0)
-                        .with_color(colors.text_muted)
-                        .finish(),
-                )
-                .with_margin_right(8.0)
-                .finish(),
-            );
-        }
-        label_row.add_child(
-            Text::new_inline(percent_text, self.monospace_font, 12.0)
-                .with_color(colors.text_primary)
-                .finish(),
-        );
-
-        let mut bar = Stack::new();
-        bar.add_child(
-            ConstrainedBox::new(
-                Container::new(Empty::new().finish())
-                    .with_background_color(colors.metric_track)
-                    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BAR_RADIUS)))
-                    .finish(),
-            )
-            .with_width(OVERVIEW_CONTENT_WIDTH)
-            .with_height(BAR_HEIGHT)
-            .finish(),
-        );
-        if fill_width > 0.0 {
-            bar.add_child(
-                ConstrainedBox::new(
-                    Container::new(Empty::new().finish())
-                        .with_background_color(usage_fill_color(value, accent, colors))
-                        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BAR_RADIUS)))
-                        .finish(),
-                )
-                .with_width(fill_width)
-                .with_height(BAR_HEIGHT)
-                .finish(),
-            );
-        }
-
-        Container::new(
-            Flex::column()
-                .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-                .with_child(label_row.finish())
-                .with_child(Container::new(bar.finish()).with_padding_top(4.0).finish())
-                .finish(),
-        )
-        .with_padding_bottom(9.0)
-        .finish()
     }
 
     pub(in crate::root_view) fn render_overview_disk_section(

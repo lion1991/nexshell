@@ -29,6 +29,8 @@ printf '%s\n' '[mem]'
 (cat /proc/meminfo 2>/dev/null || printf '%s\n' '')
 printf '%s\n' '[stat]'
 (grep '^cpu ' /proc/stat 2>/dev/null || printf '%s\n' '')
+printf '%s\n' '[ncpu]'
+(nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || printf '%s\n' '')
 printf '%s\n' '[net]'
 (cat /proc/net/dev 2>/dev/null || printf '%s\n' '')
 printf '%s\n' '[ps]'
@@ -191,6 +193,7 @@ pub struct HostOverviewProbe {
     pub memory: Option<UsageMetric>,
     pub swap: Option<UsageMetric>,
     pub cpu: Option<CpuCounters>,
+    pub cpu_cores: Option<u32>,
     pub networks: Vec<NetworkDeviceCounters>,
     pub processes: Vec<ProcessMetric>,
     pub sockets: Vec<NetworkRow>,
@@ -207,6 +210,7 @@ pub struct HostOverviewSnapshot {
     pub uptime_seconds: Option<u64>,
     pub load_average: Option<[f32; 3]>,
     pub cpu_percent: Option<f32>,
+    pub cpu_cores: Option<u32>,
     pub memory: Option<UsageMetric>,
     pub swap: Option<UsageMetric>,
     pub processes: Vec<ProcessMetric>,
@@ -238,6 +242,7 @@ impl HostOverviewSnapshot {
             uptime_seconds: None,
             load_average: None,
             cpu_percent: None,
+            cpu_cores: None,
             memory: None,
             swap: None,
             processes: Vec::new(),
@@ -676,6 +681,7 @@ pub fn parse_probe_output(output: &str) -> Result<HostOverviewProbe, String> {
     let mut load = Vec::new();
     let mut mem = Vec::new();
     let mut stat = Vec::new();
+    let mut ncpu = Vec::new();
     let mut net = Vec::new();
     let mut ps = Vec::new();
     let mut exe = Vec::new();
@@ -694,6 +700,7 @@ pub fn parse_probe_output(output: &str) -> Result<HostOverviewProbe, String> {
             "[load]" => section = "load",
             "[mem]" => section = "mem",
             "[stat]" => section = "stat",
+            "[ncpu]" => section = "ncpu",
             "[net]" => section = "net",
             "[ps]" => section = "ps",
             "[exe]" => section = "exe",
@@ -707,6 +714,7 @@ pub fn parse_probe_output(output: &str) -> Result<HostOverviewProbe, String> {
                 "load" => load.push(line.to_string()),
                 "mem" => mem.push(line.to_string()),
                 "stat" => stat.push(line.to_string()),
+                "ncpu" => ncpu.push(line.to_string()),
                 "net" => net.push(line.to_string()),
                 "ps" => ps.push(line.to_string()),
                 "exe" => exe.push(line.to_string()),
@@ -733,6 +741,7 @@ pub fn parse_probe_output(output: &str) -> Result<HostOverviewProbe, String> {
         memory: parse_memory_metric(&mem, "MemTotal", "MemAvailable"),
         swap: parse_memory_metric(&mem, "SwapTotal", "SwapFree"),
         cpu: parse_cpu_counters(&stat),
+        cpu_cores: parse_cpu_cores(&ncpu),
         networks: parse_network_counters(&net),
         processes: parse_processes(&ps, &parse_exe_links(&exe)),
         sockets: parse_sockets(&sock_tcp, &sock_udp),
@@ -792,6 +801,7 @@ pub fn snapshot_from_probe(
         uptime_seconds: probe.uptime_seconds,
         load_average: probe.load_average,
         cpu_percent,
+        cpu_cores: probe.cpu_cores,
         memory: probe.memory,
         swap: probe.swap,
         processes: probe.processes,
@@ -1128,6 +1138,13 @@ fn parse_cpu_counters(lines: &[String]) -> Option<CpuCounters> {
         return Some(CpuCounters { total, idle });
     }
     None
+}
+
+fn parse_cpu_cores(lines: &[String]) -> Option<u32> {
+    lines
+        .iter()
+        .find_map(|line| line.trim().parse::<u32>().ok())
+        .filter(|count| *count > 0)
 }
 
 fn parse_network_counters(lines: &[String]) -> Vec<NetworkDeviceCounters> {

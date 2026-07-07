@@ -65,6 +65,7 @@ pub mod shell_chrome;
 pub mod shell_integration;
 pub mod ssh_key_store;
 pub mod ssh_session;
+pub mod stat_widgets;
 #[cfg(feature = "warpui-app")]
 pub mod telemetry;
 pub mod terminal_lifecycle;

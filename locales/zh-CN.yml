@@ -84,6 +84,7 @@ host_overview_section_disk: 磁盘
 host_overview_load: 负载
 host_overview_memory: 内存
 host_overview_swap: 交换
+host_overview_cores: "%{count} 核"
 host_overview_col_memory: 内存
 host_overview_col_cpu: CPU
 host_overview_col_command: 命令
