@@ -330,7 +330,7 @@ fn render_bar(value: Option<f32>, hc: &HostUiColors) -> Box<dyn Element> {
 
     ConstrainedBox::new(
         Container::new(track)
-            .with_background_color(hc.card_border)
+            .with_background_color(hc.metric_track)
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BAR_HEIGHT / 2.0)))
             .finish(),
     )
@@ -454,7 +454,7 @@ fn render_rate_value(
 fn divider(hc: &HostUiColors) -> Box<dyn Element> {
     ConstrainedBox::new(
         Container::new(Empty::new().finish())
-            .with_background_color(hc.card_border)
+            .with_background_color(hc.metric_track)
             .finish(),
     )
     .with_height(1.0)

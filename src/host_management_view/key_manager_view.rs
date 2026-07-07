@@ -86,7 +86,7 @@ fn spacer_h(width: f32) -> Box<dyn Element> {
 fn divider(hc: &HostUiColors) -> Box<dyn Element> {
     ConstrainedBox::new(
         Container::new(Empty::new().finish())
-            .with_background_color(hc.card_border)
+            .with_background_color(hc.metric_track)
             .finish(),
     )
     .with_height(1.0)

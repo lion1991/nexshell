@@ -158,6 +158,8 @@ pub struct HostColors {
     pub card_bg_hover: ColorU,
     pub card_border: ColorU,
     pub card_border_hover: ColorU,
+    /// 卡片内进度条底槽/分隔线：半透明，默认与 hover 底上都可见（勿借 card_border）。
+    pub metric_track: ColorU,
     pub badge_ssh_bg: ColorU,
     pub badge_ssh_text: ColorU,
     pub badge_serial_bg: ColorU,
@@ -200,6 +202,7 @@ impl HostColors {
             card_bg_hover: p.neutral_3,
             card_border: p.neutral_3,
             card_border_hover: p.neutral_4,
+            metric_track: ThemePalette::with_alpha(p.neutral_4, 0x8f),
             badge_ssh_bg: ssh_bg,
             badge_ssh_text: p.accent,
             badge_serial_bg: p.tint(s.warn),
