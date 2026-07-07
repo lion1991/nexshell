@@ -447,7 +447,7 @@ fn render_toolbar_actions(
                 TerminalGridAction::HostTogglePrivacy,
                 hc,
             ))
-            .with_margin_left(2.0)
+            .with_margin_left(4.0)
             .finish(),
         )
         .with_child(
@@ -459,7 +459,7 @@ fn render_toolbar_actions(
                 TerminalGridAction::HostImport,
                 hc,
             ))
-            .with_margin_left(2.0)
+            .with_margin_left(4.0)
             .finish(),
         )
         .with_child(
@@ -471,7 +471,7 @@ fn render_toolbar_actions(
                 TerminalGridAction::HostExport,
                 hc,
             ))
-            .with_margin_left(2.0)
+            .with_margin_left(4.0)
             .finish(),
         )
         .with_child(
@@ -483,7 +483,7 @@ fn render_toolbar_actions(
                 TerminalGridAction::HostCloudSync,
                 hc,
             ))
-            .with_margin_left(2.0)
+            .with_margin_left(4.0)
             .finish(),
         )
         .with_child(toolbar_divider(hc))

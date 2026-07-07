@@ -1509,12 +1509,9 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
     Ok(hosts)
 }
 
+// 空描述保持为空：卡片/编辑窗对空值各自处理，不再注入占位文案。
 fn empty_description(description: String) -> String {
-    if description.trim().is_empty() {
-        "无描述".to_string()
-    } else {
-        description
-    }
+    description.trim().to_string()
 }
 
 fn parse_tags(tags_json: &str) -> Vec<String> {
@@ -1754,7 +1751,7 @@ fn legacy_ssh_host(
         name: name.to_string(),
         protocol: "SSH".to_string(),
         endpoint: connection.endpoint("SSH"),
-        description: "无描述".to_string(),
+        description: String::new(),
         connection,
         group_id: group_id.map(str::to_string),
         tags,
@@ -1770,7 +1767,7 @@ fn legacy_serial_host(id: &str, name: &str, port: &str, baud_rate: u32) -> HostC
         name: name.to_string(),
         protocol: "Serial".to_string(),
         endpoint: connection.endpoint("Serial"),
-        description: "无描述".to_string(),
+        description: String::new(),
         connection,
         group_id: None,
         tags: Vec::new(),

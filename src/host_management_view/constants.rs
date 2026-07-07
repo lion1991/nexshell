@@ -53,7 +53,7 @@ pub const CARD_MIN_WIDTH: f32 = 320.0;
 pub const CARD_PADDING: f32 = scale::SPACE_5;
 pub const CARD_SPACING: f32 = scale::SPACE_4;
 pub const CARD_CORNER_RADIUS: f32 = scale::RADIUS_LG;
-pub const CARD_ICON_SIZE: f32 = 40.0;
+pub const CARD_ICON_SIZE: f32 = 36.0;
 
 // --- 分组导航 ---
 pub const GROUP_ITEM_HEIGHT: f32 = 32.0;

@@ -118,11 +118,15 @@ pub fn render_host_card(
 
     // hover 颜色 eased 过渡；selected 边框保持瞬时 accent。
     let is_hovered_now = card_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
-    let (anim_bg, anim_border) = {
+    let elevation = nexshell::design_tokens::Elevation::card();
+    let (anim_bg, anim_border, anim_checkbox, anim_shadow_key, anim_shadow_ambient) = {
         let now = std::time::Instant::now();
         let mut transitions = states.hover_transitions.borrow_mut();
         let bg_key = format!("card-bg:{}", host.id);
         let bd_key = format!("card-bd:{}", host.id);
+        let cb_key = format!("card-cb:{}", host.id);
+        let shk_key = format!("card-shk:{}", host.id);
+        let sha_key = format!("card-sha:{}", host.id);
         let bg_target = if is_hovered_now {
             hc.card_bg_hover
         } else {
@@ -133,11 +137,34 @@ pub fn render_host_card(
         } else {
             hc.card_border
         };
+        // checkbox 仅 hover/选中时淡入；hover 抬升 = 双层阴影 alpha 渐入。
+        let cb_target = if selected {
+            hc.text_accent
+        } else if is_hovered_now {
+            hc.text_secondary
+        } else {
+            ColorU::transparent_black()
+        };
+        let shadow_target = |base: ColorU| {
+            if is_hovered_now {
+                base
+            } else {
+                ColorU { a: 0, ..base }
+            }
+        };
+        let shk_target = shadow_target(elevation.key.color);
+        let sha_target = shadow_target(elevation.ambient.color);
         transitions.retarget(bg_key.clone(), bg_target, now);
         transitions.retarget(bd_key.clone(), bd_target, now);
+        transitions.retarget(cb_key.clone(), cb_target, now);
+        transitions.retarget(shk_key.clone(), shk_target, now);
+        transitions.retarget(sha_key.clone(), sha_target, now);
         (
             transitions.sample(&bg_key, now).unwrap_or(bg_target),
             transitions.sample(&bd_key, now).unwrap_or(bd_target),
+            transitions.sample(&cb_key, now).unwrap_or(cb_target),
+            transitions.sample(&shk_key, now).unwrap_or(shk_target),
+            transitions.sample(&sha_key, now).unwrap_or(sha_target),
         )
     };
 
@@ -153,16 +180,17 @@ pub fn render_host_card(
             .with_main_axis_size(MainAxisSize::Min)
             .with_cross_axis_alignment(CrossAxisAlignment::Start);
 
-        // 顶部行：左侧系统图标 + 右侧多选 checkbox
+        // 顶部行：左侧系统图标（协议色底）+ 右侧多选 checkbox（hover/选中时淡入）
         let top_row = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
-            .with_child(render_system_icon(system, &hc))
+            .with_child(render_system_icon(system, &protocol, &hc))
             .with_child(Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish())
             .with_child(render_select_checkbox(
                 checkbox_state.clone(),
                 host_id_for_checkbox.clone(),
                 selected,
+                anim_checkbox,
                 &hc,
             ))
             .finish();
@@ -199,15 +227,18 @@ pub fn render_host_card(
             .finish(),
         );
 
-        card_col.add_child(
-            Container::new(
-                Text::new_inline(description.clone(), ui_font, UI_FONT_SIZE_SMALL)
-                    .with_color(hc.text_secondary)
-                    .finish(),
-            )
-            .with_margin_top(4.0)
-            .finish(),
-        );
+        // 空描述不渲染；"无描述" 兼容历史入库的占位串。
+        if !description.is_empty() && description != "无描述" {
+            card_col.add_child(
+                Container::new(
+                    Text::new_inline(description.clone(), ui_font, UI_FONT_SIZE_SMALL)
+                        .with_color(hc.text_secondary)
+                        .finish(),
+                )
+                .with_margin_top(4.0)
+                .finish(),
+            );
+        }
 
         card_col.add_child(render_tags_row(&tags, ui_font, &hc));
 
@@ -222,6 +253,17 @@ pub fn render_host_card(
             .finish(),
         );
 
+        // hover 抬升：双层阴影随 hover 淡入（alpha 由过渡驱动）。
+        let shadow_key = {
+            let mut s = elevation.key;
+            s.color = anim_shadow_key;
+            s
+        };
+        let shadow_ambient = {
+            let mut s = elevation.ambient;
+            s.color = anim_shadow_ambient;
+            s
+        };
         Container::new(
             Container::new(card_col.finish())
                 .with_uniform_padding(CARD_PADDING)
@@ -230,6 +272,8 @@ pub fn render_host_card(
         .with_background_color(bg)
         .with_border(Border::all(1.0).with_border_color(border_color))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(CARD_CORNER_RADIUS)))
+        .with_drop_shadow(shadow_key)
+        .with_drop_shadow_ambient(shadow_ambient)
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
@@ -249,11 +293,13 @@ pub fn render_host_card(
     .finish()
 }
 
-// 卡片右上角的多选 checkbox：点击 = 多选切换；卡片本体点击 = 单选
+// 卡片右上角的多选 checkbox：点击 = 多选切换；卡片本体点击 = 单选。
+// base_border 由卡片 hover 过渡驱动（非 hover 非选中时透明 = 淡出），命中区常驻。
 fn render_select_checkbox(
     state: MouseStateHandle,
     host_id: String,
     selected: bool,
+    base_border: ColorU,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     let hc = *hc;
@@ -262,7 +308,7 @@ fn render_select_checkbox(
         let border_color = if selected || is_hovered {
             hc.text_accent
         } else {
-            hc.text_secondary
+            base_border
         };
         let bg = if selected {
             hc.text_accent
@@ -287,19 +333,33 @@ fn render_select_checkbox(
     .finish()
 }
 
-fn render_system_icon(system: HostSystemIcon, hc: &HostUiColors) -> Box<dyn Element> {
+// 协议标识色：badge 与系统图标底共用，SSH 蓝 / Serial 橙 / RDP 紫。
+fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, ColorU) {
+    match protocol {
+        "Serial" => (hc.badge_serial_bg, hc.badge_serial_text),
+        "RDP" => (hc.badge_rdp_bg, hc.badge_rdp_text),
+        _ => (hc.badge_ssh_bg, hc.badge_ssh_text),
+    }
+}
+
+fn render_system_icon(
+    system: HostSystemIcon,
+    protocol: &str,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
     let icon_path = match system {
         HostSystemIcon::Terminal => ICON_TERMINAL,
         HostSystemIcon::Linux => ICON_LINUX,
         HostSystemIcon::Serial => ICON_SERIAL,
     };
+    let (base_bg, icon_color) = protocol_colors(protocol, hc);
 
     Container::new(
         ConstrainedBox::new(
             Align::new(
-                ConstrainedBox::new(Icon::new(icon_path, hc.text_primary).finish())
-                    .with_width(24.0)
-                    .with_height(24.0)
+                ConstrainedBox::new(Icon::new(icon_path, icon_color).finish())
+                    .with_width(20.0)
+                    .with_height(20.0)
                     .finish(),
             )
             .finish(),
@@ -308,7 +368,7 @@ fn render_system_icon(system: HostSystemIcon, hc: &HostUiColors) -> Box<dyn Elem
         .with_height(CARD_ICON_SIZE)
         .finish(),
     )
-    .with_background_color(hc.search_bar_bg)
+    .with_background_color(base_bg)
     .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
     .finish()
 }
@@ -318,11 +378,8 @@ fn render_protocol_badge(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
-    let (bg, text_color, label) = match protocol {
-        "SSH" => (hc.badge_ssh_bg, hc.badge_ssh_text, "SSH"),
-        "Serial" => (hc.badge_serial_bg, hc.badge_serial_text, "Serial"),
-        _ => (hc.badge_ssh_bg, hc.badge_ssh_text, protocol),
-    };
+    let (bg, text_color) = protocol_colors(protocol, hc);
+    let label = protocol;
 
     Container::new(
         Text::new_inline(label.to_string(), ui_font, UI_FONT_SIZE_SMALL)
@@ -341,14 +398,9 @@ fn render_tags_row(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    // 无标签不渲染占位。
     if tags.is_empty() {
-        return Container::new(
-            Text::new_inline("无标签".to_string(), ui_font, UI_FONT_SIZE_SMALL)
-                .with_color(hc.text_secondary)
-                .finish(),
-        )
-        .with_margin_top(4.0)
-        .finish();
+        return warpui::elements::Empty::new().finish();
     }
 
     let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
@@ -401,7 +453,7 @@ fn render_connect_button(
                 )
                 .with_child(
                     Text::new_inline("快速连接".to_string(), ui_font, UI_FONT_SIZE)
-                        .with_color(hc.text_secondary)
+                        .with_color(hc.text_accent)
                         .finish(),
                 )
                 .finish(),
@@ -536,7 +588,7 @@ pub fn render_host_list_row(
                     .finish(),
                 )
                 .with_child(
-                    Container::new(render_system_icon_small(system, &hc))
+                    Container::new(render_system_icon_small(system, &protocol, &hc))
                         .with_margin_right(8.0)
                         .finish(),
                 )
@@ -678,17 +730,22 @@ fn render_list_select_checkbox(
     .finish()
 }
 
-fn render_system_icon_small(system: HostSystemIcon, hc: &HostUiColors) -> Box<dyn Element> {
+fn render_system_icon_small(
+    system: HostSystemIcon,
+    protocol: &str,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
     let icon_path = match system {
         HostSystemIcon::Terminal => ICON_TERMINAL,
         HostSystemIcon::Linux => ICON_LINUX,
         HostSystemIcon::Serial => ICON_SERIAL,
     };
+    let (base_bg, icon_color) = protocol_colors(protocol, hc);
 
     Container::new(
         ConstrainedBox::new(
             Align::new(
-                ConstrainedBox::new(Icon::new(icon_path, hc.text_primary).finish())
+                ConstrainedBox::new(Icon::new(icon_path, icon_color).finish())
                     .with_width(16.0)
                     .with_height(16.0)
                     .finish(),
@@ -699,7 +756,7 @@ fn render_system_icon_small(system: HostSystemIcon, hc: &HostUiColors) -> Box<dy
         .with_height(28.0)
         .finish(),
     )
-    .with_background_color(hc.search_bar_bg)
+    .with_background_color(base_bg)
     .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
     .finish()
 }
