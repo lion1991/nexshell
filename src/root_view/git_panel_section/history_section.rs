@@ -447,7 +447,7 @@ impl RootView {
             .entry(active_sha.clone())
             .or_insert_with(ClippedScrollStateHandle::new)
             .clone();
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let ui_font = self.ui_font;
         let position_id = git_commit_row_position_id(&tab.id, &active_sha);
         let tab_id_for_action = tab.id.clone();

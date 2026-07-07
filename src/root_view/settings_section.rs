@@ -148,6 +148,8 @@ impl RootView {
     ) {
         let theme_data = choice.to_warp_theme();
         self.cached_warp_theme = theme_data.clone();
+        self.design_tokens =
+            nexshell::design_tokens::DesignTokens::from_theme(&self.cached_warp_theme);
         let palette = TerminalPalette::from_theme(&theme_data);
         Appearance::handle(ctx).update(ctx, |a, mctx| a.set_theme(theme_data, mctx));
         self.current_theme = choice;

@@ -317,7 +317,7 @@ impl RootView {
     /// RDP 整页 body：连接中 / 已连接（嵌画面 Element）/ 已断开（reason + 重连按钮）。
     /// conn_info_open 时右上角叠加实时连接信息浮层。
     pub(in crate::root_view) fn render_rdp_page(&self, _app: &AppContext) -> Box<dyn Element> {
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let Some(rdp) = self
             .terminal_tabs
             .get(self.active_tab_index)

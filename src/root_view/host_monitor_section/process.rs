@@ -257,7 +257,7 @@ impl RootView {
             } else if mouse.is_hovered() {
                 hover_bg
             } else {
-                ColorU::new(0, 0, 0, 0)
+                nexshell::design_tokens::TRANSPARENT
             };
             Container::new(overview_process_cells(
                 &memory, &cpu, &command, font, text_color,
@@ -291,8 +291,7 @@ impl RootView {
         &self,
         _app: &AppContext,
     ) -> Box<dyn Element> {
-        let theme = &self.cached_warp_theme;
-        let colors = HostOverviewColors::from_theme(theme);
+        let colors = self.design_tokens.overview;
         let active_tab = match self.terminal_tabs.get(self.active_tab_index) {
             Some(tab) => tab,
             None => return Container::new(Empty::new().finish()).finish(),

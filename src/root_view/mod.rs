@@ -101,6 +101,7 @@ use crate::ui_settings::{
     TERMINAL_FONT_SIZE_MIN,
 };
 use crate::{settings_view, warp_dropdown_view, warp_filterable_dropdown};
+use nexshell::design_tokens::DesignTokens;
 
 // crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
@@ -276,6 +277,8 @@ pub(crate) struct RootView {
     current_theme: ThemeChoice,
     // warp: 缓存当前 WarpTheme，避免每帧 WarpThemeConfig::new()
     cached_warp_theme: warp_core::ui::theme::WarpTheme,
+    // 随主题缓存的设计 token（chrome/overview/host 三套派生色）
+    design_tokens: DesignTokens,
     window_opacity: u8,
     cursor_style: CursorStyleChoice,
     monospace_font_name: String,
@@ -439,7 +442,9 @@ impl RootView {
         };
 
         let cached_warp_theme = ui_settings.theme.to_warp_theme();
-        if ui_settings.theme != ThemeChoice::Dark {
+        let design_tokens = DesignTokens::from_theme(&cached_warp_theme);
+        // 无条件同步全局 Appearance（Dark 也显式同步，不再隐性依赖默认值）。
+        {
             let palette = TerminalPalette::from_theme(&cached_warp_theme);
             let theme_for_appearance = cached_warp_theme.clone();
             Appearance::handle(ctx).update(ctx, |a, mctx| a.set_theme(theme_for_appearance, mctx));
@@ -678,6 +683,7 @@ impl RootView {
             settings_view_state: RefCell::new(settings_view::NexSettingsViewState::default()),
             current_theme: ui_settings.theme,
             cached_warp_theme,
+            design_tokens,
             window_opacity: ui_settings.opacity,
             cursor_style: ui_settings.cursor_style,
             monospace_font_name: ui_settings.font_family.clone(),
@@ -1846,7 +1852,7 @@ impl View for RootView {
 
 impl RootView {
     fn ui_colors(&self) -> UiColors {
-        UiColors::from_theme(&self.cached_warp_theme)
+        self.design_tokens.chrome
     }
 }
 

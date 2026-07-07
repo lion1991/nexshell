@@ -10,7 +10,6 @@ use crate::{RootView, TerminalSessionTab, ICON_PATH_COPY, ICON_PATH_EXPAND};
 use nexshell::host_overview::{
     should_show_empty_overview_status, HostOverviewSnapshot, HostOverviewStatus,
 };
-use warpui::color::ColorU;
 use warpui::elements::{
     Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded,
     Flex, Hoverable, Icon, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
@@ -22,7 +21,7 @@ impl RootView {
     // 由 terminal_section 的 render_active_tab_body_with_side_panels 跨 section 调用。
     pub(in crate::root_view) fn render_sidebar_panel(&self, app: &AppContext) -> Box<dyn Element> {
         const SIDEBAR_WIDTH: f32 = 248.0;
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let waiting_snapshot;
         let active_tab = self.terminal_tabs.get(self.active_tab_index);
         let snapshot = if let Some(tab) = active_tab {
@@ -219,7 +218,7 @@ impl RootView {
             let bg = if mouse.is_hovered() {
                 hover_bg
             } else {
-                ColorU::new(0, 0, 0, 0)
+                nexshell::design_tokens::TRANSPARENT
             };
             ConstrainedBox::new(
                 Container::new(

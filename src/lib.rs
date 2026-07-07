@@ -29,6 +29,8 @@ pub mod actions;
 #[cfg(feature = "warpui-app")]
 pub mod code_editor;
 #[cfg(feature = "warpui-app")]
+pub mod design_tokens;
+#[cfg(feature = "warpui-app")]
 pub mod features;
 pub mod file_drop_target;
 pub mod file_panel;

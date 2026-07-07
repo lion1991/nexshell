@@ -54,7 +54,7 @@ impl RootView {
     }
 
     pub(in crate::root_view) fn render_file_panel(&self, _app: &AppContext) -> Box<dyn Element> {
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let Some(tab) = self.file_panel_tab() else {
             return self.render_file_panel_shell(
                 Text::new_inline("文件", self.ui_font, 12.0)

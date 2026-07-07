@@ -285,7 +285,7 @@ impl RootView {
     // ===== render fn：从 main.rs 第 2 块 impl RootView 整体搬入 =====
 
     pub(in crate::root_view) fn render_git_panel(&self, _app: &AppContext) -> Box<dyn Element> {
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let width = self
             .git_panel_width
             .clamp(GIT_PANEL_WIDTH_MIN, GIT_PANEL_WIDTH_MAX);

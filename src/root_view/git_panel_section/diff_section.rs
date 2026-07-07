@@ -78,7 +78,7 @@ impl RootView {
     }
 
     pub(in crate::root_view) fn render_git_diff_page(&self, _app: &AppContext) -> Box<dyn Element> {
-        let colors = HostOverviewColors::from_theme(&self.cached_warp_theme);
+        let colors = self.design_tokens.overview;
         let Some(tab) = self.terminal_tabs.get(self.active_tab_index) else {
             return file_panel_message(
                 &rust_i18n::t!("git_panel_diff_select_file"),
