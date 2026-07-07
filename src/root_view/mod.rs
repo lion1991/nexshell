@@ -34,7 +34,7 @@ use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::{
     clipboard::ClipboardContent,
     elements::{
-        Border, CacheOption, ChildAnchor, ClippedScrollStateHandle, CrossAxisAlignment,
+        Border, CacheOption, ChildAnchor, ClippedScrollStateHandle, Container, CrossAxisAlignment,
         DispatchEventResult, DraggableState, EventHandler, Expanded, Flex, Image as ImageElement,
         MainAxisSize, MouseState, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement,
         ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds, Shrinkable,
@@ -1845,21 +1845,30 @@ impl View for RootView {
                 DispatchEventResult::PropagateToParent
             })
             .finish();
-        root.add_child(
-            EventHandler::new(main_layout)
-                .with_always_handle()
-                .on_mouse_in(
-                    move |ctx, _, _| {
-                        if sweep_git_commit_hover {
-                            ctx.notify_after(GIT_COMMIT_DETAIL_CLEAR_DELAY);
-                            ctx.dispatch_typed_action(TerminalGridAction::GitCommitHoverSweep);
-                        }
-                        DispatchEventResult::PropagateToParent
-                    },
-                    None,
-                )
-                .finish(),
-        );
+        let main_layout = EventHandler::new(main_layout)
+            .with_always_handle()
+            .on_mouse_in(
+                move |ctx, _, _| {
+                    if sweep_git_commit_hover {
+                        ctx.notify_after(GIT_COMMIT_DETAIL_CLEAR_DELAY);
+                        ctx.dispatch_typed_action(TerminalGridAction::GitCommitHoverSweep);
+                    }
+                    DispatchEventResult::PropagateToParent
+                },
+                None,
+            )
+            .finish();
+        // warp: view.rs:26674-26679 — 无背景图主题给根容器铺主题背景色兜底，
+        // 否则 bootstrap 占位、面板滑动等未着色帧会透出桌面。
+        if theme_for_bg.background_image().is_some() {
+            root.add_child(main_layout);
+        } else {
+            root.add_child(
+                Container::new(main_layout)
+                    .with_background_color(theme_for_bg.background().into_solid())
+                    .finish(),
+            );
+        }
 
         if self.new_session_menu_open {
             root.add_positioned_overlay_child(
