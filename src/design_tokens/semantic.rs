@@ -19,14 +19,6 @@ pub const WINDOWS_CLOSE_HOVER: ColorU = ColorU {
     a: 0xff,
 };
 
-/// 菜单/下拉投影（固定值，与主题无关）。
-pub const DROP_SHADOW_COLOR: ColorU = ColorU {
-    r: 0,
-    g: 0,
-    b: 0,
-    a: 48,
-};
-
 #[derive(Clone, Copy)]
 pub struct SemanticColors {
     pub ok: ColorU,
@@ -39,7 +31,6 @@ pub struct SemanticColors {
     pub download: ColorU,
     pub transparent: ColorU,
     pub windows_close_hover: ColorU,
-    pub drop_shadow: ColorU,
 }
 
 impl SemanticColors {
@@ -56,7 +47,6 @@ impl SemanticColors {
                 download: rgb(0x56d364),
                 transparent: TRANSPARENT,
                 windows_close_hover: WINDOWS_CLOSE_HOVER,
-                drop_shadow: DROP_SHADOW_COLOR,
             }
         } else {
             Self {
@@ -70,7 +60,6 @@ impl SemanticColors {
                 download: rgb(0x2da44e),
                 transparent: TRANSPARENT,
                 windows_close_hover: WINDOWS_CLOSE_HOVER,
-                drop_shadow: DROP_SHADOW_COLOR,
             }
         }
     }

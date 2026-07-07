@@ -11,8 +11,8 @@ use nexshell::text_editor::{
 use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, neutral_3, neutral_4};
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    DropShadow, Fill, Flex, Hoverable, Icon, ParentElement, Radius, Shrinkable, Text,
+    Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
+    Flex, Hoverable, Icon, ParentElement, Radius, Shrinkable, Text,
 };
 use warpui::{Element, ViewContext};
 
@@ -310,9 +310,10 @@ impl RootView {
         )
         .with_uniform_padding(find_bar_padding)
         .with_background_color(bar_bg)
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(border_radius)))
-        .with_drop_shadow(DropShadow::default())
-        .finish();
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(border_radius)));
+        let find_bar = nexshell::design_tokens::Elevation::popover()
+            .apply_container(find_bar)
+            .finish();
 
         Some(
             Align::new(

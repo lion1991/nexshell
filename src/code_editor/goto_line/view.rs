@@ -1,8 +1,8 @@
 #![cfg_attr(target_family = "wasm", allow(dead_code, unused_imports))]
 
 use warpui::elements::{
-    Align, Border, ChildView, ConstrainedBox, Container, CornerRadius, DropShadow, Flex,
-    ParentElement, Radius, Text,
+    Align, Border, ChildView, ConstrainedBox, Container, CornerRadius, Flex, ParentElement, Radius,
+    Text,
 };
 use warpui::{
     AppContext, Element, Entity, FocusContext, SingletonEntity, TypedActionView, View, ViewContext,
@@ -192,9 +192,10 @@ impl View for GoToLineView {
         .with_background(theme.surface_2())
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
             FIND_EDITOR_BORDER_RADIUS,
-        )))
-        .with_drop_shadow(DropShadow::default())
-        .finish();
+        )));
+        let panel = crate::design_tokens::Elevation::popover()
+            .apply_container(panel)
+            .finish();
 
         Align::new(panel).top_center().finish()
     }

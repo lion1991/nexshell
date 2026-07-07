@@ -7,7 +7,7 @@ use warp_editor::search::{SearchEvent, Searcher};
 pub use warpui::accessibility::{AccessibilityContent, WarpA11yRole};
 use warpui::elements::{
     Align, Border, ChildAnchor, Clipped, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, DropShadow, Element, Flex, Hoverable, MainAxisAlignment, MouseStateHandle,
+    CrossAxisAlignment, Element, Flex, Hoverable, MainAxisAlignment, MouseStateHandle,
     OffsetPositioning, ParentAnchor, ParentOffsetBounds, Radius, Rect, SavePosition, Shrinkable,
     Text,
 };
@@ -1017,9 +1017,10 @@ impl View for CodeEditorFind {
         .with_background(appearance.theme().surface_2())
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
             FIND_EDITOR_BORDER_RADIUS,
-        )))
-        .with_drop_shadow(DropShadow::default())
-        .finish();
+        )));
+        let find_bar = crate::design_tokens::Elevation::popover()
+            .apply_container(find_bar)
+            .finish();
 
         Align::new(
             Container::new(find_bar)

@@ -8,8 +8,8 @@
 use chrono::{Datelike, Timelike};
 use warpui::elements::{
     Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, DispatchEventResult, DropShadow, Empty, EventHandler, Expanded, Fill, Flex,
-    Hoverable, Icon, MainAxisSize, MouseStateHandle, ParentElement, Radius, ScrollbarWidth, Text,
+    CrossAxisAlignment, DispatchEventResult, Empty, EventHandler, Expanded, Fill, Flex, Hoverable,
+    Icon, MainAxisSize, MouseStateHandle, ParentElement, Radius, ScrollbarWidth, Text,
 };
 use warpui::fonts;
 use warpui::Element;
@@ -302,12 +302,14 @@ pub(crate) fn render_git_commit_detail_card(
     content.add_child(Container::new(footer).with_padding_top(10.0).finish());
 
     let card = ConstrainedBox::new(
-        Container::new(content.finish())
-            .with_uniform_padding(10.0)
-            .with_background_color(colors.panel_bg)
-            .with_border(Border::all(1.0).with_border_color(colors.panel_border))
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
-            .with_drop_shadow(DropShadow::default())
+        nexshell::design_tokens::Elevation::popover()
+            .apply_container(
+                Container::new(content.finish())
+                    .with_uniform_padding(10.0)
+                    .with_background_color(colors.panel_bg)
+                    .with_border(Border::all(1.0).with_border_color(colors.panel_border))
+                    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0))),
+            )
             .finish(),
     )
     .with_width(GIT_COMMIT_DETAIL_CARD_WIDTH)

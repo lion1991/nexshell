@@ -2,10 +2,10 @@ use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
         Align, Border, ChildAnchor, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
-        Container, CornerRadius, CrossAxisAlignment, DropShadow, Element, Expanded, Fill, Flex,
-        Hoverable, Icon, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning,
-        ParentElement, PositionedElementAnchor, PositionedElementOffsetBounds, Radius,
-        SavePosition, ScrollbarWidth, Shrinkable, Stack, Text,
+        Container, CornerRadius, CrossAxisAlignment, Element, Expanded, Fill, Flex, Hoverable,
+        Icon, MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentElement,
+        PositionedElementAnchor, PositionedElementOffsetBounds, Radius, SavePosition,
+        ScrollbarWidth, Shrinkable, Stack, Text,
     },
     geometry::vector::vec2f,
     ui_components::{
@@ -20,7 +20,7 @@ const MENU_VERTICAL_PADDING: f32 = 9.0;
 const MENU_ITEM_VERTICAL_PADDING: f32 = 5.0;
 const MENU_ITEM_HORIZONTAL_PADDING: f32 = 14.0;
 const DEFAULT_MENU_MAX_HEIGHT: f32 = 300.0;
-use nexshell::design_tokens::DROP_SHADOW_COLOR;
+use nexshell::design_tokens::Elevation;
 
 #[derive(Clone)]
 pub struct WarpDropdownOption<A: Action + Clone> {
@@ -224,7 +224,7 @@ where
     .with_overlayed_scrollbar()
     .finish();
 
-    Container::new(
+    let menu = Container::new(
         ConstrainedBox::new(scrollable)
             .with_width(menu_width)
             .with_max_height(DEFAULT_MENU_MAX_HEIGHT)
@@ -234,11 +234,8 @@ where
     .with_padding_bottom(MENU_VERTICAL_PADDING)
     .with_background(theme.surface_2())
     .with_border(Border::all(1.0).with_border_fill(theme.outline()))
-    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(5.0)))
-    .with_drop_shadow(DropShadow::new_with_standard_offset_and_spread(
-        DROP_SHADOW_COLOR,
-    ))
-    .finish()
+    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(5.0)));
+    Elevation::overlay().apply_container(menu).finish()
 }
 
 fn render_dropdown_menu_item<A>(

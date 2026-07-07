@@ -2,6 +2,7 @@
 //! chrome/overview/host 三套字段名与旧 UiColors/HostOverviewColors/HostUiColors 一一对应，
 //! 旧结构体现为本模块的 re-export 门面，消费方 call-site 零改动。
 
+pub mod elevation;
 pub mod palette;
 pub mod scale;
 pub mod semantic;
@@ -9,8 +10,9 @@ pub mod semantic;
 use warp_core::ui::theme::WarpTheme;
 use warpui_core::color::ColorU;
 
+pub use elevation::Elevation;
 pub use palette::ThemePalette;
-pub use semantic::{SemanticColors, DROP_SHADOW_COLOR, TRANSPARENT, WINDOWS_CLOSE_HOVER};
+pub use semantic::{SemanticColors, TRANSPARENT, WINDOWS_CLOSE_HOVER};
 
 #[derive(Clone, Copy)]
 pub struct DesignTokens {
@@ -56,6 +58,10 @@ pub struct ChromeColors {
     pub combo_outer_hover_bg: ColorU,
     pub combo_inner_hover_bg: ColorU,
     pub combo_chevron_active_bg: ColorU,
+    /// 活动 tab 底部 accent 焦点条。
+    pub tab_accent_bar: ColorU,
+    /// 选中行 accent tint 圆角 pill 底色。
+    pub selection_pill_bg: ColorU,
 }
 
 impl ChromeColors {
@@ -79,6 +85,8 @@ impl ChromeColors {
             combo_outer_hover_bg: p.neutral_1,
             combo_inner_hover_bg: p.neutral_2,
             combo_chevron_active_bg: p.fg_overlay_3,
+            tab_accent_bar: p.accent,
+            selection_pill_bg: p.tint(p.accent),
         }
     }
 

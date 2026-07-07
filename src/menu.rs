@@ -12,11 +12,10 @@ use warpui::assets::asset_cache::AssetSource;
 use warpui::elements::{
     Align, Border, CacheOption, ChildAnchor, ClippedScrollStateHandle, ClippedScrollable,
     ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Dismiss, DispatchEventResult,
-    DropShadow, Element, EventHandler, Flex, Hoverable, Icon, Image, MainAxisAlignment,
-    MainAxisSize, MouseInBehavior, MouseStateHandle, OffsetPositioning, ParentAnchor,
-    ParentElement, ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds,
-    Radius, Rect, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth, Shrinkable,
-    Stack, Text,
+    Element, EventHandler, Flex, Hoverable, Icon, Image, MainAxisAlignment, MainAxisSize,
+    MouseInBehavior, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds, Radius, Rect,
+    SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth, Shrinkable, Stack, Text,
 };
 use warpui::fonts::{FamilyId, Properties};
 use warpui::keymap::FixedBinding;
@@ -45,7 +44,7 @@ pub const SEPARATOR_VERTICAL_MARGIN: f32 = 4.;
 const MINIMUM_MENU_ITEM_FONT_SIZE: f32 = 5.;
 const PADDING_TO_ICON_SIZE_MULTIPLIER: f32 = 3.;
 const MENU_ITEM_LEFT_PADDING_MULTIPLIER: f32 = 1.5;
-use crate::design_tokens::DROP_SHADOW_COLOR;
+use crate::design_tokens::Elevation;
 const SECONDARY_TEXT_RATIO: f32 = 0.9;
 
 #[derive(Clone, Debug)]
@@ -2845,9 +2844,7 @@ impl<A: Action + Clone> SubMenu<A> {
                 );
 
                 if with_drop_shadow {
-                    menu = menu.with_drop_shadow(DropShadow::new_with_standard_offset_and_spread(
-                        DROP_SHADOW_COLOR,
-                    ));
+                    menu = Elevation::overlay().apply_container(menu);
                 }
 
                 if depth == 0 {

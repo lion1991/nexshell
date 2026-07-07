@@ -10,7 +10,6 @@ use warpui::{
     },
     fonts::FamilyId,
     geometry::vector::vec2f,
-    scene::DropShadow,
     ui_components::{
         button::{ButtonVariant, TextAndIcon, TextAndIconAlignment},
         components::{Coords, UiComponent, UiComponentStyles},
@@ -19,6 +18,7 @@ use warpui::{
     ViewHandle, WeakViewHandle,
 };
 
+use nexshell::design_tokens::Elevation;
 use nexshell::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant};
 use warp_core::ui::appearance::Appearance;
 
@@ -537,8 +537,8 @@ where
         if self.is_expanded {
             let mut menu = ChildView::new(&self.dropdown).finish();
             if self.use_drop_shadow {
-                menu = Container::new(menu)
-                    .with_drop_shadow(DropShadow::default())
+                menu = Elevation::overlay()
+                    .apply_container(Container::new(menu))
                     .finish();
             }
             dropdown_stack.add_positioned_overlay_child(
