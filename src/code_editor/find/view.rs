@@ -1003,24 +1003,26 @@ impl View for CodeEditorFind {
             );
         }
 
+        // 玻璃背景：实色由 GlassBackdrop 模糊+tint 提供（本浮层挂独立 overlay 层）。
         let find_bar = Container::new(
-            ConstrainedBox::new(
-                Container::new(find_rows.finish())
-                    .with_background(appearance.theme().surface_2())
-                    .finish(),
-            )
-            .with_height(editor_height + (2. * FIND_EDITOR_PADDING) + (2. * FIND_BAR_PADDING))
-            .with_width(FIND_BAR_WIDTH)
-            .finish(),
+            ConstrainedBox::new(Container::new(find_rows.finish()).finish())
+                .with_height(editor_height + (2. * FIND_EDITOR_PADDING) + (2. * FIND_BAR_PADDING))
+                .with_width(FIND_BAR_WIDTH)
+                .finish(),
         )
         .with_uniform_padding(FIND_BAR_PADDING)
-        .with_background(appearance.theme().surface_2())
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
             FIND_EDITOR_BORDER_RADIUS,
         )));
-        let find_bar = crate::design_tokens::Elevation::popover()
-            .apply_container(find_bar)
-            .finish();
+        let find_bar = crate::glass_backdrop::GlassBackdrop::new(
+            crate::design_tokens::Elevation::popover()
+                .apply_container(find_bar)
+                .finish(),
+            FIND_EDITOR_BORDER_RADIUS,
+            appearance.theme().surface_2().into_solid(),
+        )
+        .with_glass(crate::design_tokens::Glass::popover())
+        .finish();
 
         Align::new(
             Container::new(find_bar)

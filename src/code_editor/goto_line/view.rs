@@ -179,23 +179,25 @@ impl View for GoToLineView {
             );
         }
 
+        // 玻璃背景：实色由 GlassBackdrop 模糊+tint 提供（本浮层挂独立 overlay 层）。
         let panel = Container::new(
-            ConstrainedBox::new(
-                Container::new(content.finish())
-                    .with_background(theme.surface_2())
-                    .finish(),
-            )
-            .with_width(GOTO_LINE_WIDTH)
-            .finish(),
+            ConstrainedBox::new(Container::new(content.finish()).finish())
+                .with_width(GOTO_LINE_WIDTH)
+                .finish(),
         )
         .with_uniform_padding(FIND_BAR_PADDING)
-        .with_background(theme.surface_2())
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
             FIND_EDITOR_BORDER_RADIUS,
         )));
-        let panel = crate::design_tokens::Elevation::popover()
-            .apply_container(panel)
-            .finish();
+        let panel = crate::glass_backdrop::GlassBackdrop::new(
+            crate::design_tokens::Elevation::popover()
+                .apply_container(panel)
+                .finish(),
+            FIND_EDITOR_BORDER_RADIUS,
+            theme.surface_2().into_solid(),
+        )
+        .with_glass(crate::design_tokens::Glass::popover())
+        .finish();
 
         Align::new(panel).top_center().finish()
     }

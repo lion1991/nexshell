@@ -301,16 +301,22 @@ pub(crate) fn render_git_commit_detail_card(
     }
     content.add_child(Container::new(footer).with_padding_top(10.0).finish());
 
+    // 玻璃背景：实色由 GlassBackdrop 模糊+tint 提供（本浮层挂独立 overlay 层）。
     let card = ConstrainedBox::new(
-        nexshell::design_tokens::Elevation::popover()
-            .apply_container(
-                Container::new(content.finish())
-                    .with_uniform_padding(10.0)
-                    .with_background_color(colors.panel_bg)
-                    .with_border(Border::all(1.0).with_border_color(colors.panel_border))
-                    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0))),
-            )
-            .finish(),
+        nexshell::glass_backdrop::GlassBackdrop::new(
+            nexshell::design_tokens::Elevation::popover()
+                .apply_container(
+                    Container::new(content.finish())
+                        .with_uniform_padding(10.0)
+                        .with_border(Border::all(1.0).with_border_color(colors.panel_border))
+                        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0))),
+                )
+                .finish(),
+            6.0,
+            colors.panel_bg,
+        )
+        .with_glass(nexshell::design_tokens::Glass::popover())
+        .finish(),
     )
     .with_width(GIT_COMMIT_DETAIL_CARD_WIDTH)
     .finish();

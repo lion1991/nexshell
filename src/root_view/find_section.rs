@@ -8,7 +8,7 @@
 use nexshell::text_editor::{
     EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
 };
-use warp_core::ui::theme::color::internal_colors::{neutral_1, neutral_2, neutral_3, neutral_4};
+use warp_core::ui::theme::color::internal_colors::{neutral_2, neutral_3, neutral_4};
 use warpui::color::ColorU;
 use warpui::elements::{
     Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
@@ -130,20 +130,20 @@ impl RootView {
         }
 
         // warp: view_components/find.rs:571-694
-        let editor_height = 20.0;
+        // 13px 字行高 ~18，盒高贴齐行高避免编辑器内顶对齐的底部 slack。
+        let editor_height = 18.0;
         let icon_size = 14.0;
-        let find_bar_padding = 4.0;
+        let find_bar_padding = 6.0;
         let editor_padding = 6.0;
         let icon_padding = 4.0;
         let icon_spacing = 4.0;
-        let border_radius = 6.0;
-        let find_bar_width = 500.0;
+        let border_radius = 8.0;
+        let find_bar_width = 380.0;
         let find_theme = &self.cached_warp_theme;
         let label_color = find_theme.nonactive_ui_text_color().into_solid();
         let hover_bg = neutral_3(&find_theme);
         let bar_n2 = neutral_2(&find_theme);
         let bar_bg = ColorU::new(bar_n2.r, bar_n2.g, bar_n2.b, 0xf5);
-        let editor_bg = neutral_1(&find_theme);
         let border_color = neutral_4(&find_theme);
         let find_icon_active = find_theme.active_ui_text_color().into_solid();
         let find_snapshot = self.terminal.lock().ok().map(|rt| rt.snapshot_for_render());
@@ -159,31 +159,43 @@ impl RootView {
         )
         .finish();
 
+        // 去框化输入区：搜索图标做左锚，输入直接融在玻璃条上。
         let editor_area = Shrinkable::new(
             1.,
-            Container::new(query_editor)
-                .with_padding_left(8.0)
-                .with_padding_right(4.0)
-                .with_padding_top(5.0)
-                .with_padding_bottom(5.0)
-                .with_background_color(editor_bg)
-                .with_border(Border::all(1.0).with_border_color(border_color))
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(border_radius)))
-                .with_margin_right(2.0 * icon_spacing)
-                .finish(),
+            Container::new(
+                Flex::row()
+                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                    .with_child(
+                        Container::new(
+                            ConstrainedBox::new(
+                                Icon::new(crate::ICON_PATH_SEARCH, label_color).finish(),
+                            )
+                            .with_width(icon_size)
+                            .with_height(icon_size)
+                            .finish(),
+                        )
+                        .with_margin_right(8.0)
+                        .finish(),
+                    )
+                    .with_child(query_editor)
+                    .finish(),
+            )
+            .with_padding_left(6.0)
+            .with_padding_right(4.0)
+            .with_padding_top(editor_padding)
+            .with_padding_bottom(editor_padding)
+            .with_margin_right(2.0 * icon_spacing)
+            .finish(),
         )
         .finish();
 
         let find_current = find_snapshot.as_ref().and_then(|s| s.find_current_match);
         let match_label = find_match_label(match_count, find_current);
+        // 不定高：交给 find_row 的 cross-axis 垂直居中，定高盒会把文字顶到上缘。
         let label_child = Container::new(
-            ConstrainedBox::new(
-                Text::new_inline(match_label, self.monospace_font, 12.0)
-                    .with_color(label_color)
-                    .finish(),
-            )
-            .with_height(editor_height)
-            .finish(),
+            Text::new_inline(match_label, self.monospace_font, 12.0)
+                .with_color(label_color)
+                .finish(),
         )
         .with_margin_right(icon_spacing)
         .finish();
@@ -288,32 +300,51 @@ impl RootView {
         )
         .finish();
 
+        // 计数与导航按钮之间的发丝分隔，收整右侧簇（两侧等距留白）。
+        let cluster_divider = Container::new(
+            ConstrainedBox::new(
+                Container::new(warpui::elements::Empty::new().finish())
+                    .with_background_color(border_color)
+                    .finish(),
+            )
+            .with_width(1.0)
+            .with_height(14.0)
+            .finish(),
+        )
+        .with_margin_left(6.0)
+        .with_margin_right(6.0)
+        .finish();
+
         let find_row = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_child(editor_area)
             .with_child(label_child)
+            .with_child(cluster_divider)
             .with_child(down_btn)
             .with_child(up_btn)
             .with_child(close_btn)
             .finish();
 
-        // warp: find.rs:669-684
+        // warp: find.rs:669-684；玻璃背景：实色由 GlassBackdrop 模糊+tint 提供。
+        // 内层定高只含编辑器行本体，bar padding 由外层 uniform_padding 提供，别双算。
         let find_bar = Container::new(
-            ConstrainedBox::new(
-                Container::new(find_row)
-                    .with_background_color(bar_bg)
-                    .finish(),
-            )
-            .with_height(editor_height + (2.0 * editor_padding) + (2.0 * find_bar_padding))
-            .with_width(find_bar_width)
-            .finish(),
+            ConstrainedBox::new(Container::new(find_row).finish())
+                .with_height(editor_height + (2.0 * editor_padding))
+                .with_width(find_bar_width)
+                .finish(),
         )
         .with_uniform_padding(find_bar_padding)
-        .with_background_color(bar_bg)
+        .with_border(Border::all(1.0).with_border_color(border_color))
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(border_radius)));
         let find_bar = nexshell::design_tokens::Elevation::popover()
             .apply_container(find_bar)
             .finish();
+        // 与终端同层挂载，需自开层保证模糊采样到终端文字。
+        let find_bar =
+            nexshell::glass_backdrop::GlassBackdrop::new(find_bar, border_radius, bar_bg)
+                .with_glass(nexshell::design_tokens::Glass::popover())
+                .with_own_layer()
+                .finish();
 
         Some(
             Align::new(

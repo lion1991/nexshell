@@ -85,6 +85,15 @@ impl Glass {
         }
     }
 
+    /// 中层浮窗（查找条/goto/commit 详情）：常驻内容上方，tint 更实保读字。
+    pub fn popover() -> Self {
+        Self {
+            radius: 18.0,
+            saturation: 1.3,
+            tint_alpha: 0xd2,
+        }
+    }
+
     /// 组玻璃 scene 原语；tint_base 取浮层背景主题色（alpha 被预设覆盖）。
     pub fn backdrop(&self, rect: RectF, corner_radius: f32, tint_base: ColorU) -> BackdropBlur {
         BackdropBlur {

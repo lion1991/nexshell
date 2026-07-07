@@ -7,6 +7,7 @@ use warpui::color::ColorU;
 use warpui::elements::{AfterLayoutContext, Element, LayoutContext, Point, SizeConstraint, ZIndex};
 use warpui::event::DispatchedEvent;
 use warpui::geometry::rect::RectF;
+use warpui::scene::ClipBounds;
 use warpui::{AppContext, EventContext, PaintContext};
 
 use crate::design_tokens::Glass;
@@ -16,6 +17,9 @@ pub struct GlassBackdrop {
     glass: Glass,
     corner_radius: f32,
     tint_base: ColorU,
+    // 宿主与下层内容同层时置 true：自开一层，保证模糊采样到本层已画内容。
+    // 已在独立 overlay 层的浮层（菜单等）保持 false。
+    own_layer: bool,
     size: Option<Vector2F>,
     origin: Option<Point>,
 }
@@ -28,9 +32,20 @@ impl GlassBackdrop {
             glass: Glass::overlay(),
             corner_radius,
             tint_base,
+            own_layer: false,
             size: None,
             origin: None,
         }
+    }
+
+    pub fn with_glass(mut self, glass: Glass) -> Self {
+        self.glass = glass;
+        self
+    }
+
+    pub fn with_own_layer(mut self) -> Self {
+        self.own_layer = true;
+        self
     }
 }
 
@@ -51,6 +66,9 @@ impl Element for GlassBackdrop {
     }
 
     fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, app: &AppContext) {
+        if self.own_layer {
+            ctx.scene.start_layer(ClipBounds::ActiveLayer);
+        }
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
         if let Some(size) = self.size {
             ctx.scene.set_backdrop_blur(self.glass.backdrop(
@@ -60,6 +78,9 @@ impl Element for GlassBackdrop {
             ));
         }
         self.child.paint(origin, ctx, app);
+        if self.own_layer {
+            ctx.scene.stop_layer();
+        }
     }
 
     fn size(&self) -> Option<Vector2F> {
