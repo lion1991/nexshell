@@ -24,6 +24,8 @@ pub struct HostCardStates {
     pub connect_states: Vec<MouseStateHandle>,
     pub checkbox_states: Vec<MouseStateHandle>,
     pub draggable_states: Vec<DraggableState>,
+    /// 卡片/列表行 hover 颜色过渡（key = "{位面}:{host_id}"，随宿主列表持久）。
+    pub hover_transitions: std::cell::RefCell<nexshell::ui_anim::TransitionMap<String>>,
 }
 
 impl HostCardStates {
@@ -33,6 +35,7 @@ impl HostCardStates {
             connect_states: Vec::new(),
             checkbox_states: Vec::new(),
             draggable_states: Vec::new(),
+            hover_transitions: std::cell::RefCell::new(nexshell::ui_anim::TransitionMap::new()),
         }
     }
 
@@ -113,19 +116,37 @@ pub fn render_host_card(
     let tags = host.tags.clone();
     let system = host.system;
 
-    Hoverable::new(card_state, move |mouse| {
-        let is_hovered = mouse.is_hovered();
-        let bg = if is_hovered {
+    // hover 颜色 eased 过渡；selected 边框保持瞬时 accent。
+    let is_hovered_now = card_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    let (anim_bg, anim_border) = {
+        let now = std::time::Instant::now();
+        let mut transitions = states.hover_transitions.borrow_mut();
+        let bg_key = format!("card-bg:{}", host.id);
+        let bd_key = format!("card-bd:{}", host.id);
+        let bg_target = if is_hovered_now {
             hc.card_bg_hover
         } else {
             hc.card_bg
         };
-        let border_color = if selected {
-            hc.text_accent
-        } else if is_hovered {
+        let bd_target = if is_hovered_now {
             hc.card_border_hover
         } else {
             hc.card_border
+        };
+        transitions.retarget(bg_key.clone(), bg_target, now);
+        transitions.retarget(bd_key.clone(), bd_target, now);
+        (
+            transitions.sample(&bg_key, now).unwrap_or(bg_target),
+            transitions.sample(&bd_key, now).unwrap_or(bd_target),
+        )
+    };
+
+    Hoverable::new(card_state, move |_mouse| {
+        let bg = anim_bg;
+        let border_color = if selected {
+            hc.text_accent
+        } else {
+            anim_border
         };
 
         let mut card_col = Flex::column()
@@ -213,6 +234,9 @@ pub fn render_host_card(
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
     .with_defer_events_to_children()
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(TerminalGridAction::HostSelectSingle(host_id.clone()));
     })
@@ -478,15 +502,25 @@ pub fn render_host_list_row(
     let tags = host.tags.clone();
     let group_name = host.group_id.clone().unwrap_or_default();
 
-    Hoverable::new(card_state, move |mouse| {
-        let is_hovered = mouse.is_hovered();
-        let bg = if selected {
+    // 行 hover/选中背景 eased 过渡（选中并入目标色，一并平滑）。
+    let is_hovered_now = card_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    let anim_bg = {
+        let now = std::time::Instant::now();
+        let mut transitions = states.hover_transitions.borrow_mut();
+        let key = format!("row-bg:{}", host.id);
+        let target = if selected {
             hc.group_selected_bg
-        } else if is_hovered {
+        } else if is_hovered_now {
             hc.card_bg_hover
         } else {
             hc.panel_bg
         };
+        transitions.retarget(key.clone(), target, now);
+        transitions.sample(&key, now).unwrap_or(target)
+    };
+
+    Hoverable::new(card_state, move |_mouse| {
+        let bg = anim_bg;
 
         let status_col = ConstrainedBox::new(
             Flex::row()
@@ -594,6 +628,9 @@ pub fn render_host_list_row(
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
     .with_defer_events_to_children()
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(TerminalGridAction::HostSelectSingle(host_id.clone()));
     })

@@ -25,19 +25,38 @@ use warpui::{SingletonEntity as _, ViewContext};
 
 impl RootView {
     pub(in crate::root_view) fn handle_toggle_file_panel(&mut self, ctx: &mut ViewContext<Self>) {
+        // 关门滑出途中再按 = 取消关门滑回。
+        if self.file_panel_closing.borrow().is_some() {
+            *self.file_panel_closing.borrow_mut() = None;
+            self.file_panel_slide.borrow_mut().set_target(0.0);
+            ctx.notify();
+            return;
+        }
         let Some(tab) = self.file_panel_tab_mut() else {
             return;
         };
-        tab.file_panel_open = !tab.file_panel_open;
-        let opening = tab.file_panel_open;
+        if tab.file_panel_open {
+            // 开始关门：滑出到面板宽，收敛后 finalize_panel_closes 落闸真正关闭。
+            // git 面板无需联动：file 槽位释放的空间归中间的 terminal（flex），
+            // git 作为最右元素位置不变；file 从 git 底下滑出（z 序 git 在上）。
+            let width = tab
+                .file_panel_width
+                .clamp(FILE_PANEL_WIDTH_MIN, FILE_PANEL_WIDTH_MAX)
+                + crate::file_panel_view_helpers::PANEL_BORDER_W;
+            let tab_id = tab.id.clone();
+            *self.file_panel_closing.borrow_mut() = Some(tab_id);
+            self.file_panel_slide.borrow_mut().set_target(width);
+            ctx.notify();
+            return;
+        }
+        tab.file_panel_open = true;
         let tab_id = tab.id.clone();
-        if opening && matches!(tab.kind, TerminalSessionKind::Local) {
+        if matches!(tab.kind, TerminalSessionKind::Local) {
             tab.file_panel_state.follow_cwd = true;
         }
+        self.file_panel_slide_pending.set(true); // 首帧按实际宽度起搏滑入
         ctx.notify();
-        if opening {
-            self.refresh_or_restart_file_panel_worker(&tab_id, ctx);
-        }
+        self.refresh_or_restart_file_panel_worker(&tab_id, ctx);
     }
 
     pub(in crate::root_view) fn handle_file_panel_refresh(&mut self, ctx: &mut ViewContext<Self>) {

@@ -22,10 +22,12 @@ use crate::{
 };
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    DispatchEventResult, DropTarget, Empty, EventHandler, Flex, Hoverable, Icon, MainAxisSize,
-    MouseStateHandle, ParentElement, Radius, SavePosition, Shrinkable,
+    Align, Border, ChildAnchor, Clipped, ConstrainedBox, Container, CornerRadius,
+    CrossAxisAlignment, DispatchEventResult, DropTarget, Empty, EventHandler, Flex, Hoverable,
+    Icon, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement,
+    ParentOffsetBounds, Radius, Rect, SavePosition, Shrinkable, Stack,
 };
+use warpui::geometry::vector::vec2f;
 use warpui::{platform, AppContext, Element};
 
 use std::time::Instant;
@@ -152,13 +154,90 @@ impl RootView {
             );
         }
 
-        EventHandler::new(
+        let content = EventHandler::new(
             Container::new(bar_row.finish())
                 .with_padding_left(chrome_layout.left_padding)
                 .with_padding_right(chrome_layout.right_padding)
                 .finish(),
         )
-        .finish()
+        .finish();
+        // accent 底条 overlay：两根弹簧追活动 tab 上一帧实测位置，切 tab 时滑动过去。
+        // 坐标基准复用外层已存的 TAB_BAR_POSITION_ID（其水平原点与本 Stack 一致）。
+        let mut stack = Stack::new().with_child(content);
+        if let Some((bar_x, bar_y, bar_w)) = self.tab_accent_bar_layout(tabs, app) {
+            if bar_w > 1.0 {
+                stack.add_positioned_overlay_child(
+                    ConstrainedBox::new(
+                        Rect::new()
+                            .with_background_color(self.ui_colors().tab_accent_bar)
+                            .finish(),
+                    )
+                    .with_width(bar_w)
+                    .with_height(2.0)
+                    .finish(),
+                    OffsetPositioning::offset_from_parent(
+                        vec2f(bar_x, bar_y),
+                        ParentOffsetBounds::Unbounded,
+                        ParentAnchor::TopLeft,
+                        ChildAnchor::TopLeft,
+                    ),
+                );
+            }
+        }
+        stack.finish()
+    }
+
+    /// accent 底条弹簧布局：返回（相对 tab 行的 x, y, 宽）。位置取上一帧缓存；
+    /// y 直接钉在活动 tab 自己的底边（对容器高度差异免疫）。
+    /// 缺位帧（新 tab 首帧无缓存）沿用当前弹簧值继续画，避免闪断。
+    fn tab_accent_bar_layout(
+        &self,
+        tabs: &[TabModel],
+        app: &AppContext,
+    ) -> Option<(f32, f32, f32)> {
+        let active = tabs.iter().position(|t| t.active)?;
+        let now = Instant::now();
+        let rects = app
+            .element_position_by_id_at_last_frame(self.window_id, TAB_BAR_POSITION_ID)
+            .zip(app.element_position_by_id_at_last_frame(
+                self.window_id,
+                format!("nexshell_tab_position_{active}"),
+            ));
+        let mut x = self.tab_accent_bar_x.borrow_mut();
+        let mut w = self.tab_accent_bar_w.borrow_mut();
+        if let Some((bar, tab)) = rects {
+            let (tx, tw) = (tab.min_x() - bar.min_x(), tab.width());
+            // NEXSHELL_BAR_DEBUG=1 时打印弹簧轨迹（定位滑动异常用，临时观测件）。
+            if std::env::var_os("NEXSHELL_BAR_DEBUG").is_some() {
+                eprintln!(
+                    "[bar] active={active} bar_min_x={:.1} tab=({:.1},{:.1} w{:.1}) target_x={tx:.1} target_w={tw:.1}",
+                    bar.min_x(),
+                    tab.min_x(),
+                    tab.min_y(),
+                    tab.width(),
+                );
+            }
+            self.tab_accent_bar_y.set(tab.max_y() - bar.min_y() - 2.0);
+            if self.tab_accent_bar_init.get() {
+                x.set_target(tx);
+                w.set_target(tw);
+            } else {
+                // 首次出现：直接落位不滑动。
+                x.snap(tx);
+                w.snap(tw);
+                self.tab_accent_bar_init.set(true);
+            }
+        } else if !self.tab_accent_bar_init.get() {
+            return None;
+        }
+        // 取整到整像素：2px 细条在小数坐标发虚，收敛尾部亚像素位移显成抖动。
+        let (sx, sw) = (x.sample(now).round(), w.sample(now).round());
+        if std::env::var_os("NEXSHELL_BAR_DEBUG").is_some()
+            && (x.is_animating() || w.is_animating())
+        {
+            eprintln!("[bar] sample x={sx:.1} w={sw:.1}");
+        }
+        Some((sx, self.tab_accent_bar_y.get(), sw))
     }
 
     fn render_sidebar_toggle(&self) -> Box<dyn Element> {

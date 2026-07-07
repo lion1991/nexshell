@@ -219,6 +219,18 @@ pub fn render_host_management_panel(
 
 const GRID_COLUMNS: usize = 3;
 
+/// 清理已删除/被过滤宿主的 hover 过渡条目，防泄漏。
+fn retain_live_hover_transitions(
+    card_states: &HostCardStates,
+    hosts: &[nexshell::host_management::HostCardSnapshot],
+) {
+    let live: std::collections::HashSet<&str> = hosts.iter().map(|h| h.id.as_str()).collect();
+    card_states
+        .hover_transitions
+        .borrow_mut()
+        .retain(|key| key.split_once(':').is_some_and(|(_, id)| live.contains(id)));
+}
+
 fn render_card_grid(
     hosts: &[nexshell::host_management::HostCardSnapshot],
     state: &HostManagementState,
@@ -232,6 +244,7 @@ fn render_card_grid(
     if hosts.is_empty() {
         return render_empty_state(ui_font, hc);
     }
+    retain_live_hover_transitions(card_states, hosts);
 
     let mut col = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
@@ -316,6 +329,7 @@ fn render_host_list(
     if hosts.is_empty() {
         return render_empty_state(ui_font, hc);
     }
+    retain_live_hover_transitions(card_states, hosts);
 
     let mut col = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)

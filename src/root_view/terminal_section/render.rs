@@ -134,6 +134,7 @@ impl RootView {
                 Arc::clone(&self.scrollbar_thumb_hovered),
                 Arc::clone(&self.find_state),
                 Arc::clone(&self.smooth_scroll_px),
+                Arc::clone(&self.cursor_smear),
                 Arc::clone(&self.shaped_line_cache),
                 Arc::clone(&self.terminal_ime_layout),
                 terminal
@@ -279,7 +280,7 @@ impl RootView {
                 Arc::new(s)
             };
 
-            let (sel_drag, sb_drag, cursor_over, sb_hover, find_st, scroll_px, shaped, ime) =
+            let (sel_drag, sb_drag, cursor_over, sb_hover, find_st, scroll_px, smear, shaped, ime) =
                 if is_focused {
                     (
                         Arc::clone(&self.selection_drag),
@@ -288,6 +289,7 @@ impl RootView {
                         Arc::clone(&self.scrollbar_thumb_hovered),
                         Arc::clone(&self.find_state),
                         Arc::clone(&self.smooth_scroll_px),
+                        Arc::clone(&self.cursor_smear),
                         Arc::clone(&self.shaped_line_cache),
                         Arc::clone(&self.terminal_ime_layout),
                     )
@@ -299,6 +301,7 @@ impl RootView {
                         Arc::new(Mutex::new(false)),
                         Arc::new(Mutex::new(FindPanelState::default())),
                         Arc::new(Mutex::new(0.0)),
+                        Arc::new(Mutex::new(crate::cursor_smear::CursorSmear::new())),
                         Arc::new(Mutex::new(TerminalShapedLineCache::default())),
                         Arc::new(Mutex::new(None)),
                     )
@@ -331,6 +334,7 @@ impl RootView {
                 sb_hover,
                 find_st,
                 scroll_px,
+                smear,
                 shaped,
                 ime,
                 fg_handle,

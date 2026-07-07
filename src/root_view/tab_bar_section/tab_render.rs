@@ -142,7 +142,6 @@ impl RootView {
         let title_bar_bg = uc.title_bar_bg;
         let tab_border_active = uc.tab_border_active;
         let tab_border_inactive = uc.tab_border_inactive;
-        let tab_accent_bar = uc.tab_accent_bar;
         let close_bg_default = uc.tab_close_bg_default;
         let close_bg_hover_color = uc.tab_close_bg_hover;
         let close_icon_active = uc.icon_color_active;
@@ -330,20 +329,16 @@ impl RootView {
             )
             .finish();
 
-            // 活动 tab：2px accent 底条焦点；其余：1px 右分隔（首个另加左）。
-            let border = if is_active {
-                Border::new(2.0)
-                    .with_sides(false, false, true, false)
-                    .with_border_color(tab_accent_bar)
-            } else {
-                Border::new(1.0)
-                    .with_sides(false, index == 0, false, true)
-                    .with_border_color(border_color)
-            };
+            // 活动 tab 的 2px accent 底条改由 tab 栏 overlay 弹簧滑动绘制（title_bar.rs），
+            // 这里统一 1px 右分隔（首个另加左）。
             Container::new(stack)
                 .with_vertical_padding(TAB_VERTICAL_PADDING)
                 .with_background_color(bg_color)
-                .with_border(border)
+                .with_border(
+                    Border::new(1.0)
+                        .with_sides(false, index == 0, false, true)
+                        .with_border_color(border_color),
+                )
                 .finish()
         })
         .on_hover(|_, ctx, _, _| {

@@ -5,9 +5,10 @@ use chrono::{DateTime, Local};
 use pathfinder_geometry::vector::vec2f;
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, ChildAnchor, ConstrainedBox, Container, CornerRadius, DispatchEventResult, EventHandler,
-    Hoverable, Icon, MouseStateHandle, OffsetPositioning, Padding, ParentElement,
-    PositionedElementAnchor, PositionedElementOffsetBounds, Radius, Stack, Text,
+    Align, ChildAnchor, ConstrainedBox, Container, CornerRadius, DispatchEventResult, Empty,
+    EventHandler, Hoverable, Icon, MouseStateHandle, OffsetPositioning, Padding, ParentAnchor,
+    ParentElement, ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds,
+    Radius, Stack, Text,
 };
 use warpui::fonts;
 use warpui::Element;
@@ -108,6 +109,42 @@ pub(crate) fn file_panel_reconnect_message(
             DispatchEventResult::StopPropagation
         })
         .finish()
+}
+
+/// 面板滑动包装：定宽透明占位子撑住槽位（布局零影响、不抢跑露底板），
+/// 面板作为 Stack overlay 按 offset 平移（正=右移滑入/滑出，负=从左侧回位）。
+/// 注意 overlay 层全局压顶：force_overlay 用于让静止的右邻也进 overlay
+/// （压栈序在后 = 画在上层），左邻动画时从它底下钻过而不是骑到它脸上。
+/// constrain_absolute_children 让面板拿到槽位的紧高度约束（内部 Stretch 正常撑满）。
+/// offset≈0 且未强制时原样返回。
+/// 面板外层 1px 左边框会被 Container 计入布局尺寸：槽位真实外宽 = 内容宽 + 此值。
+/// 占位子、滑出目标、邻居跟随量都必须按外宽算，否则模式切换/落闸时整行横跳 1px。
+pub(crate) const PANEL_BORDER_W: f32 = 1.0;
+
+pub(crate) fn panel_slide_in_from_right(
+    panel: Box<dyn Element>,
+    width: f32,
+    offset: f32,
+    force_overlay: bool,
+) -> Box<dyn Element> {
+    if offset.abs() <= 0.5 && !force_overlay {
+        return panel;
+    }
+    let mut stack = Stack::new().with_constrain_absolute_children().with_child(
+        ConstrainedBox::new(Empty::new().finish())
+            .with_width(width + PANEL_BORDER_W)
+            .finish(),
+    );
+    stack.add_positioned_overlay_child(
+        panel,
+        OffsetPositioning::offset_from_parent(
+            vec2f(offset, 0.0),
+            ParentOffsetBounds::Unbounded,
+            ParentAnchor::TopLeft,
+            ChildAnchor::TopLeft,
+        ),
+    );
+    stack.finish()
 }
 
 /// 面板正文区域的 loading / error / 空态提示。

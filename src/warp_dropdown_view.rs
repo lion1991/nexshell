@@ -4,9 +4,9 @@ use std::fmt::Debug;
 use pathfinder_color::ColorU;
 use warpui::{
     elements::{
-        Border, ChildAnchor, ChildView, ConstrainedBox, Container, Element, Icon,
+        Border, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, Element, Icon,
         MainAxisAlignment, MainAxisSize, MouseStateHandle, OffsetPositioning, ParentElement,
-        PositionedElementAnchor, PositionedElementOffsetBounds, SavePosition, Stack,
+        PositionedElementAnchor, PositionedElementOffsetBounds, Radius, SavePosition, Stack,
     },
     fonts::FamilyId,
     geometry::vector::vec2f,
@@ -537,8 +537,12 @@ where
         if self.is_expanded {
             let mut menu = ChildView::new(&self.dropdown).finish();
             if self.use_drop_shadow {
+                // 圆角与菜单本体一致（5.0），阴影形状不再是方角。
                 menu = Elevation::overlay()
-                    .apply_container(Container::new(menu))
+                    .apply_container(
+                        Container::new(menu)
+                            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(5.0))),
+                    )
                     .finish();
             }
             dropdown_stack.add_positioned_overlay_child(

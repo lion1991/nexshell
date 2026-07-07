@@ -102,7 +102,7 @@ use crate::ui_settings::{
 };
 use crate::{settings_view, warp_dropdown_view, warp_filterable_dropdown};
 use nexshell::design_tokens::DesignTokens;
-use nexshell::ui_anim::TransitionMap;
+use nexshell::ui_anim::{SpringAnim, TransitionMap};
 
 // crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
@@ -253,6 +253,7 @@ pub(crate) struct RootView {
 
     // === 终端渲染 / 光标 ===
     smooth_scroll_px: Arc<Mutex<f64>>,
+    cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
     shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
     terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
     terminal_font_size: f32,
@@ -308,6 +309,21 @@ pub(crate) struct RootView {
     tab_hover_transitions: RefCell<TransitionMap<usize>>,
     /// 标题栏图标按钮 hover 背景过渡，key = 按钮序号。
     titlebar_btn_transitions: RefCell<TransitionMap<usize>>,
+    /// 活动 tab accent 底条滑动弹簧（相对 tab 行的 x / 宽）。
+    tab_accent_bar_x: RefCell<SpringAnim>,
+    tab_accent_bar_w: RefCell<SpringAnim>,
+    /// 底条弹簧是否已首帧落位（未落位前 snap 不滑动）。
+    tab_accent_bar_init: std::cell::Cell<bool>,
+    /// 底条 y（相对 tab 行）：直接取活动 tab 底边，缓存供缺位帧沿用。
+    tab_accent_bar_y: std::cell::Cell<f32>,
+    /// 面板开门滑入弹簧（内容右侧滑入偏移 px）+ 开门待起帧标志（首帧按实际宽度起搏）。
+    file_panel_slide: RefCell<SpringAnim>,
+    git_panel_slide: RefCell<SpringAnim>,
+    file_panel_slide_pending: std::cell::Cell<bool>,
+    git_panel_slide_pending: std::cell::Cell<bool>,
+    /// 关门滑出在途（值 = 目标 tab id）；滑出收敛后由 tick 落闸真正关闭。
+    file_panel_closing: RefCell<Option<String>>,
+    git_panel_closing: RefCell<Option<String>>,
     /// 16ms 过渡 tick 在跑标志，防重复调度。
     anim_tick_running: bool,
 }
@@ -676,6 +692,7 @@ impl RootView {
             find_btn_prev: Default::default(),
             find_btn_close: Default::default(),
             smooth_scroll_px: Arc::new(Mutex::new(0.0)),
+            cursor_smear: Arc::new(Mutex::new(crate::cursor_smear::CursorSmear::new())),
             shaped_line_cache: Arc::new(Mutex::new(TerminalShapedLineCache::default())),
             terminal_ime_layout: Arc::new(Mutex::new(None)),
             terminal_font_size: ui_settings.font_size,
@@ -710,6 +727,16 @@ impl RootView {
             code_viewer_pending_post: std::collections::HashMap::new(),
             tab_hover_transitions: RefCell::new(TransitionMap::new()),
             titlebar_btn_transitions: RefCell::new(TransitionMap::new()),
+            tab_accent_bar_x: RefCell::new(SpringAnim::new(0.0)),
+            tab_accent_bar_w: RefCell::new(SpringAnim::new(0.0)),
+            tab_accent_bar_init: std::cell::Cell::new(false),
+            tab_accent_bar_y: std::cell::Cell::new(0.0),
+            file_panel_slide: RefCell::new(SpringAnim::new(0.0)),
+            git_panel_slide: RefCell::new(SpringAnim::new(0.0)),
+            file_panel_slide_pending: std::cell::Cell::new(false),
+            git_panel_slide_pending: std::cell::Cell::new(false),
+            file_panel_closing: RefCell::new(None),
+            git_panel_closing: RefCell::new(None),
             anim_tick_running: false,
         };
         view.reload_host_recent(); // 启动首屏即填充最近访问
@@ -930,6 +957,8 @@ impl RootView {
         Self::dispatch_git_cwd_updates(self, ctx);
         Self::dispatch_file_panel_cwd_updates(self, ctx);
         ctx.notify();
+        // PTY 输出会移动光标却不走 action 漏斗，这里唤醒过渡 tick 驱动光标拖影。
+        self.wake_ui_anim(ctx);
     }
 
     /// 扫描所有本地 tab 的 snapshot.local_cwd，与上次派发对比；变化即 lazy spawn
@@ -1366,16 +1395,35 @@ impl RootView {
         }
     }
 
-    /// 全部过渡表的活跃聚合（新增 TransitionMap 时只改这里）。
+    /// 全部过渡表的活跃聚合（新增 TransitionMap / 动画源时只改这里）。
     fn any_ui_anim_active(&self, now: Instant) -> bool {
         self.tab_hover_transitions.borrow().any_animating(now)
             || self.titlebar_btn_transitions.borrow().any_animating(now)
+            || self.tab_accent_bar_x.borrow().is_animating()
+            || self.tab_accent_bar_w.borrow().is_animating()
+            || self.file_panel_slide.borrow().is_animating()
+            || self.git_panel_slide.borrow().is_animating()
+            || self
+                .host_view_states
+                .borrow()
+                .host_cards
+                .hover_transitions
+                .borrow()
+                .any_animating(now)
+            || self
+                .cursor_smear
+                .lock()
+                .map(|s| s.is_animating())
+                .unwrap_or(false)
     }
 
     /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。
     fn schedule_ui_anim_tick(ctx: &mut ViewContext<Self>) {
         ctx.spawn(Timer::after(Duration::from_millis(16)), |me, _, ctx| {
             let now = Instant::now();
+            if me.finalize_panel_closes() {
+                ctx.notify();
+            }
             if !me.any_ui_anim_active(now) {
                 me.anim_tick_running = false;
                 return;
@@ -1383,6 +1431,46 @@ impl RootView {
             ctx.notify();
             Self::schedule_ui_anim_tick(ctx);
         });
+    }
+
+    /// 面板关门滑出收敛后落闸：真正关闭，并发跟随的邻居 snap(0) 无缝换基。
+    /// 返回是否发生落闸（需要重绘）。
+    fn finalize_panel_closes(&mut self) -> bool {
+        let mut changed = false;
+        // file 落闸：git 布局将左移 F，补 +F→0（向左滑回补位）。
+        let file_done = self
+            .file_panel_closing
+            .borrow()
+            .clone()
+            .filter(|_| !self.file_panel_slide.borrow().is_animating());
+        if let Some(tab_id) = file_done {
+            *self.file_panel_closing.borrow_mut() = None;
+            self.file_panel_slide.borrow_mut().snap(0.0);
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                // 槽位释放归 terminal（flex），git 作为最右元素位置不变，无需联动。
+                tab.file_panel_open = false;
+            }
+            changed = true;
+        }
+        // git 落闸：file 布局将右移 G，补 -G→0（向右滑回）。
+        let git_done = self
+            .git_panel_closing
+            .borrow()
+            .clone()
+            .filter(|_| !self.git_panel_slide.borrow().is_animating());
+        if let Some(tab_id) = git_done {
+            *self.git_panel_closing.borrow_mut() = None;
+            self.git_panel_slide.borrow_mut().snap(0.0);
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.git_panel_open = false;
+                if tab.file_panel_open {
+                    // 并发跟随已把 file 滑到 +G（旧基准），槽位消失基准右移 G，snap(0) 无缝换基。
+                    self.file_panel_slide.borrow_mut().snap(0.0);
+                }
+            }
+            changed = true;
+        }
+        changed
     }
 
     fn sync_terminal_window_title(&mut self, title: Option<&str>, ctx: &mut ViewContext<Self>) {
@@ -2407,6 +2495,9 @@ impl RootView {
         }
         if let Ok(mut shaped_line_cache) = self.shaped_line_cache.lock() {
             *shaped_line_cache = TerminalShapedLineCache::default();
+        }
+        if let Ok(mut cursor_smear) = self.cursor_smear.lock() {
+            cursor_smear.reset(); // 切 tab/pane 不做跨屏拖影
         }
         if let Ok(mut selection_drag) = self.selection_drag.lock() {
             *selection_drag = false;

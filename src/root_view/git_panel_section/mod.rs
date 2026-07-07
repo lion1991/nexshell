@@ -48,7 +48,46 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.get_mut(idx) else {
             return;
         };
-        tab.git_panel_open = !tab.git_panel_open;
+        // 关门滑出途中再按 = 取消关门滑回（跟随的 file 面板同步回位）。
+        if self.git_panel_closing.borrow().is_some() {
+            *self.git_panel_closing.borrow_mut() = None;
+            self.git_panel_slide.borrow_mut().set_target(0.0);
+            self.file_panel_slide.borrow_mut().set_target(0.0);
+            ctx.notify();
+            return;
+        }
+        if tab.git_panel_open {
+            // 开始关门：滑出到面板宽，收敛后 finalize_panel_closes 落闸真正关闭。
+            // file 面板已开时同一时刻用同参数弹簧锁步右移（并发跟随，落闸时无缝换基）。
+            let file_open = tab.file_panel_open;
+            let tab_id = tab.id.clone();
+            *self.git_panel_closing.borrow_mut() = Some(tab_id);
+            // 槽位外宽 = 内容宽 + 1px 边框（滑出/跟随都按外宽算，否则残留 1px 边框柱）。
+            let git_w = self
+                .git_panel_width
+                .clamp(GIT_PANEL_WIDTH_MIN, GIT_PANEL_WIDTH_MAX)
+                + crate::file_panel_view_helpers::PANEL_BORDER_W;
+            self.git_panel_slide.borrow_mut().set_target(git_w);
+            if file_open && self.file_panel_closing.borrow().is_none() {
+                self.file_panel_slide.borrow_mut().set_target(git_w);
+            }
+            ctx.notify();
+            return;
+        }
+        tab.git_panel_open = true;
+        self.git_panel_slide_pending.set(true); // 首帧按实际宽度起搏滑入
+        // 文件面板已开（且不在关门中）时：git 槽位出现使其布局左移 G+1（含边框），
+        // 给它补同量内容偏移从旧屏幕位置同弹簧滑到新位置——git 面板推着它走。
+        if self.should_render_file_panel() && self.file_panel_closing.borrow().is_none() {
+            let git_w = self
+                .git_panel_width
+                .clamp(GIT_PANEL_WIDTH_MIN, GIT_PANEL_WIDTH_MAX)
+                + crate::file_panel_view_helpers::PANEL_BORDER_W;
+            let mut slide = self.file_panel_slide.borrow_mut();
+            let current = slide.sample(std::time::Instant::now());
+            slide.snap(current + git_w);
+            slide.set_target(0.0);
+        }
         ctx.notify();
     }
 
@@ -355,10 +394,31 @@ impl RootView {
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_child(self.render_git_panel_divider())
             .with_child(Expanded::new(1.0, padded).finish());
-        Container::new(ConstrainedBox::new(row.finish()).with_width(width).finish())
+        let panel = Container::new(ConstrainedBox::new(row.finish()).with_width(width).finish())
             .with_background_color(colors.panel_bg)
             .with_border(Border::left(1.0).with_border_color(colors.panel_border))
-            .finish()
+            .finish();
+        // 开门滑入：pending 标志首帧按实际宽度起搏，槽位宽度不变。
+        // 偏移取整到整像素：亚像素位移在收敛尾部会显成左右抖动。
+        let offset = {
+            let mut slide = self.git_panel_slide.borrow_mut();
+            if self.git_panel_slide_pending.take() {
+                slide.snap(width + crate::file_panel_view_helpers::PANEL_BORDER_W);
+                slide.set_target(0.0);
+            }
+            slide.sample(std::time::Instant::now()).round()
+        };
+        // file 面板动画期间强制本面板也走 overlay：压栈序在后 = 画在上层，
+        // file 的滑动从 git 底下钻过（否则 overlay 全局压顶会骑到 git 脸上）。
+        let file_animating = self.file_panel_slide.borrow().is_animating()
+            || self.file_panel_slide_pending.get()
+            || self.file_panel_closing.borrow().is_some();
+        crate::file_panel_view_helpers::panel_slide_in_from_right(
+            panel,
+            width,
+            offset,
+            file_animating,
+        )
     }
 
     /// 左缘拖拽条；语义跟 file_panel_divider 完全一致，只是 action 换成 GitPanel*。

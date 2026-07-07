@@ -3,6 +3,7 @@
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod cursor_smear;
 mod external_editor;
 mod file_panel_view_helpers;
 mod font_enumeration;

@@ -116,10 +116,21 @@ impl RootView {
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_child(self.render_file_panel_divider())
             .with_child(Expanded::new(1.0, padded).finish());
-        Container::new(ConstrainedBox::new(row.finish()).with_width(width).finish())
+        let panel = Container::new(ConstrainedBox::new(row.finish()).with_width(width).finish())
             .with_background_color(colors.panel_bg)
             .with_border(Border::left(1.0).with_border_color(colors.panel_border))
-            .finish()
+            .finish();
+        // 开门滑入：pending 标志首帧按实际宽度起搏，槽位宽度不变。
+        // 偏移取整到整像素：面板满是文字，亚像素位移在收敛尾部会显成左右抖动。
+        let offset = {
+            let mut slide = self.file_panel_slide.borrow_mut();
+            if self.file_panel_slide_pending.take() {
+                slide.snap(width + crate::file_panel_view_helpers::PANEL_BORDER_W);
+                slide.set_target(0.0);
+            }
+            slide.sample(std::time::Instant::now()).round()
+        };
+        crate::file_panel_view_helpers::panel_slide_in_from_right(panel, width, offset, false)
     }
 
     /// 左缘拖拽条：透明命中区域。Hoverable 提供 ResizeLeftRight 光标 + cursor 反馈，

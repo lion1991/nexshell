@@ -574,6 +574,7 @@ pub struct TerminalGridElement {
     scrollbar_thumb_hovered: Arc<Mutex<bool>>,
     find_state: Arc<Mutex<FindPanelState>>,
     smooth_scroll_px: Arc<Mutex<f64>>,
+    cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
     shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
     terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
     shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
@@ -1196,6 +1197,7 @@ impl TerminalGridElement {
         scrollbar_thumb_hovered: Arc<Mutex<bool>>,
         find_state: Arc<Mutex<FindPanelState>>,
         smooth_scroll_px: Arc<Mutex<f64>>,
+        cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
         shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
         terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
         shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
@@ -1221,6 +1223,7 @@ impl TerminalGridElement {
             scrollbar_thumb_hovered,
             find_state,
             smooth_scroll_px,
+            cursor_smear,
             shaped_line_cache,
             terminal_ime_layout,
             shell_is_foreground,
@@ -2571,10 +2574,36 @@ impl Element for TerminalGridElement {
         }
 
         let cursor_color = u32_to_color(self.palette.cursor);
-        for rect in cursor_rects(&grid, self.cell_metrics) {
-            ctx.scene
-                .draw_rect_with_hit_recording(rect.to_rect(content_origin))
-                .with_background(cursor_color);
+        let cursor_rect_list = cursor_rects(&grid, self.cell_metrics);
+        // 拖影只给 alt-screen（vim/htop 等 TUI）里的导航移动；主屏 prompt 的光标
+        // 移动多为 shell 重印输出（如回车后横扫到提示符尾），有拖影反而怪。
+        // 另仅补间「单实心矩形 + 未翻历史」；翻历史/空心/隐藏一律落格。
+        let smear_allowed = self.snapshot.grid.input_modes.alt_screen;
+        let mut smeared = false;
+        if let Ok(mut smear) = self.cursor_smear.lock() {
+            match (cursor_rect_list.as_slice(), grid.display_offset()) {
+                ([rect], 0) if smear_allowed => {
+                    let target = rect.to_rect(Vector2F::zero());
+                    if let Some(sq) = smear.update(target, std::time::Instant::now()) {
+                        let colors = sq.alphas.map(|a| {
+                            let mut c = cursor_color;
+                            c.a = (c.a as f32 * a) as u8;
+                            c
+                        });
+                        ctx.scene
+                            .draw_quad(sq.corners.map(|c| c + content_origin), colors);
+                        smeared = true;
+                    }
+                }
+                _ => smear.reset(),
+            }
+        }
+        if !smeared {
+            for rect in cursor_rect_list {
+                ctx.scene
+                    .draw_rect_with_hit_recording(rect.to_rect(content_origin))
+                    .with_background(cursor_color);
+            }
         }
 
         ctx.scene.stop_layer(); // 结束 grid content clip
