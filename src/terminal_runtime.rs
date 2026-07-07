@@ -4815,6 +4815,9 @@ pub fn encode_terminal_key_event_with_modes(
     }
 
     let bytes = match key {
+        // kitty 未激活时 shift+enter 兜底发 `\` + CR，对齐 iTerm2 terminal-setup / Warp，
+        // 供 Claude Code 等 TUI 识别为换行（kitty 激活时上方已编成 CSI-u，不会走到这）。
+        "enter" | "numpadenter" if shift => b"\\\r".to_vec(),
         "enter" => b"\r".to_vec(),
         "numpadenter" => b"\r".to_vec(),
         "backspace" => vec![0x7f],

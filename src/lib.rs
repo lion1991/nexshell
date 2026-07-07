@@ -1772,6 +1772,49 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
+    fn terminal_runtime_shift_enter_falls_back_to_backslash_cr_without_kitty() {
+        // kitty 未激活：shift+enter 兜底发 `\` + CR（对齐 iTerm2 terminal-setup / Warp）。
+        let modes = terminal_runtime::TerminalInputModes::default();
+        assert_eq!(
+            terminal_runtime::encode_terminal_key_with_modes(
+                "enter", None, false, false, true, false, modes
+            ),
+            Some(b"\\\r".to_vec())
+        );
+        assert_eq!(
+            terminal_runtime::encode_terminal_key_with_modes(
+                "numpadenter",
+                None,
+                false,
+                false,
+                true,
+                false,
+                modes
+            ),
+            Some(b"\\\r".to_vec())
+        );
+        // shift 未按时仍是普通回车。
+        assert_eq!(
+            terminal_runtime::encode_terminal_key_with_modes(
+                "enter", None, false, false, false, false, modes
+            ),
+            Some(b"\r".to_vec())
+        );
+
+        // kitty 激活：shift+enter 走 CSI-u，不落兜底分支。
+        let kitty = terminal_runtime::TerminalInputModes {
+            keyboard_disambiguate_escape: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            terminal_runtime::encode_terminal_key_with_modes(
+                "enter", None, false, false, true, false, kitty
+            ),
+            Some(b"\x1b[13;2u".to_vec())
+        );
+    }
+
+    #[test]
     fn terminal_runtime_ctrl_l_uses_platform_base_key_when_key_is_control_char() {
         assert_eq!(
             terminal_runtime::encode_terminal_key_event_with_modes(
