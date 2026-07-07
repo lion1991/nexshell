@@ -28,7 +28,24 @@ use warpui::elements::{
 };
 use warpui::{platform, AppContext, Element};
 
+use std::time::Instant;
+
+// 标题栏图标按钮 hover 过渡 key（titlebar_btn_transitions）。
+const BTN_SIDEBAR: usize = 0;
+const BTN_FILE: usize = 1;
+const BTN_GIT: usize = 2;
+const BTN_SETTINGS: usize = 3;
+
 impl RootView {
+    /// 图标按钮背景 eased 过渡：on(hover||active) → hover_bg，否则回落 base_bg。
+    fn titlebar_btn_bg(&self, key: usize, on: bool, hover_bg: ColorU, base_bg: ColorU) -> ColorU {
+        let now = Instant::now();
+        let target = if on { hover_bg } else { base_bg };
+        let mut m = self.titlebar_btn_transitions.borrow_mut();
+        m.retarget(key, target, now);
+        m.sample(&key, now).unwrap_or(target)
+    }
+
     pub(in crate::root_view) fn render_new_session_menu(&self) -> Box<dyn Element> {
         warpui::elements::ChildView::new(&self.new_session_menu).finish()
     }
@@ -115,6 +132,11 @@ impl RootView {
         for (index, tab) in tabs.iter().enumerate() {
             bar_row.add_child(self.render_tab(tab, index, app));
         }
+        // 清理已关闭 tab 的过渡条目，防泄漏。
+        let tab_count = tabs.len();
+        self.tab_hover_transitions
+            .borrow_mut()
+            .retain(|k| *k < tab_count);
         bar_row.add_child(new_tab_button);
         bar_row
             .add_child(Shrinkable::new(0.5, Align::new(Empty::new().finish()).finish()).finish());
@@ -147,8 +169,10 @@ impl RootView {
         let icon_active = uc.icon_color_active;
         let icon_inactive = uc.icon_color_inactive;
         let hover_bg = uc.icon_button_hover_bg;
+        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let btn_bg = self.titlebar_btn_bg(BTN_SIDEBAR, is_hovered_now, hover_bg, uc.title_bar_bg);
 
-        Hoverable::new(state, move |mouse| {
+        Hoverable::new(state, move |_mouse| {
             let icon_color = if is_active {
                 icon_active
             } else {
@@ -159,19 +183,20 @@ impl RootView {
                 .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .finish();
 
-            let mut container = Container::new(
+            Container::new(
                 ConstrainedBox::new(Align::new(icon).finish())
                     .with_width(ICON_BUTTON_SIZE)
                     .with_height(ICON_BUTTON_SIZE)
                     .finish(),
             )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-            if mouse.is_hovered() {
-                container = container.with_background_color(hover_bg);
-            }
-            container.finish()
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .with_background_color(btn_bg)
+            .finish()
         })
         .with_cursor(warpui::platform::Cursor::PointingHand)
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+        })
         .on_click(|ctx, _, _| {
             ctx.dispatch_typed_action(TerminalGridAction::ToggleSidebar);
         })
@@ -194,26 +219,34 @@ impl RootView {
         let icon_active = uc.icon_color_active;
         let icon_inactive = uc.icon_color_inactive;
         let hover_bg = uc.icon_button_hover_bg;
+        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let btn_bg = self.titlebar_btn_bg(
+            BTN_FILE,
+            is_hovered_now || is_open,
+            hover_bg,
+            uc.title_bar_bg,
+        );
 
-        let button = Hoverable::new(state, move |mouse| {
+        let button = Hoverable::new(state, move |_mouse| {
             let icon_color = if is_open { icon_active } else { icon_inactive };
             let icon = ConstrainedBox::new(Icon::new(ICON_PATH_FOLDER, icon_color).finish())
                 .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .finish();
-            let mut container = Container::new(
+            Container::new(
                 ConstrainedBox::new(Align::new(icon).finish())
                     .with_width(ICON_BUTTON_SIZE)
                     .with_height(ICON_BUTTON_SIZE)
                     .finish(),
             )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-            if mouse.is_hovered() || is_open {
-                container = container.with_background_color(hover_bg);
-            }
-            container.finish()
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .with_background_color(btn_bg)
+            .finish()
         })
         .with_cursor(warpui::platform::Cursor::PointingHand)
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+        })
         .on_click(|ctx, _, _| {
             ctx.dispatch_typed_action(TerminalGridAction::ToggleFilePanel);
         })
@@ -234,26 +267,34 @@ impl RootView {
         let icon_active = uc.icon_color_active;
         let icon_inactive = uc.icon_color_inactive;
         let hover_bg = uc.icon_button_hover_bg;
+        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let btn_bg = self.titlebar_btn_bg(
+            BTN_GIT,
+            is_hovered_now || is_open,
+            hover_bg,
+            uc.title_bar_bg,
+        );
 
-        let button = Hoverable::new(state, move |mouse| {
+        let button = Hoverable::new(state, move |_mouse| {
             let icon_color = if is_open { icon_active } else { icon_inactive };
             let icon = ConstrainedBox::new(Icon::new(ICON_PATH_GIT_BRANCH, icon_color).finish())
                 .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .finish();
-            let mut container = Container::new(
+            Container::new(
                 ConstrainedBox::new(Align::new(icon).finish())
                     .with_width(ICON_BUTTON_SIZE)
                     .with_height(ICON_BUTTON_SIZE)
                     .finish(),
             )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-            if mouse.is_hovered() || is_open {
-                container = container.with_background_color(hover_bg);
-            }
-            container.finish()
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .with_background_color(btn_bg)
+            .finish()
         })
         .with_cursor(warpui::platform::Cursor::PointingHand)
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+        })
         .on_click(|ctx, _, _| {
             ctx.dispatch_typed_action(TerminalGridAction::ToggleGitPanel);
         })
@@ -269,27 +310,35 @@ impl RootView {
         let icon_active = uc.icon_color_active;
         let icon_inactive = uc.icon_color_inactive;
         let hover_bg = uc.icon_button_hover_bg;
+        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let btn_bg = self.titlebar_btn_bg(
+            BTN_SETTINGS,
+            is_hovered_now || is_open,
+            hover_bg,
+            uc.title_bar_bg,
+        );
 
-        let button = Hoverable::new(state, move |mouse| {
+        let button = Hoverable::new(state, move |_mouse| {
             let icon_color = if is_open { icon_active } else { icon_inactive };
             let icon = ConstrainedBox::new(Icon::new(ICON_PATH_GEAR, icon_color).finish())
                 .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .finish();
 
-            let mut container = Container::new(
+            Container::new(
                 ConstrainedBox::new(Align::new(icon).finish())
                     .with_width(ICON_BUTTON_SIZE)
                     .with_height(ICON_BUTTON_SIZE)
                     .finish(),
             )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-            if mouse.is_hovered() || is_open {
-                container = container.with_background_color(hover_bg);
-            }
-            container.finish()
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .with_background_color(btn_bg)
+            .finish()
         })
         .with_cursor(warpui::platform::Cursor::PointingHand)
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+        })
         .on_click(|ctx, _, _| {
             ctx.dispatch_typed_action(TerminalGridAction::ToggleSettingsMenu);
         })

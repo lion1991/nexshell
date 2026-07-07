@@ -280,6 +280,28 @@ impl RootView {
             .finish()
     }
 
+    /// 状态字母语义色：M→warn A→ok D→danger R/C→info 其余→muted，取变更主字母。
+    fn git_status_letter_color(
+        &self,
+        entry: &nexshell::git_ops::GitFileEntry,
+        muted: ColorU,
+    ) -> ColorU {
+        let sem = &self.design_tokens.semantic;
+        // porcelain v2 无变更位是 '.'（非空格）。
+        let letter = if !matches!(entry.index_status, ' ' | '.' | '?') {
+            entry.index_status
+        } else {
+            entry.worktree_status
+        };
+        match letter {
+            'M' => sem.warn,
+            'A' => sem.ok,
+            'D' => sem.danger,
+            'R' | 'C' => sem.info,
+            _ => muted,
+        }
+    }
+
     fn render_git_panel_entry(
         &self,
         tab: &TerminalSessionTab,
@@ -327,22 +349,30 @@ impl RootView {
         let selected_bg = colors.card_bg;
         let tooltip_bg = self.ui_colors().tooltip_bg;
         let tooltip_text_color = self.ui_colors().tooltip_text;
-        let label_clone = label_text.clone();
+        // 状态字母语义上色：xy 前缀单独染色，路径部分维持主文字色。
+        let status_color = self.git_status_letter_color(entry, colors.text_muted);
+        let status_prefix = xy.clone();
+        let path_rest = label_text[xy.len()..].to_string();
         let tooltip_label = label_text.clone();
         let tooltip_position_id = git_panel_entry_tooltip_position_id(&entry.path, is_staged);
         let select_path = entry.path.clone();
 
         let label = Hoverable::new(state, move |mouse| {
-            let text = SavePosition::new(
-                Clipped::new(
-                    Text::new_inline(label_clone.clone(), ui_font, 11.0)
+            let label_row = Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_child(
+                    Text::new_inline(status_prefix.clone(), ui_font, 11.0)
+                        .with_color(status_color)
+                        .finish(),
+                )
+                .with_child(
+                    Text::new_inline(path_rest.clone(), ui_font, 11.0)
                         .with_color(text_color)
                         .finish(),
                 )
-                .finish(),
-                &tooltip_position_id,
-            )
-            .finish();
+                .finish();
+            let text =
+                SavePosition::new(Clipped::new(label_row).finish(), &tooltip_position_id).finish();
             let mut container = Container::new(
                 Container::new(text)
                     .with_padding_left(6.0)

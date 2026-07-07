@@ -699,6 +699,8 @@ pub enum TerminalGridAction {
     ResetFontSize,
     // Chrome actions: 不影响 grid，沿用同一 action 类型避免 RootView 多重 TypedActionView。
     ToggleSidebar,
+    /// 唤醒 UI 颜色过渡 tick（hover 变化时由动画元素 dispatch）。
+    WakeUiAnim,
     WindowMinimize,
     WindowToggleMaximize,
     WindowClose,

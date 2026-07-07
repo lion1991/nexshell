@@ -77,6 +77,8 @@ pub mod themes;
 #[cfg(feature = "warpui-app")]
 pub mod time_format;
 #[cfg(feature = "warpui-app")]
+pub mod ui_anim;
+#[cfg(feature = "warpui-app")]
 pub mod ui_components;
 #[cfg(feature = "warpui-app")]
 pub mod util;

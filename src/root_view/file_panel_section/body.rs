@@ -218,9 +218,9 @@ impl RootView {
             if row.is_loading {
                 "..."
             } else if row.is_expanded {
-                "v"
+                "▾"
             } else {
-                ">"
+                "▸"
             }
         } else {
             ""
@@ -239,7 +239,7 @@ impl RootView {
             format_remote_mtime(row.modified)
         };
         let hover_bg = uc.icon_button_hover_bg;
-        let selected_bg = colors.card_bg;
+        let selected_bg = uc.selection_pill_bg;
         let text_color = if is_error {
             colors.warning
         } else {
@@ -588,7 +588,7 @@ impl RootView {
             .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
             .clone();
         let hover_bg = uc.icon_button_hover_bg;
-        let selected_bg = colors.card_bg;
+        let selected_bg = uc.selection_pill_bg;
         let text_color = colors.text_primary;
         let muted = colors.text_muted;
         let font = self.ui_font;

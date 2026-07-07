@@ -102,6 +102,7 @@ use crate::ui_settings::{
 };
 use crate::{settings_view, warp_dropdown_view, warp_filterable_dropdown};
 use nexshell::design_tokens::DesignTokens;
+use nexshell::ui_anim::TransitionMap;
 
 // crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
@@ -301,6 +302,14 @@ pub(crate) struct RootView {
     last_host_swap_time: Option<std::time::Instant>,
     /// 远程保存在途时，关闭/换文件确认的「保存」续作暂存于此，待写成功后补执行（review C）。按 tab_id 键。
     code_viewer_pending_post: std::collections::HashMap<String, code_viewer_section::PostSave>,
+
+    // === UI 过渡动画（ui_anim）===
+    /// tab hover 背景过渡，key = tab index。
+    tab_hover_transitions: RefCell<TransitionMap<usize>>,
+    /// 标题栏图标按钮 hover 背景过渡，key = 按钮序号。
+    titlebar_btn_transitions: RefCell<TransitionMap<usize>>,
+    /// 16ms 过渡 tick 在跑标志，防重复调度。
+    anim_tick_running: bool,
 }
 
 impl RootView {
@@ -699,6 +708,9 @@ impl RootView {
             settings_prewarmed: std::cell::Cell::new(false),
             last_host_swap_time: None,
             code_viewer_pending_post: std::collections::HashMap::new(),
+            tab_hover_transitions: RefCell::new(TransitionMap::new()),
+            titlebar_btn_transitions: RefCell::new(TransitionMap::new()),
+            anim_tick_running: false,
         };
         view.reload_host_recent(); // 启动首屏即填充最近访问
         view
@@ -1338,7 +1350,38 @@ impl RootView {
             if recording_dirty || push_animating {
                 ctx.notify();
             }
+            // 兜底自愈：非 action 路径改了过渡目标色而 16ms tick 未被唤醒时，≤100ms 内接管。
+            if !me.anim_tick_running && me.any_ui_anim_active(now) {
+                me.wake_ui_anim(ctx);
+            }
             Self::schedule_idle_refresh(ctx);
+        });
+    }
+
+    /// 唤醒 UI 过渡 tick（由 WakeUiAnim / hover 触发）：未跑则置位并启动。
+    pub(in crate::root_view) fn wake_ui_anim(&mut self, ctx: &mut ViewContext<Self>) {
+        if !self.anim_tick_running {
+            self.anim_tick_running = true;
+            Self::schedule_ui_anim_tick(ctx);
+        }
+    }
+
+    /// 全部过渡表的活跃聚合（新增 TransitionMap 时只改这里）。
+    fn any_ui_anim_active(&self, now: Instant) -> bool {
+        self.tab_hover_transitions.borrow().any_animating(now)
+            || self.titlebar_btn_transitions.borrow().any_animating(now)
+    }
+
+    /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。
+    fn schedule_ui_anim_tick(ctx: &mut ViewContext<Self>) {
+        ctx.spawn(Timer::after(Duration::from_millis(16)), |me, _, ctx| {
+            let now = Instant::now();
+            if !me.any_ui_anim_active(now) {
+                me.anim_tick_running = false;
+                return;
+            }
+            ctx.notify();
+            Self::schedule_ui_anim_tick(ctx);
         });
     }
 
@@ -1877,6 +1920,7 @@ impl TypedActionView for RootView {
 
             // === 标题栏 Chrome（tab_bar_section）===
             TerminalGridAction::ToggleSidebar => self.handle_toggle_sidebar(ctx),
+            TerminalGridAction::WakeUiAnim => self.wake_ui_anim(ctx),
             TerminalGridAction::WindowMinimize => self.handle_window_minimize(ctx),
             TerminalGridAction::WindowToggleMaximize => self.handle_window_toggle_maximize(ctx),
             TerminalGridAction::WindowClose => self.handle_window_close(ctx),
@@ -2344,6 +2388,9 @@ impl TypedActionView for RootView {
             TerminalGridAction::EndPaneResizing => self.handle_end_pane_resizing(),
             TerminalGridAction::ToggleMaximizePane => self.handle_toggle_maximize_pane(ctx),
         }
+        // 统一唤醒过渡 tick：任何 action 都可能改 hover/主题等目标色（如键盘开关面板、
+        // 切主题时鼠标不在元素上），不唤醒会冻在中间色。tick 无动画 16ms 自停，代价可忽略。
+        self.wake_ui_anim(ctx);
     }
 }
 

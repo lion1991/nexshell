@@ -3,7 +3,7 @@
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pathfinder_geometry::vector::vec2f;
 
@@ -142,9 +142,23 @@ impl RootView {
         let title_bar_bg = uc.title_bar_bg;
         let tab_border_active = uc.tab_border_active;
         let tab_border_inactive = uc.tab_border_inactive;
+        let tab_accent_bar = uc.tab_accent_bar;
         let close_bg_default = uc.tab_close_bg_default;
         let close_bg_hover_color = uc.tab_close_bg_hover;
         let close_icon_active = uc.icon_color_active;
+        // hover 背景 eased 过渡（仅普通 tab；active/自定义色瞬时不动画）。
+        let is_hovered_now = tab_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let anim_hover_bg = {
+            let now = Instant::now();
+            let target = if is_hovered_now {
+                tab_bg_hover
+            } else {
+                title_bar_bg
+            };
+            let mut m = self.tab_hover_transitions.borrow_mut();
+            m.retarget(index, target, now);
+            m.sample(&index, now).unwrap_or(target)
+        };
         let mut hover_tab = Hoverable::new(tab_state, move |hover| {
             let is_hovered = hover.is_hovered();
             let bg_color = if let Some(color) = selected_tab_background {
@@ -156,10 +170,8 @@ impl RootView {
                 coloru_with_opacity(color, opacity)
             } else if is_active {
                 tab_bg_active
-            } else if is_hovered {
-                tab_bg_hover
             } else {
-                title_bar_bg
+                anim_hover_bg
             };
             let border_color = if is_active {
                 tab_border_active
@@ -318,15 +330,24 @@ impl RootView {
             )
             .finish();
 
+            // 活动 tab：2px accent 底条焦点；其余：1px 右分隔（首个另加左）。
+            let border = if is_active {
+                Border::new(2.0)
+                    .with_sides(false, false, true, false)
+                    .with_border_color(tab_accent_bar)
+            } else {
+                Border::new(1.0)
+                    .with_sides(false, index == 0, false, true)
+                    .with_border_color(border_color)
+            };
             Container::new(stack)
                 .with_vertical_padding(TAB_VERTICAL_PADDING)
                 .with_background_color(bg_color)
-                .with_border(
-                    Border::new(1.0)
-                        .with_sides(false, index == 0, false, true)
-                        .with_border_color(border_color),
-                )
+                .with_border(border)
                 .finish()
+        })
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
         })
         .on_middle_click(move |ctx, _, _| {
             if is_settings {
