@@ -350,6 +350,7 @@ pub enum HostViewMode {
     Grid,
     List,
     Status,
+    Containers,
     Keys,
 }
 

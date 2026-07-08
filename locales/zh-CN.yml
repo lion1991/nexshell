@@ -103,6 +103,18 @@ host_overview_uptime_days: "运行 %{n} 天"
 host_overview_uptime_hours: "运行 %{n} 小时"
 host_overview_uptime_minutes: "运行 %{n} 分钟"
 
+# === Container management ===
+host_container_no_docker: 未检测到 Docker
+host_container_permission_denied: 当前用户无 Docker 权限，请加入 docker 组
+host_container_probe_error: 采集失败
+host_container_connect_error: 连接失败
+host_container_loading: 加载中…
+host_container_empty: 无容器
+host_container_menu_start: 启动
+host_container_menu_stop: 停止
+host_container_menu_restart: 重启
+host_container_menu_logs: 日志
+
 # === Sidebar ===
 sidebar: 侧边栏
 
@@ -347,6 +359,7 @@ host_group_nav: 分组
 host_tag_filter: 标签筛选
 host_manage_groups_tags: 管理分组与标签
 host_protocol_all: 所有协议
+host_nav_containers: 容器
 
 # === Host edit form ===
 form_new_host: 新建主机

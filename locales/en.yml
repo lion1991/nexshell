@@ -103,6 +103,18 @@ host_overview_uptime_days: "Up %{n}d"
 host_overview_uptime_hours: "Up %{n}h"
 host_overview_uptime_minutes: "Up %{n}m"
 
+# === Container management ===
+host_container_no_docker: "Docker not found"
+host_container_permission_denied: "No permission to access Docker, add this user to the docker group"
+host_container_probe_error: "Probe failed"
+host_container_connect_error: "Connection failed"
+host_container_loading: "Loading…"
+host_container_empty: "No containers"
+host_container_menu_start: "Start"
+host_container_menu_stop: "Stop"
+host_container_menu_restart: "Restart"
+host_container_menu_logs: "Logs"
+
 # === Sidebar ===
 sidebar: Sidebar
 
@@ -347,6 +359,7 @@ host_group_nav: Groups
 host_tag_filter: Tag filtering
 host_manage_groups_tags: Manage groups and tags
 host_protocol_all: All protocols
+host_nav_containers: Containers
 
 # === Host edit form ===
 form_new_host: New host

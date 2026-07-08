@@ -28,6 +28,8 @@ pub struct ReferencePolicy {
 pub mod actions;
 #[cfg(feature = "warpui-app")]
 pub mod code_editor;
+pub mod container_fleet;
+pub mod container_overview;
 #[cfg(feature = "warpui-app")]
 pub mod design_tokens;
 #[cfg(feature = "warpui-app")]

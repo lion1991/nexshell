@@ -471,6 +471,94 @@ impl RootView {
         ]
     }
 
+    pub(in crate::root_view) fn render_container_card_context_menu(&self) -> Box<dyn Element> {
+        warpui::elements::ChildView::new(&self.container_card_context_menu).finish()
+    }
+
+    /// 容器卡片右键 / "⋯" 菜单：内容按容器当前状态出（Running 停止+重启，非 Running 启动），日志常显。
+    pub(crate) fn show_container_card_context_menu(
+        &mut self,
+        host_id: String,
+        container_id: String,
+        container_name: String,
+        state: nexshell::container_overview::ContainerState,
+        position: Vector2F,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let items =
+            self.container_card_context_menu_items(host_id, container_id, container_name, state);
+        self.container_card_context_menu
+            .update(ctx, |menu, view_ctx| {
+                menu.set_items(items, view_ctx);
+                menu.set_origin(Some(position));
+            });
+        self.show_container_card_context_menu = Some(position);
+        self.show_file_panel_context_menu = None;
+        self.show_git_panel_context_menu = None;
+        self.show_terminal_context_menu = None;
+        self.show_tab_right_click_menu = None;
+        self.show_process_list_context_menu = None;
+        self.show_host_card_context_menu = None;
+        self.new_session_menu_open = false;
+        self.settings_menu_open = false;
+        ctx.focus(&self.container_card_context_menu);
+        ctx.notify();
+    }
+
+    fn container_card_context_menu_items(
+        &self,
+        host_id: String,
+        container_id: String,
+        container_name: String,
+        state: nexshell::container_overview::ContainerState,
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+        use nexshell::container_overview::{ContainerAction, ContainerState};
+        use nexshell::menu::{MenuItem, MenuItemFields};
+
+        let mut items = Vec::new();
+        if state == ContainerState::Running {
+            items.push(
+                MenuItemFields::new(rust_i18n::t!("host_container_menu_stop"))
+                    .with_on_select_action(TerminalGridAction::ContainerExec {
+                        host_id: host_id.clone(),
+                        container_id: container_id.clone(),
+                        action: ContainerAction::Stop,
+                    })
+                    .into_item(),
+            );
+            items.push(
+                MenuItemFields::new(rust_i18n::t!("host_container_menu_restart"))
+                    .with_on_select_action(TerminalGridAction::ContainerExec {
+                        host_id: host_id.clone(),
+                        container_id: container_id.clone(),
+                        action: ContainerAction::Restart,
+                    })
+                    .into_item(),
+            );
+        } else {
+            items.push(
+                MenuItemFields::new(rust_i18n::t!("host_container_menu_start"))
+                    .with_on_select_action(TerminalGridAction::ContainerExec {
+                        host_id: host_id.clone(),
+                        container_id: container_id.clone(),
+                        action: ContainerAction::Start,
+                    })
+                    .into_item(),
+            );
+        }
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuItemFields::new(rust_i18n::t!("host_container_menu_logs"))
+                .with_on_select_action(TerminalGridAction::ContainerOpenLogs {
+                    host_id,
+                    container_id,
+                    container_name,
+                })
+                .into_item(),
+        );
+        items
+    }
+
     pub(crate) fn show_process_list_context_menu(
         &mut self,
         pid: u32,

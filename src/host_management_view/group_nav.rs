@@ -27,6 +27,7 @@ pub struct GroupNavStates {
     pub recent_states: Vec<MouseStateHandle>,
     pub manage_button_state: MouseStateHandle,
     pub status_entry_state: MouseStateHandle,
+    pub containers_entry_state: MouseStateHandle,
     pub keys_entry_state: MouseStateHandle,
     /// 各行 hover/选中背景 eased 过渡（key = "nav-{类}:{id}"，随导航持久）。
     pub hover_transitions: std::cell::RefCell<nexshell::ui_anim::TransitionMap<String>>,
@@ -42,6 +43,7 @@ impl GroupNavStates {
             recent_states: Vec::new(),
             manage_button_state: Arc::new(Mutex::new(MouseState::default())),
             status_entry_state: Arc::new(Mutex::new(MouseState::default())),
+            containers_entry_state: Arc::new(Mutex::new(MouseState::default())),
             keys_entry_state: Arc::new(Mutex::new(MouseState::default())),
             hover_transitions: std::cell::RefCell::new(nexshell::ui_anim::TransitionMap::new()),
             nav_scroll_state: ClippedScrollStateHandle::new(),
@@ -117,8 +119,20 @@ pub fn render_group_nav(
         ICON_ACTIVITY,
         HostViewMode::Status,
         &states.status_entry_state,
+        "nav-s:status",
         states,
         view_mode == HostViewMode::Status,
+        ui_font,
+        hc,
+    ));
+    col.add_child(render_function_item(
+        rust_i18n::t!("host_nav_containers").to_string(),
+        ICON_GRID_VIEW,
+        HostViewMode::Containers,
+        &states.containers_entry_state,
+        "nav-s:containers",
+        states,
+        view_mode == HostViewMode::Containers,
         ui_font,
         hc,
     ));
@@ -621,12 +635,14 @@ fn render_bottom_item(
     .finish()
 }
 
-/// 顶部状态总览入口：圆角卡片(云图标+加粗文字)，点击切到状态总览视图。
+/// 顶部功能区入口（状态总览/容器等）：圆角卡片(图标+加粗文字)，点击切视图。
+#[allow(clippy::too_many_arguments)]
 fn render_function_item(
     label: String,
     icon: &'static str,
     mode: HostViewMode,
     state: &MouseStateHandle,
+    pill_key: &str,
     states: &GroupNavStates,
     is_selected: bool,
     ui_font: fonts::FamilyId,
@@ -642,7 +658,7 @@ fn render_function_item(
     } else {
         hc.card_bg
     };
-    let bg = nav_pill_bg(states, "nav-s:status", target);
+    let bg = nav_pill_bg(states, pill_key, target);
 
     Hoverable::new(state, move |_mouse| {
         let text_color = if is_selected {

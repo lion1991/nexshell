@@ -835,8 +835,15 @@ pub fn format_bytes_short(bytes: u64) -> String {
 
 /// 速率拆成 (数值, 单位)，如 72704 → ("71","K")。供大数字 + 小单位分排渲染。
 pub fn split_rate(bytes_per_sec: u64) -> (String, String) {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
     let b = bytes_per_sec as f64;
-    if b >= 1024.0 * 1024.0 {
+    if b >= GIB * 1024.0 {
+        let value = format!("{:.1}", b / GIB / 1024.0);
+        (value.trim_end_matches(".0").to_string(), "T".to_string())
+    } else if b >= GIB {
+        let value = format!("{:.1}", b / GIB);
+        (value.trim_end_matches(".0").to_string(), "G".to_string())
+    } else if b >= 1024.0 * 1024.0 {
         (format!("{:.0}", b / 1024.0 / 1024.0), "M".to_string())
     } else if b >= 1024.0 {
         (format!("{:.0}", b / 1024.0), "K".to_string())
@@ -988,7 +995,10 @@ async fn run_host_overview_monitor(
     }
 }
 
-async fn connect_authenticated_session(config: &RemoteSshConfig) -> Result<SshSession, String> {
+// pub(crate)：容器监控复用同一套 SSH 认证流程。
+pub(crate) async fn connect_authenticated_session(
+    config: &RemoteSshConfig,
+) -> Result<SshSession, String> {
     validate_monitor_config(config)?;
     let host = config.host.trim();
     let username = config.username.trim();
@@ -1051,7 +1061,8 @@ async fn connect_authenticated_session(config: &RemoteSshConfig) -> Result<SshSe
     Ok(session)
 }
 
-async fn sleep_or_shutdown(duration: Duration, shutdown: &AtomicBool) {
+// pub(crate)：容器监控复用同一节奏补齐逻辑。
+pub(crate) async fn sleep_or_shutdown(duration: Duration, shutdown: &AtomicBool) {
     let deadline = Instant::now() + duration;
     while !shutdown.load(Ordering::Relaxed) {
         let now = Instant::now();
@@ -1627,4 +1638,20 @@ fn expand_tilde(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_rate;
+
+    #[test]
+    fn split_rate_covers_b_to_t() {
+        assert_eq!(split_rate(512), ("512".into(), "B".into()));
+        assert_eq!(split_rate(72_704), ("71".into(), "K".into()));
+        assert_eq!(split_rate(19_800_000), ("19".into(), "M".into()));
+        // 容器累计 BlockIO 可到百 GB 级，须落 G 档而非天文数字的 M。
+        assert_eq!(split_rate(330_000_000_000), ("307.3".into(), "G".into()));
+        assert_eq!(split_rate(1024 * 1024 * 1024), ("1".into(), "G".into()));
+        assert_eq!(split_rate(2_400_000_000_000), ("2.2".into(), "T".into()));
+    }
 }

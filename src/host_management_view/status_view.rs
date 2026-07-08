@@ -138,6 +138,7 @@ fn render_status_card(
         .and_then(|s| s.cpu_cores)
         .filter(|c| *c > 0)
         .map(|c| c as f32);
+    // 弧走档位色动态变化：正常绿 / 中级橙 / 高负载红（每环按各自 ratio 定档）。
     let mut load_rings: [(Option<f32>, ColorU); 3] = [(None, hc.text_secondary); 3];
     let mut load_dot = hc.text_secondary;
     for (i, slot) in load_rings.iter_mut().enumerate() {

@@ -802,6 +802,24 @@ pub enum TerminalGridAction {
     HostKeyEditCancel,
     HostDeleteKeyPrompt,
     HostDeleteKeyCancel,
+    // --- 容器管理 actions ---
+    ContainerShowMenu {
+        host_id: String,
+        container_id: String,
+        container_name: String,
+        state: nexshell::container_overview::ContainerState,
+        position: Vector2F,
+    },
+    ContainerExec {
+        host_id: String,
+        container_id: String,
+        action: nexshell::container_overview::ContainerAction,
+    },
+    ContainerOpenLogs {
+        host_id: String,
+        container_id: String,
+        container_name: String,
+    },
     ShowHostManagement,
     OpenProcessList,
     OpenNetworkList,

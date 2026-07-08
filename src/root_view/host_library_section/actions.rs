@@ -6,10 +6,11 @@
 // 操作实现散在同 section 的 operations / transfer / edit_window / editors，跨文件 self.xxx() 调用。
 
 use crate::host_edit_window::HostEditDraft;
-use crate::RootView;
+use crate::{RootView, TerminalSessionKind, DEFAULT_COLS, DEFAULT_ROWS};
 use nexshell::host_management::{
     HostClipboardOp, HostConnectionConfig, HostViewMode, ProtocolFilter,
 };
+use nexshell::terminal_runtime::LocalTerminalRuntime;
 use pathfinder_geometry::rect::RectF;
 use warpui::ViewContext;
 
@@ -67,6 +68,96 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.connect_host(&host_id, ctx);
+    }
+
+    /// 容器 start/stop/restart：一次性远端 exec，不阻塞 UI；成功静默（fleet 5s 内自然刷新），
+    /// 失败写回该主机容器快照的 status 让卡片区显示（无 toast 机制，见 ADR 0009 Step3）。
+    pub(in crate::root_view) fn handle_container_exec(
+        &mut self,
+        host_id: String,
+        container_id: String,
+        action: nexshell::container_overview::ContainerAction,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use nexshell::container_overview::{container_action_command, ContainerOverviewEvent};
+        use nexshell::host_overview::{remote_ssh_config_from_host_config, spawn_remote_exec};
+
+        let Some(config) = self
+            .host_state
+            .host_by_id(&host_id)
+            .map(|h| h.connection.clone())
+        else {
+            return;
+        };
+        let command = container_action_command(action, &container_id);
+        let rx = spawn_remote_exec(remote_ssh_config_from_host_config(&config), command);
+        let error_host_id = host_id;
+        ctx.spawn_stream_local(
+            rx,
+            move |view, result, ctx| {
+                if let Err(error) = result {
+                    view.container_fleet
+                        .apply_event(&error_host_id, ContainerOverviewEvent::Error(error));
+                    ctx.notify();
+                }
+            },
+            |_, _| {},
+        );
+    }
+
+    /// 容器日志：开一个连到该主机的 SSH 终端 tab，连接建立后自动敲 `docker logs -f --tail 200`。
+    /// 命令写入走现有 paste()->mpsc 输入通道，通道在 pty 就绪前即安全排队，无需等待就绪信号。
+    pub(in crate::root_view) fn handle_container_open_logs(
+        &mut self,
+        host_id: String,
+        container_id: String,
+        container_name: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(config) = self
+            .host_state
+            .host_by_id(&host_id)
+            .map(|h| h.connection.clone())
+        else {
+            return;
+        };
+        let session_id = format!("container-logs-{host_id}-{container_id}");
+        let tab_session_id = self.unique_terminal_tab_id(&session_id);
+        let (cols, rows) = self
+            .last_resize_cells
+            .lock()
+            .map(|cells| *cells)
+            .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS));
+        let status = format!(
+            "connecting SSH: {}@{}:{}",
+            config.username.trim(),
+            config.host.trim(),
+            config.port
+        );
+        let terminal = LocalTerminalRuntime::spawn_remote_ssh_or_failed(
+            &tab_session_id,
+            nexshell::host_overview::remote_ssh_config_from_host_config(&config),
+            status,
+            cols,
+            rows,
+        );
+        let label = format!("logs: {container_name}");
+        self.push_terminal_tab(
+            terminal,
+            &tab_session_id,
+            label,
+            TerminalSessionKind::Remote,
+            Some(host_id),
+            None,
+            ctx,
+        );
+        let command = format!(
+            "{}\n",
+            nexshell::container_overview::container_logs_command(&container_id)
+        );
+        if let Ok(rt) = self.terminal.lock() {
+            rt.paste(&command);
+        }
     }
 
     pub(in crate::root_view) fn handle_host_toggle_select(
@@ -146,10 +237,16 @@ impl RootView {
         self.host_state.copy_cmd_expanded = false;
         self.host_state.key_delete_confirming = false;
         self.host_key_edit_target = None;
+        // 状态总览 / 容器监控互斥，同一主机不叠加两条监控连接。
         if mode == HostViewMode::Status {
             self.start_host_status_fleet(ctx);
         } else {
             self.host_status_fleet.stop_all();
+        }
+        if mode == HostViewMode::Containers {
+            self.start_container_fleet(ctx);
+        } else {
+            self.container_fleet.stop_all();
         }
         if mode == HostViewMode::Keys {
             self.reload_host_keys();
@@ -171,6 +268,27 @@ impl RootView {
                 receiver,
                 move |view, event, ctx| {
                     view.host_status_fleet.apply_event(&host_id, event);
+                    ctx.notify();
+                },
+                |_, _| {},
+            );
+        }
+    }
+
+    /// 对当前筛选下的 SSH 主机启动容器监控舰队（幂等），事件流接回 fleet。
+    fn start_container_fleet(&mut self, ctx: &mut ViewContext<Self>) {
+        let hosts: Vec<(String, HostConnectionConfig)> = self
+            .host_state
+            .filtered_hosts()
+            .into_iter()
+            .filter(|host| host.protocol.eq_ignore_ascii_case("SSH"))
+            .map(|host| (host.id, host.connection))
+            .collect();
+        for (host_id, receiver) in self.container_fleet.start(&hosts) {
+            ctx.spawn_stream_local(
+                receiver,
+                move |view, event, ctx| {
+                    view.container_fleet.apply_event(&host_id, event);
                     ctx.notify();
                 },
                 |_, _| {},

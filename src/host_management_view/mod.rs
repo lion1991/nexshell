@@ -1,4 +1,5 @@
 pub mod constants;
+pub mod container_view;
 pub mod group_nav;
 pub mod host_card;
 pub mod key_manager_view;
@@ -20,11 +21,13 @@ use crate::terminal_grid_element::TerminalGridAction;
 use nexshell::text_editor::EditorView;
 use warp_core::ui::appearance::Appearance;
 
+use nexshell::container_fleet::ContainerFleet;
 use nexshell::host_management::{HostManagementState, HostViewMode, RecentHostSnapshot};
 use nexshell::host_overview_fleet::HostOverviewFleet;
 use nexshell::ssh_key_store::SshKeyRecord;
 
 use constants::*;
+use container_view::{render_container_view, ContainerCardStates};
 use group_nav::{render_group_nav, GroupNavStates};
 use host_card::{render_host_card, render_host_list_row, render_list_header, HostCardStates};
 use key_manager_view::{render_key_manager_view, KeyManagerStates};
@@ -36,6 +39,7 @@ pub struct HostManagementViewStates {
     pub search_bar: SearchBarStates,
     pub group_nav: GroupNavStates,
     pub host_cards: HostCardStates,
+    pub container_cards: ContainerCardStates,
     pub selection_bar: SelectionBarStates,
     pub key_manager: KeyManagerStates,
     pub scroll_state: ClippedScrollStateHandle,
@@ -47,6 +51,7 @@ impl HostManagementViewStates {
             search_bar: SearchBarStates::new(),
             group_nav: GroupNavStates::new(),
             host_cards: HostCardStates::new(),
+            container_cards: ContainerCardStates::new(),
             selection_bar: SelectionBarStates::new(),
             key_manager: KeyManagerStates::new(),
             scroll_state: ClippedScrollStateHandle::new(),
@@ -64,6 +69,7 @@ pub fn render_host_management_panel(
     appearance: &Appearance,
     sidebar_open: bool,
     fleet: &HostOverviewFleet,
+    container_fleet: &ContainerFleet,
     keys: &[(SshKeyRecord, usize)],
     selected_key_id: Option<&str>,
     selected_key_public: Option<&str>,
@@ -143,6 +149,13 @@ pub fn render_host_management_panel(
             HostViewMode::Status => {
                 render_status_view(&filtered, fleet, &view_states.host_cards, ui_font, hc)
             }
+            HostViewMode::Containers => render_container_view(
+                &filtered,
+                container_fleet,
+                &view_states.container_cards,
+                ui_font,
+                hc,
+            ),
             HostViewMode::Keys => warpui::elements::Empty::new().finish(),
         };
 

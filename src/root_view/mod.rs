@@ -46,6 +46,7 @@ use warpui::{
     TypedActionView, View, ViewContext, ViewHandle,
 };
 
+use nexshell::container_fleet::ContainerFleet;
 use nexshell::file_panel::{
     apply_sftp_event, spawn_sftp_worker, FilePanelState, FilePanelWorkerHandle, SftpRequest,
 };
@@ -134,6 +135,8 @@ pub(crate) struct RootView {
     host_state: HostManagementState,
     host_view_states: RefCell<HostManagementViewStates>,
     host_status_fleet: HostOverviewFleet,
+    // 容器管理舰队：进入 Containers 视图 start，离开 stop，与状态总览互斥
+    container_fleet: ContainerFleet,
     // 密钥库缓存：(记录, 关联主机数)，进入密钥页 / 导入 / 删除时刷新
     host_keys: Vec<(SshKeyRecord, usize)>,
     // 选中密钥推导出的 openssh 公钥缓存（选中时算一次，避免每帧解密私钥）
@@ -219,6 +222,8 @@ pub(crate) struct RootView {
     show_process_list_context_menu: Option<Vector2F>,
     host_card_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_host_card_context_menu: Option<Vector2F>,
+    container_card_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
+    show_container_card_context_menu: Option<Vector2F>,
 
     // === 标签页（tab_bar_section）===
     tab_bar_hover_state: MouseStateHandle,
@@ -487,6 +492,7 @@ impl RootView {
             host_state,
             host_view_states: RefCell::new(HostManagementViewStates::new()),
             host_status_fleet: HostOverviewFleet::new(),
+            container_fleet: ContainerFleet::new(),
             host_keys: Vec::new(),
             host_selected_key_public: None,
             host_recent: Vec::new(),
@@ -667,6 +673,19 @@ impl RootView {
                 menu
             },
             show_host_card_context_menu: None,
+            container_card_context_menu: {
+                let menu =
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
+                        me.show_container_card_context_menu = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
+                        ctx.notify();
+                    }
+                });
+                menu
+            },
+            show_container_card_context_menu: None,
             tab_bar_hover_state: Arc::new(Mutex::new(MouseState::default())),
             tab_states: Vec::new(),
             tab_tooltip_states: Vec::new(),
@@ -1420,6 +1439,13 @@ impl RootView {
             || self
                 .host_view_states
                 .borrow()
+                .container_cards
+                .gauge_anim
+                .borrow()
+                .any_animating(now)
+            || self
+                .host_view_states
+                .borrow()
                 .group_nav
                 .hover_transitions
                 .borrow()
@@ -1990,6 +2016,18 @@ impl View for RootView {
             );
         }
 
+        if let Some(position) = self.show_container_card_context_menu {
+            root.add_positioned_overlay_child(
+                self.render_container_card_context_menu(),
+                OffsetPositioning::offset_from_parent(
+                    position,
+                    terminal_context_menu_offset_bounds(),
+                    ParentAnchor::TopLeft,
+                    ChildAnchor::TopLeft,
+                ),
+            );
+        }
+
         // git 提交详情卡：挂 root Stack（waterfall）才能遮挡下层终端，避免滚动/拖动穿透。
         if let Some((detail, position_id)) = self.render_git_commit_detail_overlay() {
             root.add_positioned_overlay_child(
@@ -2203,6 +2241,39 @@ impl TypedActionView for RootView {
             TerminalGridAction::HostRenameInline(host_id) => {
                 self.handle_host_rename_inline(host_id.clone(), ctx)
             }
+
+            // === 容器管理：右键菜单 / 操作 / 日志（host_library_section + context_menus_section）===
+            TerminalGridAction::ContainerShowMenu {
+                host_id,
+                container_id,
+                container_name,
+                state,
+                position,
+            } => {
+                self.show_container_card_context_menu(
+                    host_id.clone(),
+                    container_id.clone(),
+                    container_name.clone(),
+                    *state,
+                    *position,
+                    ctx,
+                );
+            }
+            TerminalGridAction::ContainerExec {
+                host_id,
+                container_id,
+                action,
+            } => self.handle_container_exec(host_id.clone(), container_id.clone(), *action, ctx),
+            TerminalGridAction::ContainerOpenLogs {
+                host_id,
+                container_id,
+                container_name,
+            } => self.handle_container_open_logs(
+                host_id.clone(),
+                container_id.clone(),
+                container_name.clone(),
+                ctx,
+            ),
 
             // === 文件面板：传输 / 输入 / 缩放（file_panel_section）===
             TerminalGridAction::FilePanelDownload { name, is_dir } => {
