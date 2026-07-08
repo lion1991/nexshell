@@ -231,12 +231,19 @@ fn render_key_row(
     let key_id = key.id.clone();
 
     Hoverable::new(row_state, move |mouse| {
+        // 选中底走中性色 + 名字 accent（badge tint 当整卡底在浅色主题过艳）；
+        // hover 用半透明轻量色，实心大块灰在浅色卡里太重。
         let bg = if selected {
-            hc.badge_ssh_bg
+            hc.group_selected_bg
         } else if mouse.is_hovered() {
-            hc.card_bg_hover
+            hc.group_hover_bg
         } else {
             nexshell::design_tokens::TRANSPARENT
+        };
+        let name_color = if selected {
+            hc.text_accent
+        } else {
+            hc.text_primary
         };
 
         let meta = Flex::row()
@@ -250,12 +257,7 @@ fn render_key_row(
         let info = Flex::column()
             .with_main_axis_size(MainAxisSize::Min)
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
-            .with_child(bold(
-                name.clone(),
-                ui_font,
-                UI_FONT_SIZE + 1.0,
-                hc.text_primary,
-            ))
+            .with_child(bold(name.clone(), ui_font, UI_FONT_SIZE + 1.0, name_color))
             .with_child(spacer_v(8.0))
             .with_child(meta)
             .finish();
@@ -272,11 +274,18 @@ fn render_key_row(
             ))
             .finish();
 
-        Container::new(row)
-            .with_horizontal_padding(14.0)
-            .with_vertical_padding(14.0)
-            .with_background_color(bg)
-            .finish()
+        // 高亮做内缩圆角 pill：外层卡的圆角不裁子元素，整宽直角 bg 会露出卡角。
+        // 四边等距内缩 6，圆角 5 ≈ 外卡 10 的同心内圆角。
+        Container::new(
+            Container::new(row)
+                .with_horizontal_padding(8.0)
+                .with_vertical_padding(8.0)
+                .with_background_color(bg)
+                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(5.0)))
+                .finish(),
+        )
+        .with_uniform_padding(6.0)
+        .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
     .on_click(move |ctx, _, _| {
