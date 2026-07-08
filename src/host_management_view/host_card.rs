@@ -334,7 +334,7 @@ fn render_select_checkbox(
 }
 
 // 协议标识色：badge 与系统图标底共用，SSH 蓝 / Serial 橙 / RDP 紫。
-fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, ColorU) {
+pub(super) fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, ColorU) {
     match protocol {
         "Serial" => (hc.badge_serial_bg, hc.badge_serial_text),
         "RDP" => (hc.badge_rdp_bg, hc.badge_rdp_text),

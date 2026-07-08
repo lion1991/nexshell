@@ -1,17 +1,25 @@
 use std::sync::{Arc, Mutex};
 
 use warpui::{
+    color::ColorU,
     elements::{
-        Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Expanded, Flex,
-        Hoverable, Icon, MainAxisSize, MouseState, MouseStateHandle, ParentElement, Radius, Text,
-        Wrap,
+        Border, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
+        CornerRadius, CrossAxisAlignment, Expanded, Fill, Flex, Hoverable, Icon, MainAxisSize,
+        MouseState, MouseStateHandle, ParentElement, Radius, ScrollbarWidth, Text, Wrap,
     },
-    fonts, Element,
+    fonts,
+    text_layout::ClipConfig,
+    Element,
 };
 
+use super::host_card::protocol_colors;
 use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
 use nexshell::host_management::{HostGroupSnapshot, HostViewMode, RecentHostSnapshot};
+
+// 行高亮 pill：外层左右内缩 + 内层圆角，避免贴边整条矩形。
+const NAV_PILL_INSET: f32 = 8.0;
+const NAV_PILL_RADIUS: f32 = 6.0;
 
 pub struct GroupNavStates {
     pub group_states: Vec<MouseStateHandle>,
@@ -20,6 +28,10 @@ pub struct GroupNavStates {
     pub manage_button_state: MouseStateHandle,
     pub status_entry_state: MouseStateHandle,
     pub keys_entry_state: MouseStateHandle,
+    /// 各行 hover/选中背景 eased 过渡（key = "nav-{类}:{id}"，随导航持久）。
+    pub hover_transitions: std::cell::RefCell<nexshell::ui_anim::TransitionMap<String>>,
+    /// 分组/最近访问中段滚动区状态。
+    pub nav_scroll_state: ClippedScrollStateHandle,
 }
 
 impl GroupNavStates {
@@ -31,6 +43,8 @@ impl GroupNavStates {
             manage_button_state: Arc::new(Mutex::new(MouseState::default())),
             status_entry_state: Arc::new(Mutex::new(MouseState::default())),
             keys_entry_state: Arc::new(Mutex::new(MouseState::default())),
+            hover_transitions: std::cell::RefCell::new(nexshell::ui_anim::TransitionMap::new()),
+            nav_scroll_state: ClippedScrollStateHandle::new(),
         }
     }
 
@@ -56,6 +70,15 @@ impl GroupNavStates {
     }
 }
 
+// 取样某行的背景过渡：先 retarget 到本帧目标色再取插值，key 稳定。
+fn nav_pill_bg(states: &GroupNavStates, key: &str, target: ColorU) -> ColorU {
+    let now = std::time::Instant::now();
+    let key = key.to_string();
+    let mut t = states.hover_transitions.borrow_mut();
+    t.retarget(key.clone(), target, now);
+    t.sample(&key, now).unwrap_or(target)
+}
+
 pub fn render_group_nav(
     groups: &[HostGroupSnapshot],
     search_box: Box<dyn Element>,
@@ -67,6 +90,23 @@ pub fn render_group_nav(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    // 清理已消失行的过渡条目；底部/状态入口恒常驻。
+    {
+        let group_ids: std::collections::HashSet<&str> =
+            groups.iter().map(|g| g.id.as_str()).collect();
+        let recent_ids: std::collections::HashSet<&str> =
+            recent.iter().map(|r| r.host_id.as_str()).collect();
+        states
+            .hover_transitions
+            .borrow_mut()
+            .retain(|key| match key.split_once(':') {
+                Some(("nav-g", id)) => group_ids.contains(id),
+                Some(("nav-r", id)) => recent_ids.contains(id),
+                Some(("nav-b", _)) | Some(("nav-s", _)) => true,
+                _ => false,
+            });
+    }
+
     let mut col = Flex::column()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
@@ -77,6 +117,8 @@ pub fn render_group_nav(
         ICON_ACTIVITY,
         HostViewMode::Status,
         &states.status_entry_state,
+        states,
+        view_mode == HostViewMode::Status,
         ui_font,
         hc,
     ));
@@ -89,35 +131,52 @@ pub fn render_group_nav(
             .finish(),
     );
 
-    col.add_child(
+    // 中段（分组 + 最近访问）单独滚动，防止分组多时把底部固定区顶出屏。
+    let mut mid = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+
+    mid.add_child(
         Container::new(
             Text::new_inline(
                 rust_i18n::t!("host_group_nav").to_string(),
                 ui_font,
-                UI_FONT_SIZE,
+                UI_FONT_SIZE_SMALL,
             )
             .with_color(hc.text_secondary)
             .finish(),
         )
         .with_padding_left(16.0)
-        .with_padding_top(12.0)
-        .with_padding_bottom(8.0)
-        .with_border(Border::top(1.0).with_border_color(hc.sidebar_border))
+        .with_padding_top(14.0)
+        .with_padding_bottom(6.0)
         .finish(),
     );
 
     for (index, group) in groups.iter().enumerate() {
-        col.add_child(render_group_item(group, index, states, ui_font, hc));
+        mid.add_child(render_group_item(group, index, states, ui_font, hc));
     }
 
     if !recent.is_empty() {
-        col.add_child(render_section_title("最近访问", ui_font, hc));
+        mid.add_child(render_section_title("最近访问", ui_font, hc));
         for (index, item) in recent.iter().enumerate() {
-            col.add_child(render_recent_item(item, index, states, ui_font, hc));
+            mid.add_child(render_recent_item(item, index, states, ui_font, hc));
         }
     }
 
-    col.add_child(Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish());
+    col.add_child(
+        Expanded::new(
+            1.0,
+            ClippedScrollable::vertical(
+                states.nav_scroll_state.clone(),
+                mid.finish(),
+                ScrollbarWidth::Custom(4.0),
+                Fill::Solid(hc.scrollbar_thumb),
+                Fill::Solid(hc.scrollbar_thumb_active),
+                Fill::None,
+            )
+            .with_overlayed_scrollbar()
+            .finish(),
+        )
+        .finish(),
+    );
 
     if !available_tags.is_empty() {
         col.add_child(
@@ -133,7 +192,6 @@ pub fn render_group_nav(
             .with_padding_left(16.0)
             .with_padding_top(8.0)
             .with_padding_bottom(6.0)
-            .with_border(Border::top(1.0).with_border_color(hc.sidebar_border))
             .finish(),
         );
 
@@ -162,6 +220,8 @@ pub fn render_group_nav(
         "密钥管理".to_string(),
         ICON_KEY,
         &states.keys_entry_state,
+        "nav-b:keys",
+        states,
         TerminalGridAction::HostSetViewMode(HostViewMode::Keys),
         true,
         view_mode == HostViewMode::Keys,
@@ -172,6 +232,8 @@ pub fn render_group_nav(
         rust_i18n::t!("host_manage_groups_tags").to_string(),
         ICON_LINK,
         &states.manage_button_state,
+        "nav-b:manage",
+        states,
         TerminalGridAction::HostManageGroupsTags,
         false,
         false,
@@ -202,98 +264,126 @@ fn render_group_item(
     let label = group.label.clone();
     let count = group.count;
     let group_id_click = group.id.clone();
+    let group_id_marker = group.id.clone();
     let is_all = group.id == "all";
 
-    Hoverable::new(state, move |mouse| {
-        let bg = if is_selected {
-            hc.group_selected_bg
-        } else if mouse.is_hovered() {
-            hc.group_hover_bg
-        } else {
-            hc.sidebar_bg
-        };
+    let is_hovered = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    let target = if is_selected {
+        hc.group_selected_bg
+    } else if is_hovered {
+        hc.group_hover_bg
+    } else {
+        hc.sidebar_bg
+    };
+    let bg = nav_pill_bg(states, &format!("nav-g:{}", group.id), target);
 
+    Hoverable::new(state, move |_mouse| {
         let text_color = if is_selected {
             hc.text_accent
         } else {
             hc.text_primary
         };
-
+        // 计数选中态跟随 accent，其余次级色。
+        let count_color = if is_selected {
+            hc.text_accent
+        } else {
+            hc.text_secondary
+        };
+        // pill：外层 margin 内缩、内层承 bg + 圆角；行内 padding 16→8 保内容位置不变。
         Container::new(
-            ConstrainedBox::new(
-                Flex::row()
-                    .with_main_axis_size(MainAxisSize::Max)
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_child(
-                        Container::new(group_marker(is_all, &hc))
-                            .with_padding_left(16.0)
-                            .with_margin_right(10.0)
-                            .finish(),
-                    )
-                    .with_child(
-                        Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
-                            .with_color(text_color)
-                            .finish(),
-                    )
-                    .with_child(
-                        Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish(),
-                    )
-                    .with_child(
-                        Container::new(
-                            Text::new_inline(count.to_string(), ui_font, UI_FONT_SIZE)
-                                .with_color(hc.text_secondary)
+            Container::new(
+                ConstrainedBox::new(
+                    Flex::row()
+                        .with_main_axis_size(MainAxisSize::Max)
+                        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                        .with_child(
+                            Container::new(group_marker(is_all, &group_id_marker, &hc))
+                                .with_padding_left(8.0)
+                                .with_margin_right(10.0)
                                 .finish(),
                         )
-                        .with_padding_right(16.0)
+                        .with_child(
+                            Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
+                                .with_color(text_color)
+                                .finish(),
+                        )
+                        .with_child(
+                            Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish(),
+                        )
+                        .with_child(
+                            Container::new(
+                                Text::new_inline(count.to_string(), ui_font, UI_FONT_SIZE)
+                                    .with_color(count_color)
+                                    .finish(),
+                            )
+                            .with_padding_right(8.0)
+                            .finish(),
+                        )
                         .finish(),
-                    )
-                    .finish(),
+                )
+                .with_height(GROUP_ITEM_HEIGHT)
+                .finish(),
             )
-            .with_height(GROUP_ITEM_HEIGHT)
+            .with_background_color(bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(NAV_PILL_RADIUS)))
             .finish(),
         )
-        .with_background_color(bg)
+        .with_margin_left(NAV_PILL_INSET)
+        .with_margin_right(NAV_PILL_INSET)
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(TerminalGridAction::HostSelectGroup(group_id_click.clone()));
     })
     .finish()
 }
 
-// 分组色标：所有主机用蓝色列表图标，普通分组用文件夹图标。
-fn group_marker(is_all: bool, hc: &HostUiColors) -> Box<dyn Element> {
-    let (icon, color) = if is_all {
-        (ICON_LIST_VIEW, hc.text_accent)
-    } else {
-        (ICON_FOLDER, hc.text_secondary)
-    };
-    ConstrainedBox::new(Icon::new(icon, color).finish())
+// 分组色标：所有主机用 accent 列表图标，普通分组用按 id 取色的 8×8 圆角色点。
+fn group_marker(is_all: bool, group_id: &str, hc: &HostUiColors) -> Box<dyn Element> {
+    if is_all {
+        return ConstrainedBox::new(Icon::new(ICON_LIST_VIEW, hc.text_accent).finish())
+            .with_width(ICON_SIZE_SM)
+            .with_height(ICON_SIZE_SM)
+            .finish();
+    }
+    let idx = group_id.bytes().map(|b| b as usize).sum::<usize>() % hc.group_dot_palette.len();
+    let dot = ConstrainedBox::new(
+        Container::new(warpui::elements::Empty::new().finish())
+            .with_background_color(hc.group_dot_palette[idx])
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .finish(),
+    )
+    .with_width(8.0)
+    .with_height(8.0)
+    .finish();
+    ConstrainedBox::new(Container::new(dot).with_uniform_padding(4.0).finish())
         .with_width(ICON_SIZE_SM)
         .with_height(ICON_SIZE_SM)
         .finish()
 }
 
-// 区块小标题（带顶部分隔线），如"最近访问"。
+// 区块小标题，如"最近访问"（降级为 SMALL 字号、无分隔线）。
 fn render_section_title(
     label: &str,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     Container::new(
-        Text::new_inline(label.to_string(), ui_font, UI_FONT_SIZE)
+        Text::new_inline(label.to_string(), ui_font, UI_FONT_SIZE_SMALL)
             .with_color(hc.text_secondary)
             .finish(),
     )
     .with_padding_left(16.0)
-    .with_padding_top(12.0)
-    .with_padding_bottom(8.0)
-    .with_border(Border::top(1.0).with_border_color(hc.sidebar_border))
+    .with_padding_top(14.0)
+    .with_padding_bottom(6.0)
     .finish()
 }
 
-// 最近访问项：>_ 图标 + 主机名 + (分组名 · 相对时间)，点击快连。
+// 最近访问项单行：>_ 图标 + 主机名（可截断）+ 弹性空档 + 相对时间恒右，点击快连。
 fn render_recent_item(
     item: &RecentHostSnapshot,
     index: usize,
@@ -305,54 +395,85 @@ fn render_recent_item(
     let state = states.recent_states[index].clone();
     let host_id = item.host_id.clone();
     let name = item.name.clone();
-    let sub = match &item.group_name {
-        Some(group) => format!("{} · {}", group, relative_time(item.accessed_at)),
-        None => relative_time(item.accessed_at),
+    let (icon_tint, icon_fg) = protocol_colors(&item.protocol, &hc);
+    let time = relative_time(item.accessed_at);
+
+    let is_hovered = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    let target = if is_hovered {
+        hc.group_hover_bg
+    } else {
+        hc.sidebar_bg
     };
-    Hoverable::new(state, move |mouse| {
-        let bg = if mouse.is_hovered() {
-            hc.group_hover_bg
-        } else {
-            hc.sidebar_bg
-        };
+    let bg = nav_pill_bg(states, &format!("nav-r:{}", item.host_id), target);
+
+    Hoverable::new(state, move |_mouse| {
         Container::new(
-            Flex::row()
-                .with_main_axis_size(MainAxisSize::Max)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    Container::new(
-                        ConstrainedBox::new(Icon::new(ICON_TERMINAL, hc.text_secondary).finish())
-                            .with_width(ICON_SIZE_SM)
-                            .with_height(ICON_SIZE_SM)
-                            .finish(),
-                    )
-                    .with_padding_left(16.0)
-                    .with_margin_right(10.0)
-                    .finish(),
-                )
-                .with_child(
-                    Flex::column()
-                        .with_main_axis_size(MainAxisSize::Min)
-                        .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            Container::new(
+                ConstrainedBox::new(
+                    Flex::row()
+                        .with_main_axis_size(MainAxisSize::Max)
+                        .with_cross_axis_alignment(CrossAxisAlignment::Center)
                         .with_child(
-                            Text::new_inline(name.clone(), ui_font, UI_FONT_SIZE)
-                                .with_color(hc.text_primary)
+                            Container::new(
+                                // 24×24 协议色底 + 居中 14 图标（padding=(24-14)/2）。
+                                Container::new(
+                                    ConstrainedBox::new(Icon::new(ICON_TERMINAL, icon_fg).finish())
+                                        .with_width(14.0)
+                                        .with_height(14.0)
+                                        .finish(),
+                                )
+                                .with_uniform_padding(5.0)
+                                .with_background_color(icon_tint)
+                                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
                                 .finish(),
+                            )
+                            .with_padding_left(8.0)
+                            .with_margin_right(10.0)
+                            .finish(),
                         )
                         .with_child(
-                            Text::new_inline(sub.clone(), ui_font, UI_FONT_SIZE_SMALL)
-                                .with_color(hc.text_secondary)
+                            // 名字槽独占弹性空间（勿再加 Expanded 空档分走宽度）；
+                            // 超宽才尾部渐隐（Warp tab 同款），与时间保底 8px 间距。
+                            Expanded::new(
+                                1.0,
+                                Container::new(
+                                    Text::new_inline(name.clone(), ui_font, UI_FONT_SIZE)
+                                        .with_color(hc.text_primary)
+                                        .with_clip(ClipConfig::end())
+                                        .soft_wrap(false)
+                                        .finish(),
+                                )
+                                .with_margin_right(8.0)
                                 .finish(),
+                            )
+                            .finish(),
+                        )
+                        .with_child(
+                            Container::new(
+                                Text::new_inline(time.clone(), ui_font, UI_FONT_SIZE_SMALL)
+                                    .with_color(hc.text_secondary)
+                                    .finish(),
+                            )
+                            .with_padding_right(8.0)
+                            .finish(),
                         )
                         .finish(),
                 )
+                .with_height(GROUP_ITEM_HEIGHT)
                 .finish(),
+            )
+            .with_background_color(bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(NAV_PILL_RADIUS)))
+            .finish(),
         )
-        .with_vertical_padding(6.0)
-        .with_background_color(bg)
+        .with_margin_left(NAV_PILL_INSET)
+        .with_margin_right(NAV_PILL_INSET)
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(TerminalGridAction::HostQuickConnect(host_id.clone()));
     })
@@ -418,10 +539,13 @@ fn render_tag_chip(
 }
 
 // 侧栏底部按钮：图标+文字左对齐。密钥管理(可选中) / 管理分组标签共用。
+// top border 留在全宽外层（底部区分界，不随 pill 内缩）。
 fn render_bottom_item(
     label: String,
     icon: &'static str,
     state: &MouseStateHandle,
+    pill_key: &str,
+    states: &GroupNavStates,
     action: TerminalGridAction,
     show_top_border: bool,
     is_selected: bool,
@@ -431,14 +555,17 @@ fn render_bottom_item(
     let hc = *hc;
     let state = state.clone();
 
-    Hoverable::new(state, move |mouse| {
-        let bg = if is_selected {
-            hc.group_selected_bg
-        } else if mouse.is_hovered() {
-            hc.group_hover_bg
-        } else {
-            hc.sidebar_bg
-        };
+    let is_hovered = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    let target = if is_selected {
+        hc.group_selected_bg
+    } else if is_hovered {
+        hc.group_hover_bg
+    } else {
+        hc.sidebar_bg
+    };
+    let bg = nav_pill_bg(states, pill_key, target);
+
+    Hoverable::new(state, move |_mouse| {
         let fg = if is_selected {
             hc.text_accent
         } else {
@@ -446,29 +573,38 @@ fn render_bottom_item(
         };
 
         Container::new(
-            Flex::row()
-                .with_main_axis_size(MainAxisSize::Max)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    Container::new(
-                        ConstrainedBox::new(Icon::new(icon, fg).finish())
-                            .with_width(ICON_SIZE_SM)
-                            .with_height(ICON_SIZE_SM)
+            Container::new(
+                Container::new(
+                    Flex::row()
+                        .with_main_axis_size(MainAxisSize::Max)
+                        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                        .with_child(
+                            Container::new(
+                                ConstrainedBox::new(Icon::new(icon, fg).finish())
+                                    .with_width(ICON_SIZE_SM)
+                                    .with_height(ICON_SIZE_SM)
+                                    .finish(),
+                            )
+                            .with_margin_right(10.0)
                             .finish(),
-                    )
-                    .with_margin_right(10.0)
-                    .finish(),
-                )
-                .with_child(
-                    Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
-                        .with_color(fg)
+                        )
+                        .with_child(
+                            Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
+                                .with_color(fg)
+                                .finish(),
+                        )
                         .finish(),
                 )
+                .with_padding_left(8.0)
+                .with_vertical_padding(8.0)
+                .with_background_color(bg)
+                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(NAV_PILL_RADIUS)))
                 .finish(),
+            )
+            .with_margin_left(NAV_PILL_INSET)
+            .with_margin_right(NAV_PILL_INSET)
+            .finish(),
         )
-        .with_padding_left(16.0)
-        .with_vertical_padding(10.0)
-        .with_background_color(bg)
         .with_border(
             Border::top(if show_top_border { 1.0 } else { 0.0 })
                 .with_border_color(hc.sidebar_border),
@@ -476,6 +612,9 @@ fn render_bottom_item(
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(action.clone());
     })
@@ -488,16 +627,28 @@ fn render_function_item(
     icon: &'static str,
     mode: HostViewMode,
     state: &MouseStateHandle,
+    states: &GroupNavStates,
+    is_selected: bool,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     let hc = *hc;
     let state = state.clone();
-    Hoverable::new(state, move |mouse| {
-        let bg = if mouse.is_hovered() {
-            hc.card_bg_hover
+
+    let is_hovered = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+    // 选中时背景恒为 hover 色（不随鼠标变），否则常规 hover 切换。
+    let target = if is_selected || is_hovered {
+        hc.card_bg_hover
+    } else {
+        hc.card_bg
+    };
+    let bg = nav_pill_bg(states, "nav-s:status", target);
+
+    Hoverable::new(state, move |_mouse| {
+        let text_color = if is_selected {
+            hc.text_accent
         } else {
-            hc.card_bg
+            hc.text_primary
         };
         Container::new(
             Container::new(
@@ -516,7 +667,7 @@ fn render_function_item(
                     )
                     .with_child(
                         Text::new_inline(label.clone(), ui_font, UI_FONT_SIZE)
-                            .with_color(hc.text_primary)
+                            .with_color(text_color)
                             .with_style(fonts::Properties::default().weight(fonts::Weight::Bold))
                             .finish(),
                     )
@@ -535,6 +686,9 @@ fn render_function_item(
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(TerminalGridAction::HostSetViewMode(mode));
     })

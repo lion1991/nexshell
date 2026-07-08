@@ -84,6 +84,7 @@ pub struct RecentHostSnapshot {
     pub name: String,
     pub group_name: Option<String>,
     pub accessed_at: i64,
+    pub protocol: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

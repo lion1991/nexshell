@@ -182,6 +182,8 @@ pub struct HostColors {
     pub action_bar_border: ColorU,
     pub scrollbar_thumb: ColorU,
     pub scrollbar_thumb_active: ColorU,
+    /// 分组色点调色板（GitHub Primer label 色系），按分组 id 取模选色。
+    pub group_dot_palette: [ColorU; 8],
     /// 语义色（供本页写死 hex 清理后引用，如删除红 / 在线绿）。
     pub semantic: SemanticColors,
 }
@@ -213,7 +215,8 @@ impl HostColors {
             connect_btn_bg_hover: ssh_bg,
             connect_btn_border: outline,
             group_selected_bg: p.neutral_2,
-            group_hover_bg: p.neutral_1,
+            // 勿用 neutral_1：与 sidebar_bg 同色 = hover 隐身（同色隐身病，见 metric_track）。
+            group_hover_bg: ThemePalette::with_alpha(p.neutral_3, 0x66),
             tag_bg: ssh_bg,
             tag_text: p.accent,
             text_primary: p.active_text,
@@ -225,6 +228,29 @@ impl HostColors {
             action_bar_border: p.neutral_4,
             scrollbar_thumb: ThemePalette::with_alpha(p.neutral_3, 0x99),
             scrollbar_thumb_active: p.neutral_3,
+            group_dot_palette: if p.is_dark {
+                [
+                    rgb(0x58a6ff),
+                    rgb(0x3fb950),
+                    rgb(0xd29922),
+                    rgb(0xdb6d28),
+                    rgb(0xf85149),
+                    rgb(0xbc8cff),
+                    rgb(0xff7eb6),
+                    rgb(0x39c5cf),
+                ]
+            } else {
+                [
+                    rgb(0x0969da),
+                    rgb(0x1a7f37),
+                    rgb(0x9a6700),
+                    rgb(0xbc4c00),
+                    rgb(0xcf222e),
+                    rgb(0x8250df),
+                    rgb(0xbf3989),
+                    rgb(0x1b7c83),
+                ]
+            },
             semantic: *s,
         }
     }
@@ -232,5 +258,14 @@ impl HostColors {
     pub fn from_theme(theme: &WarpTheme) -> Self {
         let p = ThemePalette::from_theme(theme);
         Self::derive(&p, &SemanticColors::new(p.is_dark))
+    }
+}
+
+const fn rgb(hex: u32) -> ColorU {
+    ColorU {
+        r: ((hex >> 16) & 0xff) as u8,
+        g: ((hex >> 8) & 0xff) as u8,
+        b: (hex & 0xff) as u8,
+        a: 0xff,
     }
 }

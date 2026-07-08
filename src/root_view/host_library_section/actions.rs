@@ -233,6 +233,7 @@ impl RootView {
                     name: host.name.clone(),
                     group_name,
                     accessed_at: ts,
+                    protocol: host.protocol.clone(),
                 })
             })
             .collect();

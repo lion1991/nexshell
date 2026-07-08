@@ -1411,6 +1411,13 @@ impl RootView {
                 .borrow()
                 .any_animating(now)
             || self
+                .host_view_states
+                .borrow()
+                .group_nav
+                .hover_transitions
+                .borrow()
+                .any_animating(now)
+            || self
                 .cursor_smear
                 .lock()
                 .map(|s| s.is_animating())
