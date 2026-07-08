@@ -50,7 +50,7 @@ impl RootView {
         &mut self,
         ctx: &mut ViewContext<Self>,
     ) {
-        self.app_page = AppPage::HostManagement;
+        self.set_app_page(AppPage::HostManagement, ctx);
         self.reload_host_recent(); // 进页面即刷新最近访问，不必等刷新/连接
         ctx.notify();
     }
@@ -95,7 +95,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         if self.app_page != AppPage::Terminal {
-            self.app_page = AppPage::Terminal;
+            self.set_app_page(AppPage::Terminal, ctx);
         }
         self.activate_terminal_tab(index, ctx);
         ctx.notify();

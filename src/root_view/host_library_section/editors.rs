@@ -30,6 +30,25 @@ impl RootView {
         })
     }
 
+    // 容器视图搜索框 editor：与 host_search_editor 同构，事件订阅在 RootView::new() 里挂。
+    pub(crate) fn create_container_search_editor(
+        ctx: &mut ViewContext<Self>,
+    ) -> warpui::ViewHandle<EditorView> {
+        ctx.add_typed_action_view(|ctx| {
+            let font_size = Appearance::as_ref(ctx).ui_font_size();
+            let options = SingleLineEditorOptions {
+                text: TextOptions {
+                    font_size_override: Some(font_size),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut editor = EditorView::single_line(options, ctx);
+            editor.set_placeholder_text(rust_i18n::t!("container_search_placeholder"), ctx);
+            editor
+        })
+    }
+
     pub(crate) fn create_host_rename_editor(
         ctx: &mut ViewContext<Self>,
     ) -> warpui::ViewHandle<EditorView> {
@@ -207,6 +226,30 @@ impl RootView {
                     .search_bar
                     .protocol_dropdown_open = false;
                 self.host_search_editor.update(ctx, |editor, ctx| {
+                    if !editor.buffer_text(ctx).is_empty() {
+                        editor.system_reset_buffer_text("", ctx);
+                    }
+                });
+                ctx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    pub(in crate::root_view) fn handle_container_search_editor_event(
+        &mut self,
+        event: &EditorEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        match event {
+            EditorEvent::Edited(_) => {
+                let query = self.container_search_editor.as_ref(ctx).buffer_text(ctx);
+                self.host_state.set_container_query(query);
+                ctx.notify();
+            }
+            EditorEvent::Escape => {
+                self.host_state.clear_container_query();
+                self.container_search_editor.update(ctx, |editor, ctx| {
                     if !editor.buffer_text(ctx).is_empty() {
                         editor.system_reset_buffer_text("", ctx);
                     }

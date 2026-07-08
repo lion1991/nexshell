@@ -39,6 +39,8 @@ const MAGIC: &str = "NEXSHELL_CONTAINER_V1";
 const COLLECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// 连续采集失败多少次才判定连接已死、重连。
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+/// action_error 横幅最短展示时长，避免被 5s 一帧的快照秒清。
+const ACTION_ERROR_MIN_DISPLAY: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContainerState {
@@ -181,18 +183,23 @@ pub fn merge_container_snapshot(
 pub enum ContainerOverviewEvent {
     Snapshot(ContainerSnapshot),
     Error(String),
+    /// 一次性操作（start/stop/restart）失败：只提示、不污染采集快照。
+    ActionError(String),
 }
 
 /// 渲染侧持有的 UI 状态包装（对齐 HostOverviewUiState 惯例）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContainerOverviewUiState {
     pub snapshot: ContainerSnapshot,
+    /// 最近一次容器操作失败信息+发生时刻。最短展示 ACTION_ERROR_MIN_DISPLAY，之后由下帧快照清除。
+    pub action_error: Option<(String, Instant)>,
 }
 
 impl ContainerOverviewUiState {
     pub fn waiting(host: impl Into<String>) -> Self {
         Self {
             snapshot: ContainerSnapshot::waiting(host),
+            action_error: None,
         }
     }
 
@@ -200,12 +207,22 @@ impl ContainerOverviewUiState {
         match event {
             ContainerOverviewEvent::Snapshot(snapshot) => {
                 self.snapshot = merge_container_snapshot(&self.snapshot, snapshot);
+                if self
+                    .action_error
+                    .as_ref()
+                    .is_some_and(|(_, at)| at.elapsed() >= ACTION_ERROR_MIN_DISPLAY)
+                {
+                    self.action_error = None;
+                }
             }
             ContainerOverviewEvent::Error(error) => {
                 if self.snapshot.host.trim().is_empty() {
                     self.snapshot.host = "未连接".to_string();
                 }
                 self.snapshot.status = ContainerCollectStatus::Error(error);
+            }
+            ContainerOverviewEvent::ActionError(error) => {
+                self.action_error = Some((error, Instant::now()));
             }
         }
     }

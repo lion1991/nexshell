@@ -139,37 +139,29 @@ pub fn render_group_nav(
 
     col.add_child(
         Container::new(search_box)
+            .with_margin_top(8.0)
             .with_margin_left(12.0)
             .with_margin_right(12.0)
-            .with_margin_bottom(4.0)
+            .with_margin_bottom(18.0)
             .finish(),
     );
 
     // 中段（分组 + 最近访问）单独滚动，防止分组多时把底部固定区顶出屏。
     let mut mid = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-    mid.add_child(
-        Container::new(
-            Text::new_inline(
-                rust_i18n::t!("host_group_nav").to_string(),
-                ui_font,
-                UI_FONT_SIZE_SMALL,
-            )
-            .with_color(hc.text_secondary)
-            .finish(),
-        )
-        .with_padding_left(16.0)
-        .with_padding_top(14.0)
-        .with_padding_bottom(6.0)
-        .finish(),
-    );
+    mid.add_child(render_section_title(
+        &rust_i18n::t!("host_group_nav"),
+        0.0,
+        ui_font,
+        hc,
+    ));
 
     for (index, group) in groups.iter().enumerate() {
         mid.add_child(render_group_item(group, index, states, ui_font, hc));
     }
 
     if !recent.is_empty() {
-        mid.add_child(render_section_title("最近访问", ui_font, hc));
+        mid.add_child(render_section_title("最近访问", 14.0, ui_font, hc));
         for (index, item) in recent.iter().enumerate() {
             mid.add_child(render_recent_item(item, index, states, ui_font, hc));
         }
@@ -383,6 +375,7 @@ fn group_marker(is_all: bool, group_id: &str, hc: &HostUiColors) -> Box<dyn Elem
 // 区块小标题，如"最近访问"（降级为 SMALL 字号、无分隔线）。
 fn render_section_title(
     label: &str,
+    top_pad: f32,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
@@ -392,7 +385,7 @@ fn render_section_title(
             .finish(),
     )
     .with_padding_left(16.0)
-    .with_padding_top(14.0)
+    .with_padding_top(top_pad)
     .with_padding_bottom(6.0)
     .finish()
 }
@@ -620,8 +613,7 @@ fn render_bottom_item(
             .finish(),
         )
         .with_border(
-            Border::top(if show_top_border { 1.0 } else { 0.0 })
-                .with_border_color(hc.sidebar_border),
+            Border::top(if show_top_border { 1.0 } else { 0.0 }).with_border_color(hc.card_border),
         )
         .finish()
     })
@@ -690,15 +682,15 @@ fn render_function_item(
                     .finish(),
             )
             .with_horizontal_padding(14.0)
-            .with_vertical_padding(12.0)
+            .with_vertical_padding(8.0)
             .with_background_color(bg)
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
             .finish(),
         )
-        .with_margin_top(12.0)
+        .with_margin_top(8.0)
         .with_margin_left(12.0)
         .with_margin_right(12.0)
-        .with_margin_bottom(8.0)
+        .with_margin_bottom(4.0)
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)

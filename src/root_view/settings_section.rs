@@ -100,7 +100,7 @@ impl RootView {
         &mut self,
         ctx: &mut ViewContext<Self>,
     ) {
-        self.app_page = AppPage::Settings;
+        self.set_app_page(AppPage::Settings, ctx);
         self.settings_tab_open = true;
         self.settings_view_state.borrow_mut().current_page = NexSettingsSection::Keybindings;
         self.settings_menu_open = false;
@@ -117,7 +117,7 @@ impl RootView {
     }
 
     pub(in crate::root_view) fn handle_show_settings(&mut self, ctx: &mut ViewContext<Self>) {
-        self.app_page = AppPage::Settings;
+        self.set_app_page(AppPage::Settings, ctx);
         self.settings_tab_open = true;
         self.settings_menu_open = false;
         self.settings_prewarmed.set(true);
@@ -127,7 +127,7 @@ impl RootView {
     pub(in crate::root_view) fn handle_close_settings_tab(&mut self, ctx: &mut ViewContext<Self>) {
         self.settings_tab_open = false;
         if self.app_page == AppPage::Settings {
-            self.app_page = AppPage::Terminal;
+            self.set_app_page(AppPage::Terminal, ctx);
         }
         ctx.notify();
     }

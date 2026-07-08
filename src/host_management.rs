@@ -365,6 +365,8 @@ pub enum HostClipboardOp {
 pub struct HostManagementState {
     pub snapshot: HostManagementSnapshot,
     pub query: String,
+    // 容器视图（Containers）按容器名搜索的独立查询词，与主机搜索 query 互不影响。
+    pub container_query: String,
     pub selected_group_id: Option<String>,
     pub selected_tags: BTreeSet<String>,
     pub protocol_filter: ProtocolFilter,
@@ -395,6 +397,7 @@ impl HostManagementState {
         Self {
             snapshot,
             query: String::new(),
+            container_query: String::new(),
             selected_group_id: None,
             selected_tags: BTreeSet::new(),
             protocol_filter: ProtocolFilter::All,
@@ -500,6 +503,14 @@ impl HostManagementState {
     pub fn clear_search(&mut self) {
         self.query.clear();
         self.retain_visible_selection();
+    }
+
+    pub fn set_container_query(&mut self, query: impl Into<String>) {
+        self.container_query = query.into();
+    }
+
+    pub fn clear_container_query(&mut self) {
+        self.container_query.clear();
     }
 
     pub fn select_group(&mut self, id: &str) {

@@ -34,6 +34,8 @@ pub struct ContainerCardStates {
     menu_button_states: RefCell<HashMap<String, MouseStateHandle>>,
     /// CPU 环 sweep 过渡（key = "{host_id}:{container_id}"）。
     pub gauge_anim: RefCell<nexshell::ui_anim::FloatTransitionMap<String>>,
+    /// 容器名搜索框 hover 态，供 render_search_input 用。
+    pub search_input_state: MouseStateHandle,
 }
 
 impl ContainerCardStates {
@@ -55,6 +57,7 @@ pub fn render_container_view(
     hosts: &[HostCardSnapshot],
     fleet: &ContainerFleet,
     states: &ContainerCardStates,
+    query: &str,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
@@ -81,18 +84,51 @@ pub fn render_container_view(
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-    for (index, host) in ssh_hosts.iter().enumerate() {
-        if index > 0 {
+    let needle = query.trim().to_lowercase();
+    let searching = !needle.is_empty();
+    let mut any_visible = false;
+    let mut any_settled = false;
+    for host in ssh_hosts.iter() {
+        let state = fleet.state(&host.id);
+        if let Some(ui) = state {
+            let snap = &ui.snapshot;
+            if snap.has_collected_data() || snap.status == ContainerCollectStatus::Ready {
+                any_settled = true;
+            }
+        }
+        // 搜索态：无匹配容器的主机整节隐藏（不管加载/错误/无 docker）；非搜索态走原隐藏判定。
+        let hidden = if searching {
+            !host_has_match(state, &needle)
+        } else {
+            host_section_hidden(state)
+        };
+        if hidden {
+            continue;
+        }
+        if any_visible {
             col.add_child(spacer_v(24.0));
         }
         col.add_child(render_host_section(
-            host,
-            fleet.state(&host.id),
-            states,
-            now,
-            ui_font,
-            hc,
+            host, state, states, now, &needle, searching, ui_font, hc,
         ));
+        any_visible = true;
+    }
+    if !any_visible {
+        if searching {
+            col.add_child(render_none_visible_placeholder_text(
+                rust_i18n::t!("container_search_no_match").to_string(),
+                ui_font,
+                hc,
+            ));
+        } else if any_settled {
+            // 全部隐藏时：仅在至少一台主机已有确定结论（真无容器/无 docker 等）时提示；
+            // 若都还在加载/连不上（无结论）则留空，不误显占位、也不显示加载过程。
+            col.add_child(render_none_visible_placeholder_text(
+                rust_i18n::t!("host_container_none_visible").to_string(),
+                ui_font,
+                hc,
+            ));
+        }
     }
 
     Container::new(col.finish())
@@ -102,12 +138,65 @@ pub fn render_container_view(
         .finish()
 }
 
+/// 该主机是否存在名称匹配 needle（已 lowercase）的容器；无状态（尚未采集）视为不匹配。
+fn host_has_match(state: Option<&ContainerOverviewUiState>, needle: &str) -> bool {
+    state.map_or(false, |ui| {
+        ui.snapshot
+            .containers
+            .iter()
+            .any(|c| c.name.to_lowercase().contains(needle))
+    })
+}
+
+/// 隐藏无意义的整节：从未采到数据的过渡/失败态（初次等待/重连采集中/连不上）、未装 docker、已就绪且无容器。
+/// 保留：有存量容器的瞬时错误（操作失败，has_collected_data 为真）、权限拒绝、其他错误、有容器。
+fn host_section_hidden(state: Option<&ContainerOverviewUiState>) -> bool {
+    let Some(ui) = state else { return false };
+    let snap = &ui.snapshot;
+    // 从未采到有效数据、且未落到 Ready 的态（Waiting/Collecting/连不上的 Error）一律隐藏——
+    // 重连的 Collecting 占位帧不再闪「加载中」；有存量容器的瞬时 Error 因 has_collected_data 为真而保留。
+    if !snap.has_collected_data() && snap.status != ContainerCollectStatus::Ready {
+        return true;
+    }
+    // 未装 docker
+    if matches!(snap.error, Some(ContainerProbeError::NoDocker)) {
+        return true;
+    }
+    // 已就绪且无容器
+    snap.containers.is_empty()
+        && snap.error.is_none()
+        && snap.status == ContainerCollectStatus::Ready
+}
+
+/// 全部主机节被隐藏时的居中弱提示，避免整页空白（文案外传：无结论留空 / 无匹配 / 无运行容器）。
+fn render_none_visible_placeholder_text(
+    text: String,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
+    Flex::column()
+        .with_main_axis_size(MainAxisSize::Min)
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_child(
+            Container::new(
+                Text::new_inline(text, ui_font, UI_FONT_SIZE)
+                    .with_color(hc.text_secondary)
+                    .finish(),
+            )
+            .with_padding_top(40.0)
+            .finish(),
+        )
+        .finish()
+}
+
 /// 单主机节：标题 + 容器双列网格 / 异常占位文案。
 fn render_host_section(
     host: &HostCardSnapshot,
     state: Option<&ContainerOverviewUiState>,
     states: &ContainerCardStates,
     now: Instant,
+    needle: &str,
+    searching: bool,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
@@ -121,8 +210,24 @@ fn render_host_section(
             .finish(),
     );
 
+    if let Some(err) = state
+        .and_then(|ui| ui.action_error.as_ref())
+        .map(|(e, _)| e)
+    {
+        section.add_child(render_action_error(err, ui_font, hc));
+    }
+
     section.add_child(match state {
-        Some(ui) => render_host_body(&host.id, &ui.snapshot, states, now, ui_font, hc),
+        Some(ui) => render_host_body(
+            &host.id,
+            &ui.snapshot,
+            states,
+            now,
+            needle,
+            searching,
+            ui_font,
+            hc,
+        ),
         None => render_placeholder(
             rust_i18n::t!("host_container_loading").to_string(),
             ui_font,
@@ -133,15 +238,42 @@ fn render_host_section(
     section.finish()
 }
 
+/// 容器操作失败提示：红色小字，独立于采集状态，不替换容器网格。
+fn render_action_error(err: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn Element> {
+    Container::new(
+        Text::new_inline(
+            format!("{}：{}", rust_i18n::t!("container_action_error"), err),
+            ui_font,
+            UI_FONT_SIZE_SMALL,
+        )
+        .with_color(hc.semantic.danger)
+        .finish(),
+    )
+    .with_horizontal_padding(4.0)
+    .with_margin_bottom(8.0)
+    .finish()
+}
+
 /// 按快照状态分派：连接错误 / docker 错误 / 加载中 / 空 / 容器网格。
+/// searching 为 true 时（该主机已确认有匹配容器）直接过滤渲染，跳过 loading/error/empty 分支。
 fn render_host_body(
     host_id: &str,
     snapshot: &nexshell::container_overview::ContainerSnapshot,
     states: &ContainerCardStates,
     now: Instant,
+    needle: &str,
+    searching: bool,
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    if searching {
+        let matched: Vec<&ContainerInfo> = snapshot
+            .containers
+            .iter()
+            .filter(|c| c.name.to_lowercase().contains(needle))
+            .collect();
+        return render_container_grid(host_id, &matched, states, now, ui_font, hc);
+    }
     if let ContainerCollectStatus::Error(text) = &snapshot.status {
         let msg = format!(
             "{}：{}",
@@ -170,7 +302,8 @@ fn render_host_body(
         };
         return render_placeholder(text, ui_font, hc);
     }
-    render_container_grid(host_id, &snapshot.containers, states, now, ui_font, hc)
+    let all: Vec<&ContainerInfo> = snapshot.containers.iter().collect();
+    render_container_grid(host_id, &all, states, now, ui_font, hc)
 }
 
 fn render_placeholder(
@@ -188,10 +321,10 @@ fn render_placeholder(
     .finish()
 }
 
-/// 双列容器卡片网格，仿 host 卡片网格换行逻辑。
+/// 双列容器卡片网格，仿 host 卡片网格换行逻辑。containers 为引用切片，搜索态传过滤子集时免 clone。
 fn render_container_grid(
     host_id: &str,
-    containers: &[ContainerInfo],
+    containers: &[&ContainerInfo],
     states: &ContainerCardStates,
     now: Instant,
     ui_font: fonts::FamilyId,
@@ -217,7 +350,7 @@ fn render_container_grid(
             row.add_child(
                 Expanded::new(
                     1.0,
-                    render_container_card(host_id, &containers[index], states, now, ui_font, hc),
+                    render_container_card(host_id, containers[index], states, now, ui_font, hc),
                 )
                 .finish(),
             );

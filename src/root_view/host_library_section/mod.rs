@@ -41,6 +41,7 @@ impl RootView {
             self.sidebar_open,
             &self.host_status_fleet,
             &self.container_fleet,
+            &self.container_search_editor,
             &self.host_keys,
             self.host_state.selected_key_id.as_deref(),
             self.host_selected_key_public.as_deref(),

@@ -110,10 +110,14 @@ host_container_probe_error: "Probe failed"
 host_container_connect_error: "Connection failed"
 host_container_loading: "Loading…"
 host_container_empty: "No containers"
+host_container_none_visible: "No hosts with running containers"
 host_container_menu_start: "Start"
 host_container_menu_stop: "Stop"
 host_container_menu_restart: "Restart"
 host_container_menu_logs: "Logs"
+container_search_placeholder: "Search containers…"
+container_search_no_match: "No matching containers"
+container_action_error: "Operation failed"
 
 # === Sidebar ===
 sidebar: Sidebar

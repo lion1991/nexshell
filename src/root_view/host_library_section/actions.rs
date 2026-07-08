@@ -6,7 +6,7 @@
 // 操作实现散在同 section 的 operations / transfer / edit_window / editors，跨文件 self.xxx() 调用。
 
 use crate::host_edit_window::HostEditDraft;
-use crate::{RootView, TerminalSessionKind, DEFAULT_COLS, DEFAULT_ROWS};
+use crate::{AppPage, RootView, TerminalSessionKind, DEFAULT_COLS, DEFAULT_ROWS};
 use nexshell::host_management::{
     HostClipboardOp, HostConnectionConfig, HostViewMode, ProtocolFilter,
 };
@@ -97,7 +97,7 @@ impl RootView {
             move |view, result, ctx| {
                 if let Err(error) = result {
                     view.container_fleet
-                        .apply_event(&error_host_id, ContainerOverviewEvent::Error(error));
+                        .apply_event(&error_host_id, ContainerOverviewEvent::ActionError(error));
                     ctx.notify();
                 }
             },
@@ -192,6 +192,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.host_state.select_group(&group_id);
+        self.sync_container_fleet(ctx);
         ctx.notify();
     }
 
@@ -201,6 +202,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.host_state.toggle_tag(&tag);
+        self.sync_container_fleet(ctx);
         ctx.notify();
     }
 
@@ -224,6 +226,7 @@ impl RootView {
             .borrow_mut()
             .search_bar
             .protocol_dropdown_open = false;
+        self.sync_container_fleet(ctx);
         ctx.notify();
     }
 
@@ -237,17 +240,20 @@ impl RootView {
         self.host_state.copy_cmd_expanded = false;
         self.host_state.key_delete_confirming = false;
         self.host_key_edit_target = None;
+        // 切视图清空容器名搜索，避免再进 Containers 视图时残留上次查询词。
+        self.host_state.clear_container_query();
+        self.container_search_editor.update(ctx, |editor, ctx| {
+            if !editor.buffer_text(ctx).is_empty() {
+                editor.system_reset_buffer_text("", ctx);
+            }
+        });
         // 状态总览 / 容器监控互斥，同一主机不叠加两条监控连接。
         if mode == HostViewMode::Status {
             self.start_host_status_fleet(ctx);
         } else {
             self.host_status_fleet.stop_all();
         }
-        if mode == HostViewMode::Containers {
-            self.start_container_fleet(ctx);
-        } else {
-            self.container_fleet.stop_all();
-        }
+        self.sync_container_fleet(ctx);
         if mode == HostViewMode::Keys {
             self.reload_host_keys();
         }
@@ -272,6 +278,17 @@ impl RootView {
                 },
                 |_, _| {},
             );
+        }
+    }
+
+    /// 按当前页面状态同步容器 fleet：在容器视图则启动/复活采集，否则暂停（留态、停通信）。
+    pub(in crate::root_view) fn sync_container_fleet(&mut self, ctx: &mut ViewContext<Self>) {
+        let should_run = self.app_page == AppPage::HostManagement
+            && self.host_state.view_mode == HostViewMode::Containers;
+        if should_run {
+            self.start_container_fleet(ctx);
+        } else {
+            self.container_fleet.pause_all();
         }
     }
 

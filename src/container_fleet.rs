@@ -33,13 +33,21 @@ impl ContainerFleet {
         Self::default()
     }
 
-    /// 对每台主机起监控（已在跑的跳过，幂等）。SSH 协议过滤由调用方负责（对齐 HostOverviewFleet）。
+    /// 对每台主机起监控。已在跑（handle 活着）的跳过；暂停态（ui 在、handle 空）复活时保留上次快照
+    /// 只重挂 handle，不重置 ui，避免重连闪「加载中」。SSH 协议过滤由调用方负责（对齐 HostOverviewFleet）。
+    /// 顺带清理已不在当前列表的主机（删除/筛选/协议变化），避免暂停态 entry 残留。
     /// 返回新起的事件流，由调用方消费后回调 `apply_event`。
     pub fn start(&mut self, hosts: &[(String, HostConnectionConfig)]) -> Vec<FleetStream> {
+        let alive: std::collections::HashSet<&str> =
+            hosts.iter().map(|(id, _)| id.as_str()).collect();
+        self.entries.retain(|id, _| alive.contains(id.as_str()));
+
         let mut streams = Vec::new();
         for (host_id, config) in hosts {
-            if self.entries.contains_key(host_id) {
-                continue;
+            if let Some(entry) = self.entries.get(host_id) {
+                if entry._handle.is_some() {
+                    continue;
+                }
             }
             let display = config.host.clone();
             match spawn_container_monitor(
@@ -47,21 +55,36 @@ impl ContainerFleet {
                 REFRESH_INTERVAL,
             ) {
                 Ok((handle, receiver)) => {
-                    self.entries.insert(
-                        host_id.clone(),
-                        FleetEntry {
-                            ui: ContainerOverviewUiState::waiting(display),
-                            _handle: Some(handle),
-                        },
-                    );
+                    match self.entries.get_mut(host_id) {
+                        // 暂停态复活：保留 ui（上次快照），只重挂 handle。
+                        Some(entry) => entry._handle = Some(handle),
+                        // 新主机：初始 waiting。
+                        None => {
+                            self.entries.insert(
+                                host_id.clone(),
+                                FleetEntry {
+                                    ui: ContainerOverviewUiState::waiting(display),
+                                    _handle: Some(handle),
+                                },
+                            );
+                        }
+                    }
                     streams.push((host_id.clone(), receiver));
                 }
                 Err(error) => {
-                    // 起线程就失败：直接落错状态，不交事件流。
-                    let mut ui = ContainerOverviewUiState::waiting(display);
-                    ui.apply_event(ContainerOverviewEvent::Error(error));
-                    self.entries
-                        .insert(host_id.clone(), FleetEntry { ui, _handle: None });
+                    // 起线程失败：已有 entry 保留其 ui 再叠加 Error；新主机 waiting+Error。
+                    match self.entries.get_mut(host_id) {
+                        Some(entry) => {
+                            entry._handle = None;
+                            entry.ui.apply_event(ContainerOverviewEvent::Error(error));
+                        }
+                        None => {
+                            let mut ui = ContainerOverviewUiState::waiting(display);
+                            ui.apply_event(ContainerOverviewEvent::Error(error));
+                            self.entries
+                                .insert(host_id.clone(), FleetEntry { ui, _handle: None });
+                        }
+                    }
                 }
             }
         }
@@ -83,6 +106,14 @@ impl ContainerFleet {
     /// 停止全部监控并清空（Drop handle 即 stop）。
     pub fn stop_all(&mut self) {
         self.entries.clear();
+    }
+
+    /// 暂停全部采集：drop handle 停线程/释放连接，但保留 ui 快照，供切回容器视图时立即渲染。
+    /// 与 stop_all（清空 entries）区别：pause 留态、可复活。
+    pub fn pause_all(&mut self) {
+        for entry in self.entries.values_mut() {
+            entry._handle = None;
+        }
     }
 
     pub fn is_running(&self) -> bool {

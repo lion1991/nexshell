@@ -885,7 +885,33 @@ fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Arc<At
     );
 }
 
+/// 提高进程可打开文件描述符上限：每台主机监控要占 tokio runtime + SSH 连接的 fd，
+/// macOS GUI app 默认软上限很低（~256），多主机时会 EMFILE。启动期尽量提到 hard limit。
+#[cfg(unix)]
+fn raise_open_file_limit() {
+    unsafe {
+        let mut rl: libc::rlimit = std::mem::zeroed();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) != 0 {
+            return;
+        }
+        // macOS 的 hard 可能是 RLIM_INFINITY，但实际受 kern.maxfilesperproc 限制，
+        // 故取一个保守上限；否则用 min(desired, hard)。best-effort，失败忽略。
+        const DESIRED: libc::rlim_t = 10240;
+        let target = if rl.rlim_max == libc::RLIM_INFINITY {
+            DESIRED
+        } else {
+            DESIRED.min(rl.rlim_max)
+        };
+        if target > rl.rlim_cur {
+            rl.rlim_cur = target;
+            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &rl);
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    #[cfg(unix)]
+    raise_open_file_limit();
     // 设了 RUST_LOG 才接管 tracing（看 IronRDP 内部日志，如 RUST_LOG=ironrdp_rdpsnd=debug）。
     if std::env::var_os("RUST_LOG").is_some() {
         use tracing_subscriber::EnvFilter;

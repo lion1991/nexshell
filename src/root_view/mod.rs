@@ -144,6 +144,8 @@ pub(crate) struct RootView {
     // 最近访问主机缓存，连接 / 进入主机库时刷新
     host_recent: Vec<RecentHostSnapshot>,
     host_search_editor: warpui::ViewHandle<EditorView>,
+    // 容器视图（Containers）按容器名搜索的独立 editor，与 host_search_editor 互不干扰。
+    container_search_editor: warpui::ViewHandle<EditorView>,
     tab_rename_editor: warpui::ViewHandle<EditorView>,
     file_panel_input_editor: warpui::ViewHandle<EditorView>,
     file_panel_input_intent: Option<FilePanelInputIntent>,
@@ -387,6 +389,13 @@ impl RootView {
         ctx.subscribe_to_view(&host_search_editor, |me, _, event: &EditorEvent, ctx| {
             me.handle_host_search_editor_event(event, ctx);
         });
+        let container_search_editor = Self::create_container_search_editor(ctx);
+        ctx.subscribe_to_view(
+            &container_search_editor,
+            |me, _, event: &EditorEvent, ctx| {
+                me.handle_container_search_editor_event(event, ctx);
+            },
+        );
         let tab_rename_editor = Self::create_tab_rename_editor(ctx);
         let file_panel_input_editor = Self::create_file_panel_input_editor(ctx);
         let host_rename_editor = Self::create_host_rename_editor(ctx);
@@ -497,6 +506,7 @@ impl RootView {
             host_selected_key_public: None,
             host_recent: Vec::new(),
             host_search_editor,
+            container_search_editor,
             tab_rename_editor,
             file_panel_input_editor,
             file_panel_input_intent: None,
@@ -1222,6 +1232,16 @@ impl RootView {
         }
         self.terminal_tabs[index].host_overview.apply_event(event);
         ctx.notify();
+    }
+
+    /// app_page 统一入口：改页后联动容器 fleet（离开容器页即暂停采集，回到即复活刷新）。
+    pub(in crate::root_view) fn set_app_page(
+        &mut self,
+        page: AppPage,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.app_page = page;
+        self.sync_container_fleet(ctx);
     }
 
     fn sync_host_overview_monitor(&mut self, ctx: &mut ViewContext<Self>) {
@@ -2795,7 +2815,7 @@ impl RootView {
         self.terminal = terminal;
         self.new_session_menu_open = false;
         self.settings_menu_open = false;
-        self.app_page = AppPage::Terminal;
+        self.set_app_page(AppPage::Terminal, ctx);
         ctx.focus_self();
         self.reset_active_terminal_view_state();
         self.sync_terminal_window_title(Some(&fallback_label), ctx);
@@ -2861,7 +2881,7 @@ impl RootView {
         let title = tab.window_title();
         self.active_tab_index = index;
         self.terminal = terminal;
-        self.app_page = AppPage::Terminal;
+        self.set_app_page(AppPage::Terminal, ctx);
         ctx.focus_self();
         if let Ok(mut layout) = self.terminal_ime_layout.lock() {
             *layout = None;
@@ -2878,7 +2898,7 @@ impl RootView {
         if self.terminal_tabs.is_empty() {
             self.active_tab_index = 0;
             self.terminal = inactive_terminal_runtime();
-            self.app_page = AppPage::HostManagement;
+            self.set_app_page(AppPage::HostManagement, ctx);
             self.reload_host_recent();
             self.sync_terminal_window_title(None, ctx);
             self.sync_host_overview_monitor(ctx);
@@ -2896,7 +2916,7 @@ impl RootView {
             .unwrap_or_else(|| Arc::clone(&active_tab.terminal));
         let title = active_tab.window_title();
         self.terminal = terminal;
-        self.app_page = AppPage::Terminal;
+        self.set_app_page(AppPage::Terminal, ctx);
         ctx.focus_self();
         self.reset_active_terminal_view_state();
         self.sync_terminal_window_title(Some(&title), ctx);
@@ -2956,7 +2976,7 @@ impl RootView {
         if self.terminal_tabs.is_empty() {
             self.active_tab_index = 0;
             self.terminal = inactive_terminal_runtime();
-            self.app_page = AppPage::HostManagement;
+            self.set_app_page(AppPage::HostManagement, ctx);
             self.reload_host_recent();
             self.sync_terminal_window_title(None, ctx);
             return;

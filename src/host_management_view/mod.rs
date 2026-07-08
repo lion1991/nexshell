@@ -70,6 +70,7 @@ pub fn render_host_management_panel(
     sidebar_open: bool,
     fleet: &HostOverviewFleet,
     container_fleet: &ContainerFleet,
+    container_search_editor: &ViewHandle<EditorView>,
     keys: &[(SshKeyRecord, usize)],
     selected_key_id: Option<&str>,
     selected_key_public: Option<&str>,
@@ -124,6 +125,46 @@ pub fn render_host_management_panel(
         Container::new(render_empty_state(ui_font, hc))
             .with_background_color(hc.panel_bg)
             .finish()
+    } else if state.view_mode == HostViewMode::Containers {
+        // 容器视图常驻搜索栏：落在滚动区外，不随列表滚动。
+        let container_search = search_bar::render_search_input(
+            &view_states.container_cards.search_input_state,
+            container_search_editor,
+            appearance,
+            hc,
+        );
+        let search_row = Container::new(container_search)
+            .with_horizontal_padding(24.0)
+            .with_vertical_padding(12.0)
+            .finish();
+        let list = render_container_view(
+            &filtered,
+            container_fleet,
+            &view_states.container_cards,
+            &state.container_query,
+            ui_font,
+            hc,
+        );
+
+        let scrollbar_thumb = Fill::Solid(hc.scrollbar_thumb);
+        let scrollbar_thumb_active = Fill::Solid(hc.scrollbar_thumb_active);
+        let scrollable = ClippedScrollable::vertical(
+            view_states.scroll_state.clone(),
+            list,
+            ScrollbarWidth::Custom(6.0),
+            scrollbar_thumb,
+            scrollbar_thumb_active,
+            Fill::None,
+        )
+        .with_overlayed_scrollbar()
+        .finish();
+
+        Flex::column()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(search_row)
+            .with_child(Expanded::new(1.0, scrollable).finish())
+            .finish()
     } else {
         let card_grid = match state.view_mode {
             HostViewMode::Grid => render_card_grid(
@@ -149,13 +190,8 @@ pub fn render_host_management_panel(
             HostViewMode::Status => {
                 render_status_view(&filtered, fleet, &view_states.host_cards, ui_font, hc)
             }
-            HostViewMode::Containers => render_container_view(
-                &filtered,
-                container_fleet,
-                &view_states.container_cards,
-                ui_font,
-                hc,
-            ),
+            // Containers 已在上面分支单独处理，此处不可达；保留占位只为维持穷尽匹配（同 Keys）。
+            HostViewMode::Containers => warpui::elements::Empty::new().finish(),
             HostViewMode::Keys => warpui::elements::Empty::new().finish(),
         };
 
