@@ -844,7 +844,7 @@ impl Default for TerminalCellStyleSnapshot {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct TerminalCellFlags(u16);
+pub struct TerminalCellFlags(u32);
 
 impl TerminalCellFlags {
     pub const INVERSE: Self = Self(0b0000_0000_0000_0001);
@@ -865,15 +865,30 @@ impl TerminalCellFlags {
     pub const SELECTED: Self = Self(0b0010_0000_0000_0000);
     pub const FIND_MATCH: Self = Self(0b0100_0000_0000_0000);
     pub const FIND_FOCUS: Self = Self(0b1000_0000_0000_0000);
-    pub const CELL_DECORATIONS: Self =
-        Self(Self::UNDERLINE.0 | Self::STRIKEOUT.0 | Self::DOUBLE_UNDERLINE.0);
-    pub const ALL_UNDERLINES: Self = Self(Self::UNDERLINE.0 | Self::DOUBLE_UNDERLINE.0);
+    pub const UNDERCURL: Self = Self(0b0001_0000_0000_0000_0000);
+    pub const DOTTED_UNDERLINE: Self = Self(0b0010_0000_0000_0000_0000);
+    pub const DASHED_UNDERLINE: Self = Self(0b0100_0000_0000_0000_0000);
+    pub const CELL_DECORATIONS: Self = Self(
+        Self::UNDERLINE.0
+            | Self::STRIKEOUT.0
+            | Self::DOUBLE_UNDERLINE.0
+            | Self::UNDERCURL.0
+            | Self::DOTTED_UNDERLINE.0
+            | Self::DASHED_UNDERLINE.0,
+    );
+    pub const ALL_UNDERLINES: Self = Self(
+        Self::UNDERLINE.0
+            | Self::DOUBLE_UNDERLINE.0
+            | Self::UNDERCURL.0
+            | Self::DOTTED_UNDERLINE.0
+            | Self::DASHED_UNDERLINE.0,
+    );
 
     pub const fn empty() -> Self {
         Self(0)
     }
 
-    pub const fn bits(self) -> u16 {
+    pub const fn bits(self) -> u32 {
         self.0
     }
 
@@ -947,6 +962,18 @@ impl TerminalGridCellSnapshot {
         self.flags.contains(TerminalCellFlags::DOUBLE_UNDERLINE)
     }
 
+    pub fn undercurl(&self) -> bool {
+        self.flags.contains(TerminalCellFlags::UNDERCURL)
+    }
+
+    pub fn dotted_underline(&self) -> bool {
+        self.flags.contains(TerminalCellFlags::DOTTED_UNDERLINE)
+    }
+
+    pub fn dashed_underline(&self) -> bool {
+        self.flags.contains(TerminalCellFlags::DASHED_UNDERLINE)
+    }
+
     pub fn strikeout(&self) -> bool {
         self.flags.contains(TerminalCellFlags::STRIKEOUT)
     }
@@ -1002,6 +1029,9 @@ pub struct TerminalRenderCell {
     pub italic: bool,
     pub underline: bool,
     pub double_underline: bool,
+    pub undercurl: bool,
+    pub dotted_underline: bool,
+    pub dashed_underline: bool,
     pub strikeout: bool,
     pub hidden: bool,
     pub find_match: bool,
@@ -1033,6 +1063,9 @@ pub struct TerminalRenderRun {
     pub italic: bool,
     pub underline: bool,
     pub double_underline: bool,
+    pub undercurl: bool,
+    pub dotted_underline: bool,
+    pub dashed_underline: bool,
     pub strikeout: bool,
     pub hidden: bool,
     pub find_match: bool,
@@ -1109,6 +1142,9 @@ pub fn terminal_render_rows(
                         italic: cell.italic(),
                         underline: cell.underline() || cell.hyperlink.is_some(),
                         double_underline: cell.double_underline(),
+                        undercurl: cell.undercurl(),
+                        dotted_underline: cell.dotted_underline(),
+                        dashed_underline: cell.dashed_underline(),
                         strikeout: cell.strikeout(),
                         hidden: cell.hidden(),
                         find_match: cell.find_match(),
@@ -1161,6 +1197,9 @@ fn coalesce_render_runs(cells: Vec<TerminalRenderCell>) -> Vec<TerminalRenderRun
                 italic: cell.italic,
                 underline: cell.underline,
                 double_underline: cell.double_underline,
+                undercurl: cell.undercurl,
+                dotted_underline: cell.dotted_underline,
+                dashed_underline: cell.dashed_underline,
                 strikeout: cell.strikeout,
                 hidden: cell.hidden,
                 find_match: cell.find_match,
@@ -1200,6 +1239,9 @@ fn terminal_render_run_from_cell(cell: TerminalRenderCell) -> TerminalRenderRun 
         italic: cell.italic,
         underline: cell.underline,
         double_underline: cell.double_underline,
+        undercurl: cell.undercurl,
+        dotted_underline: cell.dotted_underline,
+        dashed_underline: cell.dashed_underline,
         strikeout: cell.strikeout,
         hidden: cell.hidden,
         find_match: cell.find_match,
@@ -1220,6 +1262,9 @@ fn terminal_run_can_merge_cell(run: &TerminalRenderRun, cell: &TerminalRenderCel
         && run.italic == cell.italic
         && run.underline == cell.underline
         && run.double_underline == cell.double_underline
+        && run.undercurl == cell.undercurl
+        && run.dotted_underline == cell.dotted_underline
+        && run.dashed_underline == cell.dashed_underline
         && run.strikeout == cell.strikeout
         && run.hidden == cell.hidden
         && run.find_match == cell.find_match
@@ -1537,7 +1582,12 @@ impl TerminalGridCore {
                     || cell.flags.contains(Flags::DIM) != cc.dim()
                     || cell.flags.contains(Flags::HIDDEN) != cc.hidden()
                     || cell.flags.contains(Flags::ITALIC) != cc.italic()
-                    || cell.flags.intersects(Flags::ALL_UNDERLINES) != cc.underline()
+                    || cell.flags.contains(Flags::UNDERLINE)
+                        != cc.flags.contains(TerminalCellFlags::UNDERLINE)
+                    || cell.flags.contains(Flags::DOUBLE_UNDERLINE) != cc.double_underline()
+                    || cell.flags.contains(Flags::UNDERCURL) != cc.undercurl()
+                    || cell.flags.contains(Flags::DOTTED_UNDERLINE) != cc.dotted_underline()
+                    || cell.flags.contains(Flags::DASHED_UNDERLINE) != cc.dashed_underline()
                     || cell.flags.contains(Flags::STRIKEOUT) != cc.strikeout()
                 {
                     changed = true;
@@ -2024,11 +2074,23 @@ impl TerminalGridCore {
                 );
                 flags.set(
                     TerminalCellFlags::UNDERLINE,
-                    cell.flags.intersects(Flags::ALL_UNDERLINES),
+                    cell.flags.contains(Flags::UNDERLINE),
                 );
                 flags.set(
                     TerminalCellFlags::DOUBLE_UNDERLINE,
                     cell.flags.contains(Flags::DOUBLE_UNDERLINE),
+                );
+                flags.set(
+                    TerminalCellFlags::UNDERCURL,
+                    cell.flags.contains(Flags::UNDERCURL),
+                );
+                flags.set(
+                    TerminalCellFlags::DOTTED_UNDERLINE,
+                    cell.flags.contains(Flags::DOTTED_UNDERLINE),
+                );
+                flags.set(
+                    TerminalCellFlags::DASHED_UNDERLINE,
+                    cell.flags.contains(Flags::DASHED_UNDERLINE),
                 );
                 flags.set(
                     TerminalCellFlags::STRIKEOUT,

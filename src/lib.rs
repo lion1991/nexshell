@@ -1251,7 +1251,7 @@ Inter-|   Receive                                                |  Transmit
     fn terminal_runtime_grid_cell_snapshot_uses_compact_flags() {
         assert_eq!(
             std::mem::size_of::<terminal_runtime::TerminalCellFlags>(),
-            2
+            4
         );
 
         let mut grid = terminal_runtime::TerminalGridCore::new(8, 1, 100);
@@ -1437,6 +1437,29 @@ Inter-|   Receive                                                |  Transmit
         assert!(snapshot.lines[0].cells[1].double_underline());
         assert!(rows[0].cells[0].strikeout);
         assert!(rows[0].cells[1].double_underline);
+    }
+
+    #[test]
+    fn terminal_runtime_render_rows_preserve_undercurl_dotted_dashed_underline() {
+        let mut grid = terminal_runtime::TerminalGridCore::new(8, 1, 100);
+
+        grid.process_output(b"\x1b[4:3mC\x1b[0m\x1b[4:4mD\x1b[0m\x1b[4:5mA\x1b[0m");
+        let snapshot = grid.snapshot(&[], None);
+        let rows = terminal_runtime::terminal_render_rows(
+            &snapshot,
+            &terminal_runtime::TerminalPalette::default(),
+        );
+
+        assert!(snapshot.lines[0].cells[0].undercurl());
+        assert!(!snapshot.lines[0].cells[0].dotted_underline());
+        assert!(snapshot.lines[0].cells[1].dotted_underline());
+        assert!(!snapshot.lines[0].cells[1].undercurl());
+        assert!(snapshot.lines[0].cells[2].dashed_underline());
+
+        assert!(rows[0].cells[0].undercurl);
+        assert!(rows[0].cells[0].underline);
+        assert!(rows[0].cells[1].dotted_underline);
+        assert!(rows[0].cells[2].dashed_underline);
     }
 
     #[test]

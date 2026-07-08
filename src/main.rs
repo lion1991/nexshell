@@ -24,6 +24,7 @@ mod throttle;
 mod title_bar_chrome;
 mod ui_colors;
 mod ui_settings;
+mod underline_decor;
 mod warp_dropdown;
 mod warp_dropdown_view;
 mod warp_filterable_dropdown;

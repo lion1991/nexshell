@@ -18,6 +18,7 @@ use nexshell::pane_tree::DraggedBorder;
 use warp_util::path::ShellFamily;
 
 use crate::external_editor::EditorChoice;
+use crate::underline_decor;
 use warpui_core::{
     clipboard_utils,
     elements::{
@@ -82,6 +83,37 @@ impl TerminalImeLayout {
 // revision 变了才 `ctx.notify()`。dispatch_event 只在自己处理事件后立刻
 // `ctx.notify()`，确保用户输入立即上屏。
 
+/// 下划线样式（SGR 4:x）：None/Single/Double 是直线矩形，Curl/Dotted/Dashed
+/// 走 `underline_decor` 几何模块。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum UnderlineKind {
+    #[default]
+    None,
+    Single,
+    Double,
+    Curl,
+    Dotted,
+    Dashed,
+}
+
+/// 快照 cell 的下划线/删除线访问器 → `UnderlineKind`：优先具体样式，
+/// hyperlink 仅在无其他样式时兜底为 Single。
+fn grid_cell_underline_kind(cell: &TerminalGridCellSnapshot) -> UnderlineKind {
+    if cell.double_underline() {
+        UnderlineKind::Double
+    } else if cell.undercurl() {
+        UnderlineKind::Curl
+    } else if cell.dotted_underline() {
+        UnderlineKind::Dotted
+    } else if cell.dashed_underline() {
+        UnderlineKind::Dashed
+    } else if cell.underline() || cell.hyperlink.is_some() {
+        UnderlineKind::Single
+    } else {
+        UnderlineKind::None
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct GridCell {
@@ -92,8 +124,7 @@ pub struct GridCell {
     pub underline_color: Option<ColorU>,
     pub bold: bool,
     pub italic: bool,
-    pub underline: bool,
-    pub double_underline: bool,
+    pub underline: UnderlineKind,
     pub strikeout: bool,
     pub wide_spacer: bool,
     pub hyperlink: Option<Arc<str>>,
@@ -109,8 +140,7 @@ impl GridCell {
             underline_color: None,
             bold: false,
             italic: false,
-            underline: false,
-            double_underline: false,
+            underline: UnderlineKind::None,
             strikeout: false,
             wide_spacer: false,
             hyperlink: None,
@@ -214,8 +244,7 @@ impl GridSnapshot {
                         .map(|c| u32_to_color(resolve_terminal_color(c, palette))),
                     bold: cell.bold(),
                     italic: cell.italic(),
-                    underline: cell.underline() || cell.hyperlink.is_some(),
-                    double_underline: cell.double_underline(),
+                    underline: grid_cell_underline_kind(cell),
                     strikeout: cell.strikeout(),
                     wide_spacer: cell.wide_spacer(),
                     hyperlink,
@@ -267,8 +296,7 @@ struct RenderCell<'a> {
     underline_color: Option<ColorU>,
     bold: bool,
     italic: bool,
-    underline: bool,
-    double_underline: bool,
+    underline: UnderlineKind,
     strikeout: bool,
     wide_spacer: bool,
     hyperlink: Option<&'a str>,
@@ -358,7 +386,6 @@ impl TerminalGridAccess for GridSnapshot {
             bold: cell.bold,
             italic: cell.italic,
             underline: cell.underline,
-            double_underline: cell.double_underline,
             strikeout: cell.strikeout,
             wide_spacer: cell.wide_spacer,
             hyperlink: cell.hyperlink.as_deref(),
@@ -489,8 +516,7 @@ fn runtime_render_cell<'a>(
             .map(|color| u32_to_color(resolve_terminal_color(color, palette))),
         bold: cell.bold(),
         italic: cell.italic(),
-        underline: cell.underline() || cell.hyperlink.is_some(),
-        double_underline: cell.double_underline(),
+        underline: grid_cell_underline_kind(cell),
         strikeout: cell.strikeout(),
         wide_spacer: cell.wide_spacer(),
         hyperlink: cell.hyperlink.as_deref(),
@@ -667,6 +693,19 @@ impl DecorationRect {
             origin + Vector2F::new(self.x, self.y),
             Vector2F::new(self.width, self.height),
         )
+    }
+}
+
+/// undercurl 装饰：非轴对齐折线段，走 `scene.draw_quad`（DecorationRect 装不下）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DecorationQuad {
+    corners: [Vector2F; 4],
+    color: ColorU,
+}
+
+impl DecorationQuad {
+    fn to_scene(self, origin: Vector2F) -> ([Vector2F; 4], [ColorU; 4]) {
+        (self.corners.map(|c| c + origin), [self.color; 4])
     }
 }
 
@@ -2168,42 +2207,146 @@ fn terminal_background_rects(
     rects
 }
 
+fn decoration_thickness(cell_w: f32) -> f32 {
+    0.15 * cell_w.round().max(1.0)
+}
+
+/// 同一行内从 `start_col` 起连续同色同 `kind` 的 cell 数（用于 dashed/dotted/curl
+/// 的相位连续排布，见 `underline_decor`）。
+fn decoration_run_cols(
+    snapshot: &impl TerminalGridAccess,
+    row: usize,
+    start_col: usize,
+    kind: UnderlineKind,
+    color: ColorU,
+) -> usize {
+    let mut end = start_col + 1;
+    while end < snapshot.cols() {
+        let Some(next) = snapshot.cell(row, end) else {
+            break;
+        };
+        if next.underline != kind || next.underline_color.unwrap_or(next.fg) != color {
+            break;
+        }
+        end += 1;
+    }
+    end - start_col
+}
+
 fn terminal_cell_decoration_rects(
     snapshot: &impl TerminalGridAccess,
     cell_metrics: CellMetrics,
 ) -> Vec<DecorationRect> {
     let cell_w = cell_metrics.width.max(1.0);
     let cell_h = cell_metrics.height.max(1.0);
-    let thickness = 0.15 * cell_w.round().max(1.0);
+    let thickness = decoration_thickness(cell_w);
     let mut rects = Vec::new();
 
     for row in 0..snapshot.rows() {
-        for col in 0..snapshot.cols() {
+        let mut col = 0;
+        while col < snapshot.cols() {
             let Some(cell) = snapshot.cell(row, col) else {
+                col += 1;
                 continue;
             };
 
-            let (height, y) = if cell.double_underline {
-                (thickness * 2.0, cell_h - thickness * 2.0)
-            } else if cell.underline || cell.hyperlink.is_some() {
-                (thickness, cell_h - thickness)
-            } else if cell.strikeout {
-                (thickness, cell_h / 2.0 - thickness)
-            } else {
-                continue;
-            };
-
-            rects.push(DecorationRect::new(
-                col as f32 * cell_w,
-                row as f32 * cell_h + y,
-                cell_w,
-                height,
-                cell.underline_color.unwrap_or(cell.fg),
-            ));
+            match cell.underline {
+                UnderlineKind::Double => {
+                    rects.push(DecorationRect::new(
+                        col as f32 * cell_w,
+                        row as f32 * cell_h + (cell_h - thickness * 2.0),
+                        cell_w,
+                        thickness * 2.0,
+                        cell.underline_color.unwrap_or(cell.fg),
+                    ));
+                    col += 1;
+                }
+                UnderlineKind::Single => {
+                    rects.push(DecorationRect::new(
+                        col as f32 * cell_w,
+                        row as f32 * cell_h + (cell_h - thickness),
+                        cell_w,
+                        thickness,
+                        cell.underline_color.unwrap_or(cell.fg),
+                    ));
+                    col += 1;
+                }
+                UnderlineKind::Dashed | UnderlineKind::Dotted => {
+                    let color = cell.underline_color.unwrap_or(cell.fg);
+                    let run_cols = decoration_run_cols(snapshot, row, col, cell.underline, color);
+                    let segs = if cell.underline == UnderlineKind::Dashed {
+                        underline_decor::dashed_rects(col, run_cols, cell_w, cell_h, thickness)
+                    } else {
+                        underline_decor::dotted_rects(col, run_cols, cell_w, cell_h, thickness)
+                    };
+                    for seg in segs {
+                        rects.push(DecorationRect::new(
+                            seg.x,
+                            row as f32 * cell_h + seg.y,
+                            seg.width,
+                            seg.height,
+                            color,
+                        ));
+                    }
+                    col += run_cols;
+                }
+                UnderlineKind::Curl => {
+                    // 走 terminal_cell_decoration_curls（非轴对齐，需 draw_quad）。
+                    col += 1;
+                }
+                UnderlineKind::None => {
+                    if cell.strikeout {
+                        rects.push(DecorationRect::new(
+                            col as f32 * cell_w,
+                            row as f32 * cell_h + (cell_h / 2.0 - thickness),
+                            cell_w,
+                            thickness,
+                            cell.underline_color.unwrap_or(cell.fg),
+                        ));
+                    }
+                    col += 1;
+                }
+            }
         }
     }
 
     rects
+}
+
+fn terminal_cell_decoration_curls(
+    snapshot: &impl TerminalGridAccess,
+    cell_metrics: CellMetrics,
+) -> Vec<DecorationQuad> {
+    let cell_w = cell_metrics.width.max(1.0);
+    let cell_h = cell_metrics.height.max(1.0);
+    let thickness = decoration_thickness(cell_w);
+    let mut quads = Vec::new();
+
+    for row in 0..snapshot.rows() {
+        let mut col = 0;
+        while col < snapshot.cols() {
+            let Some(cell) = snapshot.cell(row, col) else {
+                col += 1;
+                continue;
+            };
+            if cell.underline != UnderlineKind::Curl {
+                col += 1;
+                continue;
+            }
+            let color = cell.underline_color.unwrap_or(cell.fg);
+            let run_cols = decoration_run_cols(snapshot, row, col, UnderlineKind::Curl, color);
+            let row_offset = Vector2F::new(0.0, row as f32 * cell_h);
+            for corners in underline_decor::curl_quads(col, run_cols, cell_w, cell_h, thickness) {
+                quads.push(DecorationQuad {
+                    corners: corners.map(|c| c + row_offset),
+                    color,
+                });
+            }
+            col += run_cols;
+        }
+    }
+
+    quads
 }
 
 #[allow(dead_code)]
@@ -2589,6 +2732,10 @@ impl Element for TerminalGridElement {
             ctx.scene
                 .draw_rect_without_hit_recording(rect.to_rect(content_origin))
                 .with_background(rect.color);
+        }
+        for quad in terminal_cell_decoration_curls(&grid, self.cell_metrics) {
+            let (corners, colors) = quad.to_scene(content_origin);
+            ctx.scene.draw_quad(corners, colors);
         }
 
         let cursor_color = u32_to_color(self.palette.cursor);
@@ -3357,8 +3504,8 @@ mod tests {
         terminal_shortcut_for_key_on_platform, terminal_typed_characters_for_input,
         viewport_cells_for_available_size, BackgroundRect, CellMetrics, CursorRect, DecorationRect,
         FamilyId, Fill, GridCell, GridSnapshot, RuntimeGridView, ScrollbarHit, TerminalGridAction,
-        TerminalImeLayout, TerminalShapedLineCache, TerminalShortcutPlatform, GRID_PADDING_LEFT,
-        GRID_PADDING_TOP,
+        TerminalImeLayout, TerminalShapedLineCache, TerminalShortcutPlatform, UnderlineKind,
+        GRID_PADDING_LEFT, GRID_PADDING_TOP,
     };
     use nexshell::terminal_runtime::{
         MarkedText, MouseReportAction, MouseReportButton, TerminalCursorShape, TerminalGridCore,
@@ -3738,9 +3885,9 @@ mod tests {
 
         let grid = GridSnapshot::from_runtime_snapshot(&snapshot, &TerminalPalette::default());
 
-        assert!(grid.cell(0, 0).unwrap().underline);
+        assert_eq!(grid.cell(0, 0).unwrap().underline, UnderlineKind::Single);
         assert!(grid.cell(0, 1).unwrap().strikeout);
-        assert!(grid.cell(0, 2).unwrap().double_underline);
+        assert_eq!(grid.cell(0, 2).unwrap().underline, UnderlineKind::Double);
     }
 
     #[test]
@@ -3910,9 +4057,9 @@ mod tests {
         grid.cols = 3;
         grid.rows = 1;
         grid.cells = vec![GridCell::empty(); 3];
-        grid.cells[0].underline = true;
+        grid.cells[0].underline = UnderlineKind::Single;
         grid.cells[1].strikeout = true;
-        grid.cells[2].double_underline = true;
+        grid.cells[2].underline = UnderlineKind::Double;
         grid.cells[0].fg = pathfinder_color::ColorU::new(1, 2, 3, 255);
         grid.cells[1].fg = pathfinder_color::ColorU::new(4, 5, 6, 255);
         grid.cells[2].fg = pathfinder_color::ColorU::new(7, 8, 9, 255);
