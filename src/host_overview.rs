@@ -833,6 +833,18 @@ pub fn format_bytes_short(bytes: u64) -> String {
     }
 }
 
+/// 速率拆成 (数值, 单位)，如 72704 → ("71","K")。供大数字 + 小单位分排渲染。
+pub fn split_rate(bytes_per_sec: u64) -> (String, String) {
+    let b = bytes_per_sec as f64;
+    if b >= 1024.0 * 1024.0 {
+        (format!("{:.0}", b / 1024.0 / 1024.0), "M".to_string())
+    } else if b >= 1024.0 {
+        (format!("{:.0}", b / 1024.0), "K".to_string())
+    } else {
+        (format!("{bytes_per_sec}"), "B".to_string())
+    }
+}
+
 async fn run_host_overview_monitor(
     config: RemoteSshConfig,
     refresh_interval: Duration,

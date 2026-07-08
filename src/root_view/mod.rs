@@ -1413,6 +1413,13 @@ impl RootView {
             || self
                 .host_view_states
                 .borrow()
+                .host_cards
+                .gauge_anim
+                .borrow()
+                .any_animating(now)
+            || self
+                .host_view_states
+                .borrow()
                 .group_nav
                 .hover_transitions
                 .borrow()
@@ -1422,6 +1429,10 @@ impl RootView {
                 .lock()
                 .map(|s| s.is_animating())
                 .unwrap_or(false)
+            || self
+                .terminal_tabs
+                .iter()
+                .any(|tab| tab.host_overview_gauge_anim.borrow().any_animating(now))
     }
 
     /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。
@@ -2625,6 +2636,7 @@ impl RootView {
                 host_overview_process_expand_state: Arc::new(Mutex::new(MouseState::default())),
                 host_overview_network_expand_state: Arc::new(Mutex::new(MouseState::default())),
                 host_overview_system_expand_state: Arc::new(Mutex::new(MouseState::default())),
+                host_overview_gauge_anim: RefCell::default(),
                 system_info_scroll_state: ClippedScrollStateHandle::default(),
                 host_overview_disk_scroll_state: ClippedScrollStateHandle::default(),
                 process_list_scroll_state: ClippedScrollStateHandle::default(),

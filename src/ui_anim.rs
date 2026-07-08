@@ -108,6 +108,97 @@ impl<K: Hash + Eq> Default for TransitionMap<K> {
     }
 }
 
+// ── 数值过渡（环弧 sweep 等）────────────────────────────────────
+
+/// 数值过渡时长（毫秒）：比色过渡长，让弧线爬升可感。
+pub const FLOAT_TRANSITION_MS: f32 = 350.0;
+
+/// 单条数值过渡。start=None 表示稳态无动画。
+#[derive(Clone, Copy)]
+pub struct FloatTransition {
+    from: f32,
+    to: f32,
+    start: Option<Instant>,
+}
+
+impl FloatTransition {
+    /// 稳态构造：无动画，直接停在 initial。
+    pub fn new(initial: f32) -> Self {
+        Self {
+            from: initial,
+            to: initial,
+            start: None,
+        }
+    }
+
+    fn progress(&self, now: Instant) -> f32 {
+        match self.start {
+            None => 1.0,
+            Some(s) => (now.saturating_duration_since(s).as_millis() as f32 / FLOAT_TRANSITION_MS)
+                .clamp(0.0, 1.0),
+        }
+    }
+
+    pub fn sample(&self, now: Instant) -> f32 {
+        let t = ease_out_cubic(self.progress(now));
+        self.from + (self.to - self.from) * t
+    }
+
+    pub fn is_animating(&self, now: Instant) -> bool {
+        self.start.is_some() && self.progress(now) < 1.0
+    }
+
+    /// 重定向到新目标：目标变则从当前采样值起步（动画中途不跳变）。
+    pub fn retarget(&mut self, target: f32, now: Instant) {
+        if self.to == target {
+            return;
+        }
+        self.from = self.sample(now);
+        self.to = target;
+        self.start = Some(now);
+    }
+}
+
+/// 动态集合的数值过渡表。key 为调用方稳定标识。
+pub struct FloatTransitionMap<K: Hash + Eq> {
+    map: HashMap<K, FloatTransition>,
+}
+
+impl<K: Hash + Eq> FloatTransitionMap<K> {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    /// 重定向 key 的过渡；首次出现以 target 稳态建（首帧不补间）。
+    pub fn retarget(&mut self, key: K, target: f32, now: Instant) {
+        self.map
+            .entry(key)
+            .or_insert_with(|| FloatTransition::new(target))
+            .retarget(target, now);
+    }
+
+    pub fn sample(&self, key: &K, now: Instant) -> Option<f32> {
+        self.map.get(key).map(|t| t.sample(now))
+    }
+
+    pub fn any_animating(&self, now: Instant) -> bool {
+        self.map.values().any(|t| t.is_animating(now))
+    }
+
+    /// 清理本帧不再出现的 key，防泄漏。
+    pub fn retain(&mut self, keep: impl Fn(&K) -> bool) {
+        self.map.retain(|k, _| keep(k));
+    }
+}
+
+impl<K: Hash + Eq> Default for FloatTransitionMap<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── 一维弹簧（位移/宽度动画）────────────────────────────────────
 
 /// 刚度与阻尼：微过阻尼（ζ≈1.05），~200ms 内视觉收敛；比临界略高以杀掉

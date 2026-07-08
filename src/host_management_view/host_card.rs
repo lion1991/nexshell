@@ -26,6 +26,8 @@ pub struct HostCardStates {
     pub draggable_states: Vec<DraggableState>,
     /// 卡片/列表行 hover 颜色过渡（key = "{位面}:{host_id}"，随宿主列表持久）。
     pub hover_transitions: std::cell::RefCell<nexshell::ui_anim::TransitionMap<String>>,
+    /// 状态总览卡环形仪表 sweep 过渡（key = "{host_id}:mem|load0..2"）。
+    pub gauge_anim: std::cell::RefCell<nexshell::ui_anim::FloatTransitionMap<String>>,
 }
 
 impl HostCardStates {
@@ -36,6 +38,7 @@ impl HostCardStates {
             checkbox_states: Vec::new(),
             draggable_states: Vec::new(),
             hover_transitions: std::cell::RefCell::new(nexshell::ui_anim::TransitionMap::new()),
+            gauge_anim: std::cell::RefCell::new(nexshell::ui_anim::FloatTransitionMap::new()),
         }
     }
 

@@ -11,6 +11,7 @@ use nexshell::host_overview::{
     format_bytes_short, DiskMetric, HostOverviewSnapshot, HostOverviewStatus,
 };
 use nexshell::stat_widgets::RingGauge;
+use std::time::Instant;
 use warpui::color::ColorU;
 use warpui::elements::{
     Border, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
@@ -26,6 +27,7 @@ impl RootView {
         snapshot: &HostOverviewSnapshot,
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
+        let now = Instant::now();
         let mut column = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_child(self.render_overview_system_title(tab, colors));
@@ -45,6 +47,9 @@ impl RootView {
                 Expanded::new(
                     1.0,
                     self.render_overview_ring_stat(
+                        tab,
+                        "cpu",
+                        now,
                         "CPU",
                         snapshot.cpu_percent,
                         snapshot.cpu_cores.map(|count| {
@@ -60,6 +65,9 @@ impl RootView {
             Expanded::new(
                 1.0,
                 self.render_overview_ring_stat(
+                    tab,
+                    "mem",
+                    now,
                     rust_i18n::t!("host_overview_memory").as_ref(),
                     snapshot.memory.as_ref().map(|metric| metric.percent),
                     snapshot.memory.as_ref().map(format_usage_metric),
@@ -78,6 +86,9 @@ impl RootView {
                 Expanded::new(
                     1.0,
                     self.render_overview_ring_stat(
+                        tab,
+                        "swap",
+                        now,
                         rust_i18n::t!("host_overview_swap").as_ref(),
                         Some(swap.percent),
                         Some(format_usage_metric(swap)),
@@ -101,8 +112,13 @@ impl RootView {
     }
 
     // 环形仪表 + 底部标签（+ 可选明细行），列内居中；≥90% 数值弧切警告色。
+    // 有 tab 且有数据时，弧/中心数字/判色都走 sweep 数值过渡（随弧一起爬）。
+    #[allow(clippy::too_many_arguments)]
     fn render_overview_ring_stat(
         &self,
+        tab: Option<&TerminalSessionTab>,
+        key: &str,
+        now: Instant,
         label: &str,
         percent: Option<f32>,
         detail: Option<String>,
@@ -111,9 +127,25 @@ impl RootView {
     ) -> Box<dyn Element> {
         const RING_DIAMETER: f32 = 56.0;
         const RING_THICKNESS: f32 = 7.0;
-        let value = percent.unwrap_or(0.0).clamp(0.0, 100.0);
+        let target = percent.unwrap_or(0.0).clamp(0.0, 100.0);
+        // 动画值：有 tab + 有数据时按目标 fraction 补间，否则直接用目标。
+        let display = match (tab, percent) {
+            (Some(tab), Some(_)) => {
+                let k = key.to_string();
+                tab.host_overview_gauge_anim
+                    .borrow_mut()
+                    .retarget(k.clone(), target / 100.0, now);
+                let frac = tab
+                    .host_overview_gauge_anim
+                    .borrow()
+                    .sample(&k, now)
+                    .unwrap_or(target / 100.0);
+                frac * 100.0
+            }
+            _ => target,
+        };
         let percent_text = percent
-            .map(|value| format!("{value:.0}%"))
+            .map(|_| format!("{display:.0}%"))
             .unwrap_or_else(|| "--".to_string());
 
         let center_label = Text::new_inline(percent_text, self.monospace_font, 12.0)
@@ -130,11 +162,11 @@ impl RootView {
             RING_DIAMETER,
             RING_THICKNESS,
             track,
-            usage_fill_color(value, accent, colors),
+            usage_fill_color(display, accent, colors),
         )
         .with_label(center_label);
         if percent.is_some() {
-            gauge = gauge.with_fraction(value / 100.0);
+            gauge = gauge.with_fraction(display / 100.0);
         }
 
         let mut column = Flex::column()
@@ -190,8 +222,43 @@ impl RootView {
             .with_child(self.render_overview_section_title(
                 rust_i18n::t!("host_overview_section_disk").as_ref(),
                 colors,
-            ))
-            .with_child(self.render_disk_header(colors));
+            ));
+        // 磁盘读/写速率竖排（有任一速率数据才显示）
+        if snapshot.disk_read_bytes_per_sec.is_some() || snapshot.disk_write_bytes_per_sec.is_some()
+        {
+            let rate_row = Flex::row()
+                .with_main_axis_size(MainAxisSize::Max)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                .with_child(
+                    Expanded::new(
+                        1.0,
+                        self.render_overview_rate_stat(
+                            snapshot.disk_read_bytes_per_sec,
+                            None,
+                            rust_i18n::t!("host_overview_disk_read").as_ref(),
+                            colors.download,
+                            colors,
+                        ),
+                    )
+                    .finish(),
+                )
+                .with_child(
+                    Expanded::new(
+                        1.0,
+                        self.render_overview_rate_stat(
+                            snapshot.disk_write_bytes_per_sec,
+                            None,
+                            rust_i18n::t!("host_overview_disk_write").as_ref(),
+                            colors.upload,
+                            colors,
+                        ),
+                    )
+                    .finish(),
+                )
+                .finish();
+            header.add_child(Container::new(rate_row).with_padding_bottom(8.0).finish());
+        }
+        header.add_child(self.render_disk_header(colors));
 
         // 侧栏只看真实磁盘，tmpfs 等伪文件系统去整页看；全是伪文件系统时回退显示全部
         let mut disks: Vec<&DiskMetric> = snapshot

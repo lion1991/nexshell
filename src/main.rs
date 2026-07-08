@@ -67,6 +67,7 @@ use nexshell::pane_state::NexPaneId;
 use nexshell::pane_tree::PaneData;
 use nexshell::ssh_session::SshHandle;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
+use nexshell::ui_anim::FloatTransitionMap;
 use nexshell::warp_tab_context_menu::{TAB_COLOR_ICON_PATH, TAB_NO_COLOR_ICON_PATH};
 
 mod rdp_view;
@@ -430,6 +431,8 @@ struct TerminalSessionTab {
     host_overview_process_expand_state: MouseStateHandle,
     host_overview_network_expand_state: MouseStateHandle,
     host_overview_system_expand_state: MouseStateHandle,
+    /// 概览 CPU/Mem/Swap 环 + Load 三环的 sweep 数值过渡，按 key 索引。
+    host_overview_gauge_anim: RefCell<FloatTransitionMap<String>>,
     system_info_scroll_state: ClippedScrollStateHandle,
     host_overview_disk_scroll_state: ClippedScrollStateHandle,
     process_list_scroll_state: ClippedScrollStateHandle,

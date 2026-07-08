@@ -82,6 +82,10 @@ host_overview_section_process: Processes
 host_overview_section_network: Network
 host_overview_section_disk: Disks
 host_overview_load: Load
+host_overview_rate_up: Upload
+host_overview_rate_down: Download
+host_overview_disk_read: Read
+host_overview_disk_write: Write
 host_overview_memory: Memory
 host_overview_swap: Swap
 host_overview_cores: "%{count} cores"

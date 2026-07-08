@@ -38,31 +38,44 @@ impl RootView {
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(self.render_network_selector(tab, network, snapshot, colors, app));
             top.add_child(Shrinkable::new(1.0, Empty::new().finish()).finish());
-            let rate_text = |text: String, color: ColorU| {
-                Text::new_inline(text, self.monospace_font, 12.0)
-                    .with_color(color)
-                    .finish()
-            };
-            let mut rates = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
-            rates.add_child(rate_text(
-                format!("↑ {}", format_bytes_short(network.tx_bytes_per_sec)),
-                colors.upload,
-            ));
-            rates.add_child(
-                Container::new(rate_text(
-                    format!("↓ {}", format_bytes_short(network.rx_bytes_per_sec)),
-                    colors.download,
-                ))
-                .with_margin_left(8.0)
-                .finish(),
-            );
-            top.add_child(Clipped::new(rates.finish()).finish());
             column.add_child(
                 Container::new(top.finish())
                     .with_padding_bottom(8.0)
                     .finish(),
             );
             column.add_child(self.render_network_chart(network, colors));
+            // 图表下的上/下行速率竖排大数字
+            let rate_row = Flex::row()
+                .with_main_axis_size(MainAxisSize::Max)
+                .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                .with_child(
+                    Expanded::new(
+                        1.0,
+                        self.render_overview_rate_stat(
+                            Some(network.tx_bytes_per_sec),
+                            Some("↑"),
+                            rust_i18n::t!("host_overview_rate_up").as_ref(),
+                            colors.upload,
+                            colors,
+                        ),
+                    )
+                    .finish(),
+                )
+                .with_child(
+                    Expanded::new(
+                        1.0,
+                        self.render_overview_rate_stat(
+                            Some(network.rx_bytes_per_sec),
+                            Some("↓"),
+                            rust_i18n::t!("host_overview_rate_down").as_ref(),
+                            colors.download,
+                            colors,
+                        ),
+                    )
+                    .finish(),
+                )
+                .finish();
+            column.add_child(Container::new(rate_row).with_padding_top(8.0).finish());
         } else {
             column.add_child(self.render_overview_muted_line(
                 rust_i18n::t!("host_overview_no_network").as_ref(),

@@ -113,6 +113,8 @@ pub struct OverviewColors {
     pub chart_grid: ColorU,
     pub warning: ColorU,
     pub ok: ColorU,
+    /// 语义色（负载阈值判定等直接引用 ok/warn/danger）。
+    pub semantic: SemanticColors,
 }
 
 impl OverviewColors {
@@ -135,6 +137,7 @@ impl OverviewColors {
             chart_grid: ThemePalette::with_alpha(muted, 0x33),
             warning: s.danger,
             ok: s.ok,
+            semantic: *s,
         }
     }
 

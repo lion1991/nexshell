@@ -8,8 +8,9 @@ use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab, ICON_PATH_COPY, ICON_PATH_EXPAND};
 use nexshell::host_overview::{
-    should_show_empty_overview_status, HostOverviewSnapshot, HostOverviewStatus,
+    should_show_empty_overview_status, split_rate, HostOverviewSnapshot, HostOverviewStatus,
 };
+use warpui::color::ColorU;
 use warpui::elements::{
     Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded,
     Flex, Hoverable, Icon, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
@@ -306,6 +307,80 @@ impl RootView {
 
         Container::new(row.finish())
             .with_padding_bottom(7.0)
+            .finish()
+    }
+
+    // 速率竖排：大数字 + 小单位（底对齐）/ 箭头 + 标签。网络与磁盘共用。
+    // value: >0 用 accent，=0 灰「0」，None 灰「—」；arrow=None 时下行只有标签。
+    pub(in crate::root_view) fn render_overview_rate_stat(
+        &self,
+        value: Option<u64>,
+        arrow: Option<&str>,
+        label: &str,
+        accent: ColorU,
+        colors: &HostOverviewColors,
+    ) -> Box<dyn Element> {
+        let (num, unit, num_color) = match value {
+            Some(v) if v > 0 => {
+                let (n, u) = split_rate(v);
+                (n, format!("{u}/s"), accent)
+            }
+            Some(_) => ("0".to_string(), String::new(), colors.text_muted),
+            None => ("—".to_string(), String::new(), colors.text_muted),
+        };
+        let mut num_row = Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::End)
+            .with_child(
+                Text::new_inline(num, self.monospace_font, 15.0)
+                    .with_style(fonts::Properties::default().weight(fonts::Weight::Bold))
+                    .with_color(num_color)
+                    .finish(),
+            );
+        if !unit.is_empty() {
+            num_row.add_child(
+                ConstrainedBox::new(Empty::new().finish())
+                    .with_width(2.0)
+                    .finish(),
+            );
+            num_row.add_child(
+                Container::new(
+                    Text::new_inline(unit, self.ui_font, 10.0)
+                        .with_color(colors.text_muted)
+                        .finish(),
+                )
+                .with_margin_bottom(1.0)
+                .finish(),
+            );
+        }
+
+        let mut label_row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
+        if let Some(arrow) = arrow {
+            label_row.add_child(
+                Text::new_inline(arrow.to_string(), self.ui_font, 10.0)
+                    .with_color(accent)
+                    .finish(),
+            );
+            label_row.add_child(
+                ConstrainedBox::new(Empty::new().finish())
+                    .with_width(3.0)
+                    .finish(),
+            );
+        }
+        label_row.add_child(
+            Text::new_inline(label.to_string(), self.ui_font, 10.0)
+                .with_color(colors.text_muted)
+                .finish(),
+        );
+
+        Flex::column()
+            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            .with_child(num_row.finish())
+            .with_child(
+                Container::new(label_row.finish())
+                    .with_padding_top(2.0)
+                    .finish(),
+            )
             .finish()
     }
 
