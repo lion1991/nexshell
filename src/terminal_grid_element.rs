@@ -1333,28 +1333,24 @@ impl TerminalGridElement {
     /// terminal-emulator 通用做法一致：减去 grid 原点 → /cell → floor → 加上
     /// `Line(-display_offset)` 把 viewport row 还原成绝对 line。
     fn position_to_term_point(&self, position: Vector2F) -> Option<(TermPoint, Side)> {
-        let origin = self.origin?.xy() + grid_content_offset();
+        let origin = self.grid_content_origin()?;
         let grid = self.grid();
-        let cell_w = self.cell_metrics.width.max(1.0);
-        let cell_h = self.cell_metrics.height.max(1.0);
-        let local_x = (position.x() - origin.x()).max(0.0);
-        let local_y = (position.y() - origin.y()).max(0.0);
+        terminal_position_to_term_point(&grid, self.cell_metrics, origin, position)
+    }
 
-        let max_col = grid.cols().saturating_sub(1) as f32;
-        let max_row = grid.rows().saturating_sub(1) as f32;
-        let col_frac = local_x / cell_w;
-        let row_frac = local_y / cell_h;
+    fn grid_content_origin(&self) -> Option<Vector2F> {
+        Some(
+            self.origin?.xy()
+                + grid_content_offset()
+                + Vector2F::new(0.0, self.current_smooth_scroll_px()),
+        )
+    }
 
-        let col = col_frac.floor().clamp(0.0, max_col) as usize;
-        let row = row_frac.floor().clamp(0.0, max_row) as usize;
-
-        let line = Line(row as i32 - grid.display_offset() as i32);
-        let side = if (col_frac - col_frac.floor()) < 0.5 {
-            Side::Left
-        } else {
-            Side::Right
-        };
-        Some((TermPoint::new(line, Column(col)), side))
+    fn current_smooth_scroll_px(&self) -> f32 {
+        self.smooth_scroll_px
+            .lock()
+            .map(|v| *v as f32)
+            .unwrap_or(0.0)
     }
 
     fn mouse_position_is_in_bounds(&self, position: Vector2F) -> bool {
@@ -1390,7 +1386,7 @@ impl TerminalGridElement {
         if !self.live_mouse_app_active() || !self.mouse_position_is_in_bounds(position) {
             return None;
         }
-        let origin = self.origin?.xy() + grid_content_offset();
+        let origin = self.grid_content_origin()?;
         let grid = self.grid();
         mouse_report_bytes(
             &grid,
@@ -1838,6 +1834,38 @@ fn terminal_mouse_position_is_in_bounds(
     position: Vector2F,
 ) -> bool {
     RectF::new(origin, size).contains_point(position)
+}
+
+fn terminal_position_to_term_point(
+    snapshot: &impl TerminalGridAccess,
+    cell_metrics: CellMetrics,
+    content_origin: Vector2F,
+    position: Vector2F,
+) -> Option<(TermPoint, Side)> {
+    if snapshot.cols() == 0 || snapshot.rows() == 0 {
+        return None;
+    }
+
+    let cell_w = cell_metrics.width.max(1.0);
+    let cell_h = cell_metrics.height.max(1.0);
+    let local_x = (position.x() - content_origin.x()).max(0.0);
+    let local_y = (position.y() - content_origin.y()).max(0.0);
+
+    let max_col = snapshot.cols().saturating_sub(1) as f32;
+    let max_row = snapshot.rows().saturating_sub(1) as f32;
+    let col_frac = local_x / cell_w;
+    let row_frac = local_y / cell_h;
+
+    let col = col_frac.floor().clamp(0.0, max_col) as usize;
+    let row = row_frac.floor().clamp(0.0, max_row) as usize;
+    let line = Line(row as i32 - snapshot.display_offset() as i32);
+    let side = if (col_frac - col_frac.floor()) < 0.5 {
+        Side::Left
+    } else {
+        Side::Right
+    };
+
+    Some((TermPoint::new(line, Column(col)), side))
 }
 
 fn modifiers_for_report(modifiers: ModifiersState) -> MouseReportModifiers {
@@ -3602,7 +3630,7 @@ mod tests {
 
     use super::{
         accumulate_scroll_px, cursor_rects, encode_terminal_key_event_with_modes,
-        find_action_for_key, mouse_report_bytes, repeat_mouse_report_bytes,
+        find_action_for_key, grid_content_offset, mouse_report_bytes, repeat_mouse_report_bytes,
         resize_cells_for_available_size, scrollbar_display_offset_for_center,
         scrollbar_display_offset_for_pointer_movement, snap_terminal_rect_to_device_pixels,
         split_pane_terminal_body_size, terminal_action_needs_notify, terminal_background_rects,
@@ -3611,14 +3639,16 @@ mod tests {
         terminal_ime_cursor_rect_for_layout, terminal_input_bytes_should_reset_smooth_scroll,
         terminal_input_editor_should_defer_keydown_to_typed_characters,
         terminal_mouse_position_is_in_bounds, terminal_page_scroll_lines_for_key,
-        terminal_scroll_data, terminal_scrollbar_geometry, terminal_scrollbar_hit,
-        terminal_scrollbar_thumb_fill, terminal_shaped_line_data, terminal_shortcut_for_key,
-        terminal_shortcut_for_key_on_platform, terminal_typed_characters_for_input,
-        viewport_cells_for_available_size, BackgroundRect, CellMetrics, CursorRect, DecorationRect,
-        FamilyId, Fill, GridCell, GridSnapshot, RuntimeGridView, ScrollbarHit, TerminalGridAction,
-        TerminalImeLayout, TerminalShapedLineCache, TerminalShortcutPlatform, UnderlineKind,
-        GRID_PADDING_LEFT, GRID_PADDING_TOP,
+        terminal_position_to_term_point, terminal_scroll_data, terminal_scrollbar_geometry,
+        terminal_scrollbar_hit, terminal_scrollbar_thumb_fill, terminal_shaped_line_data,
+        terminal_shortcut_for_key, terminal_shortcut_for_key_on_platform,
+        terminal_typed_characters_for_input, viewport_cells_for_available_size, BackgroundRect,
+        CellMetrics, CursorRect, DecorationRect, FamilyId, Fill, GridCell, GridSnapshot,
+        RuntimeGridView, ScrollbarHit, TerminalGridAction, TerminalImeLayout,
+        TerminalShapedLineCache, TerminalShortcutPlatform, UnderlineKind, GRID_PADDING_LEFT,
+        GRID_PADDING_TOP,
     };
+    use alacritty_terminal::index::{Column, Line, Point as TermPoint, Side};
     use nexshell::terminal_runtime::{
         MarkedText, MouseReportAction, MouseReportButton, TerminalCursorShape, TerminalGridCore,
         TerminalGridSnapshot, TerminalInputModes, TerminalPalette,
@@ -4461,6 +4491,29 @@ mod tests {
 
         assert_eq!(rect.origin_x(), 2.0 + GRID_PADDING_LEFT + 30.0);
         assert!((rect.origin_y() - (3.0 + GRID_PADDING_TOP + 4.0 + 240.0 + 4.56)).abs() < 0.001);
+    }
+
+    #[test]
+    fn terminal_position_to_term_point_accounts_for_smooth_scroll_offset() {
+        let mut grid = active_mouse_grid();
+        grid.display_offset = 0;
+        grid.rows = 4;
+        grid.cols = 4;
+        let cell = CellMetrics {
+            width: 10.0,
+            height: 20.0,
+            baseline_y: 14.0,
+        };
+        let content_origin =
+            Vector2F::new(2.0, 3.0) + grid_content_offset() + Vector2F::new(0.0, 12.0);
+        let visual_row_one_center = content_origin + Vector2F::new(4.0, 20.0 + 10.0);
+
+        let (point, side) =
+            terminal_position_to_term_point(&grid, cell, content_origin, visual_row_one_center)
+                .unwrap();
+
+        assert_eq!(point, TermPoint::new(Line(1), Column(0)));
+        assert_eq!(side, Side::Left);
     }
 
     #[test]
