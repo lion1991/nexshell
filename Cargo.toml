@@ -117,6 +117,7 @@ similar = { version = "2.7", features = ["inline"], optional = true }
 line-ending = { version = "1.4.0", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block = "0.1"
 cocoa = "=0.26.0"
 objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
 core-text = "21.0.0"

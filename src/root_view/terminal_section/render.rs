@@ -103,6 +103,7 @@ impl RootView {
             );
         }
         let terminal_keyboard_enabled = self.terminal_keyboard_input_enabled(app);
+        let glass_dirty_snapshot = Arc::clone(&runtime_snapshot);
         let snapshot = if terminal_keyboard_enabled {
             self.project_input_editor_snapshot(runtime_snapshot)
         } else {
@@ -122,6 +123,7 @@ impl RootView {
         let grid = Align::new(
             TerminalGridElement::new(
                 Arc::clone(&snapshot),
+                glass_dirty_snapshot,
                 cell_metrics,
                 self.monospace_font,
                 self.terminal_font_size,
@@ -136,6 +138,7 @@ impl RootView {
                 Arc::clone(&self.smooth_scroll_px),
                 Arc::clone(&self.cursor_smear),
                 Arc::clone(&self.shaped_line_cache),
+                Arc::clone(&self.terminal_glass_dirty_tracker),
                 Arc::clone(&self.terminal_ime_layout),
                 terminal
                     .lock()
@@ -269,6 +272,7 @@ impl RootView {
                 );
             }
 
+            let glass_dirty_snapshot = Arc::clone(&runtime_snapshot);
             let snapshot = if is_focused {
                 self.project_input_editor_snapshot(runtime_snapshot)
             } else {
@@ -314,6 +318,7 @@ impl RootView {
 
             let grid_element = TerminalGridElement::new(
                 Arc::clone(&snapshot),
+                glass_dirty_snapshot,
                 cell_metrics,
                 self.monospace_font,
                 self.terminal_font_size,
@@ -336,6 +341,7 @@ impl RootView {
                 scroll_px,
                 smear,
                 shaped,
+                Arc::clone(&self.terminal_glass_dirty_tracker),
                 ime,
                 fg_handle,
                 Some(pane_id),

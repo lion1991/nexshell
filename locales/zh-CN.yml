@@ -242,6 +242,10 @@ appearance_theme: 主题
 appearance_themes: 主题
 appearance_window: 窗口
 appearance_window_opacity: "窗口不透明度：%{value}"
+appearance_glass_quality: 玻璃效果
+appearance_glass_quality_off: 关闭
+appearance_glass_quality_frosted: 毛玻璃
+appearance_glass_quality_liquid: 液态玻璃
 appearance_text: 文本
 appearance_terminal_font: 终端字体
 appearance_view_all_fonts: 查看所有可用的系统字体

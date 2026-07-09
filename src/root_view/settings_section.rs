@@ -10,7 +10,7 @@
 use crate::external_editor::EditorChoice;
 use crate::settings_view;
 use crate::terminal_grid_element::{
-    CursorStyleChoice, LanguageChoice, NexSettingsSection, TerminalGridAction,
+    CursorStyleChoice, GlassQualityChoice, LanguageChoice, NexSettingsSection, TerminalGridAction,
     TerminalShapedLineCache, ThemeChoice,
 };
 use crate::ui_settings::{
@@ -37,6 +37,7 @@ impl RootView {
             self.terminal_font_size,
             self.line_height_ratio,
             self.window_opacity,
+            self.glass_quality,
             self.cursor_style,
             self.monospace_font_weight,
             &self.monospace_font_name,
@@ -215,6 +216,17 @@ impl RootView {
     ) {
         self.window_opacity = value.clamp(1, 100);
         Self::apply_window_opacity(ctx, self.window_opacity);
+        self.save_ui_settings();
+        ctx.notify();
+    }
+
+    pub(in crate::root_view) fn handle_set_glass_quality(
+        &mut self,
+        quality: GlassQualityChoice,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.glass_quality = quality;
+        nexshell::glass_backdrop::set_glass_quality(quality);
         self.save_ui_settings();
         ctx.notify();
     }

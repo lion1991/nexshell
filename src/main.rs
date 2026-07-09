@@ -19,6 +19,7 @@ mod input_cursor;
 #[cfg(target_os = "macos")]
 mod macos_window_util;
 mod settings_view;
+mod terminal_grid_glass_dirty;
 mod terminal_view_helpers;
 mod throttle;
 mod title_bar_chrome;
@@ -1032,6 +1033,9 @@ fn main() -> Result<()> {
 
     let flags_for_run = Arc::clone(&foreground_flags);
     let _ = app_builder.run(move |ctx| {
+        #[cfg(target_os = "macos")]
+        macos_window_util::install_reduce_transparency_observer();
+
         register_warp_text_input_stack(ctx);
         register_terminal_key_bindings(ctx);
         register_menu_global_actions(ctx);

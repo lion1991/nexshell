@@ -7,7 +7,7 @@ use warpui_core::color::ColorU;
 use warpui_core::elements::Container;
 use warpui_core::geometry::rect::RectF;
 use warpui_core::geometry::vector::vec2f;
-use warpui_core::scene::{self, BackdropBlur, DropShadow};
+use warpui_core::scene::{self, BackdropBlur, DropShadow, GlassOptical};
 
 const fn black(a: u8) -> ColorU {
     ColorU {
@@ -73,6 +73,12 @@ pub struct Glass {
     pub radius: f32,
     pub saturation: f32,
     pub tint_alpha: u8,
+    pub liquid_tint_alpha: u8,
+    pub thickness: f32,
+    pub ior_delta: f32,
+    pub specular: f32,
+    pub crisp_mix: f32,
+    pub adaptive_contrast: bool,
 }
 
 impl Glass {
@@ -82,6 +88,12 @@ impl Glass {
             radius: 24.0,
             saturation: 1.4,
             tint_alpha: 0xc0,
+            liquid_tint_alpha: 0x73,
+            thickness: 0.85,
+            ior_delta: 0.28,
+            specular: 0.55,
+            crisp_mix: 0.85,
+            adaptive_contrast: true,
         }
     }
 
@@ -91,6 +103,23 @@ impl Glass {
             radius: 18.0,
             saturation: 1.3,
             tint_alpha: 0xd2,
+            liquid_tint_alpha: 0x96,
+            thickness: 0.55,
+            ior_delta: 0.18,
+            specular: 0.35,
+            crisp_mix: 0.6,
+            adaptive_contrast: true,
+        }
+    }
+
+    pub fn liquid_optical(&self) -> GlassOptical {
+        GlassOptical {
+            thickness: self.thickness,
+            ior_delta: self.ior_delta,
+            specular: self.specular,
+            crisp_mix: self.crisp_mix,
+            adaptive_contrast: self.adaptive_contrast,
+            ..Default::default()
         }
     }
 
@@ -105,6 +134,90 @@ impl Glass {
                 ..tint_base
             },
             saturation: self.saturation,
+            optical: GlassOptical::default(),
         }
+    }
+
+    pub fn liquid_backdrop(
+        &self,
+        rect: RectF,
+        corner_radius: f32,
+        tint_base: ColorU,
+    ) -> BackdropBlur {
+        BackdropBlur {
+            optical: self.liquid_optical(),
+            tint: ColorU {
+                a: self.liquid_tint_alpha,
+                ..tint_base
+            },
+            ..self.backdrop(rect, corner_radius, tint_base)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glass_backdrop_uses_inactive_optical_default() {
+        let blur = Glass::overlay().backdrop(
+            RectF::new(vec2f(0.0, 0.0), vec2f(100.0, 50.0)),
+            12.0,
+            ColorU::new(20, 30, 40, 255),
+        );
+
+        assert!(!blur.optical.is_active());
+        assert_eq!(blur.tint.a, 0xc0);
+    }
+
+    #[test]
+    fn overlay_liquid_optical_uses_design_preset() {
+        let blur = Glass::overlay().liquid_backdrop(
+            RectF::new(vec2f(0.0, 0.0), vec2f(100.0, 50.0)),
+            12.0,
+            ColorU::new(20, 30, 40, 255),
+        );
+        let optical = blur.optical;
+
+        assert!(optical.is_active());
+        assert_eq!(optical.thickness, 0.85);
+        assert_eq!(optical.ior_delta, 0.28);
+        assert_eq!(optical.specular, 0.55);
+        assert_eq!(optical.crisp_mix, 0.85);
+        assert_eq!(optical.light_dir, vec2f(0.423, -0.906));
+        assert!(optical.adaptive_contrast);
+        assert_eq!(blur.tint.a, 0x73);
+    }
+
+    #[test]
+    fn popover_liquid_backdrop_uses_design_preset() {
+        let blur = Glass::popover().liquid_backdrop(
+            RectF::new(vec2f(0.0, 0.0), vec2f(100.0, 50.0)),
+            12.0,
+            ColorU::new(20, 30, 40, 255),
+        );
+        let optical = blur.optical;
+
+        assert!(optical.is_active());
+        assert_eq!(optical.thickness, 0.55);
+        assert_eq!(optical.ior_delta, 0.18);
+        assert_eq!(optical.specular, 0.35);
+        assert_eq!(optical.crisp_mix, 0.6);
+        assert_eq!(optical.light_dir, vec2f(0.423, -0.906));
+        assert!(optical.adaptive_contrast);
+        assert_eq!(blur.tint.a, 0x96);
+    }
+
+    #[test]
+    fn popover_frosted_backdrop_keeps_existing_tint_alpha() {
+        let blur = Glass::popover().backdrop(
+            RectF::new(vec2f(0.0, 0.0), vec2f(100.0, 50.0)),
+            12.0,
+            ColorU::new(20, 30, 40, 255),
+        );
+
+        assert!(!blur.optical.is_active());
+        assert_eq!(blur.tint.a, 0xd2);
     }
 }

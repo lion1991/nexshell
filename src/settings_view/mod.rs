@@ -25,7 +25,8 @@ use self::appearance_page::{render_appearance_page, AppearancePageState};
 use self::keybindings_page::render_keybindings_page;
 use self::render_helpers::{CONTENT_FONT_SIZE, HEADER_PADDING, SIDEBAR_WIDTH};
 use super::terminal_grid_element::{
-    self, CursorStyleChoice, NexSettingsSection, TerminalGridAction, ThemeChoice,
+    self, CursorStyleChoice, GlassQualityChoice, NexSettingsSection, TerminalGridAction,
+    ThemeChoice,
 };
 
 // warp: theme_chooser.rs 常量
@@ -96,6 +97,7 @@ pub fn render_settings_view(
     current_font_size: f32,
     line_height_ratio: f32,
     window_opacity: u8,
+    current_glass_quality: GlassQualityChoice,
     cursor_style: CursorStyleChoice,
     current_font_weight: warpui::fonts::Weight,
     current_font_name: &str,
@@ -186,6 +188,7 @@ pub fn render_settings_view(
             current_font_size,
             line_height_ratio,
             window_opacity,
+            current_glass_quality,
             cursor_style,
             current_font_weight,
             current_font_name,

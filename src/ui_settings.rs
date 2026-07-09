@@ -4,7 +4,9 @@ use nexshell::git_panel::{clamp_git_history_height, GIT_HISTORY_HEIGHT_DEFAULT};
 use nexshell::host_management::default_database_path;
 
 use crate::external_editor::EditorChoice;
-use crate::terminal_grid_element::{CursorStyleChoice, LanguageChoice, ThemeChoice};
+use crate::terminal_grid_element::{
+    CursorStyleChoice, GlassQualityChoice, LanguageChoice, ThemeChoice,
+};
 
 pub(crate) const TERMINAL_FONT_SIZE_DEFAULT: f32 = 14.0;
 pub(crate) const TERMINAL_FONT_SIZE_MIN: f32 = 9.0;
@@ -27,6 +29,7 @@ pub(crate) struct UiSettings {
     pub line_height_ratio: f32,
     pub git_history_height: f32,
     pub opacity: u8,
+    pub glass_quality: GlassQualityChoice,
     pub cursor_style: CursorStyleChoice,
     pub font_family: String,
     pub font_weight: warpui::fonts::Weight,
@@ -46,6 +49,7 @@ impl Default for UiSettings {
             line_height_ratio: TERMINAL_LINE_HEIGHT_RATIO_DEFAULT,
             git_history_height: GIT_HISTORY_HEIGHT_DEFAULT,
             opacity: 100,
+            glass_quality: GlassQualityChoice::Frosted,
             cursor_style: CursorStyleChoice::Block,
             font_family: super::default_monospace_font_family_name(),
             font_weight: warpui::fonts::Weight::Normal,
@@ -64,6 +68,10 @@ pub(crate) fn load_ui_settings() -> UiSettings {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .unwrap_or(serde_json::Value::Null);
+    ui_settings_from_value(v)
+}
+
+fn ui_settings_from_value(v: serde_json::Value) -> UiSettings {
     UiSettings {
         sidebar_open: v
             .get("sidebar_open")
@@ -99,6 +107,11 @@ pub(crate) fn load_ui_settings() -> UiSettings {
             .and_then(|x| x.as_u64())
             .map(|x| (x as u8).clamp(1, 100))
             .unwrap_or(100),
+        glass_quality: v
+            .get("glass_quality")
+            .and_then(|x| x.as_str())
+            .and_then(GlassQualityChoice::from_id)
+            .unwrap_or_default(),
         cursor_style: match v.get("cursor_style").and_then(|x| x.as_str()) {
             Some("beam") => CursorStyleChoice::Beam,
             Some("underline") => CursorStyleChoice::Underline,
@@ -145,6 +158,37 @@ pub(crate) fn save_ui_settings_to_disk(settings: &UiSettings) {
             }
         })
         .unwrap_or_default();
+    write_ui_settings_to_object(&mut obj, settings);
+    // 序列化失败时保留原配置，绝不写空串覆盖
+    let json = match serde_json::to_string_pretty(&obj) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[nexshell] 序列化 UI 设置失败，保留原配置: {e}");
+            return;
+        }
+    };
+    if let Some(dir) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("[nexshell] 创建配置目录失败: {e}");
+            return;
+        }
+    }
+    // 先写临时文件再 rename，避免写到一半崩溃损坏原配置
+    let tmp = path.with_extension("json.tmp");
+    if let Err(e) = std::fs::write(&tmp, &json) {
+        eprintln!("[nexshell] 写 UI 设置失败: {e}");
+        return;
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        eprintln!("[nexshell] 替换 UI 设置失败: {e}");
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+fn write_ui_settings_to_object(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    settings: &UiSettings,
+) {
     obj.insert(
         "sidebar_open".to_string(),
         serde_json::Value::Bool(settings.sidebar_open),
@@ -166,6 +210,10 @@ pub(crate) fn save_ui_settings_to_disk(settings: &UiSettings) {
         serde_json::json!(settings.git_history_height),
     );
     obj.insert("opacity".to_string(), serde_json::json!(settings.opacity));
+    obj.insert(
+        "glass_quality".to_string(),
+        serde_json::Value::String(settings.glass_quality.id().to_string()),
+    );
     obj.insert(
         "cursor_style".to_string(),
         serde_json::Value::String(
@@ -203,30 +251,6 @@ pub(crate) fn save_ui_settings_to_disk(settings: &UiSettings) {
         "reuse_view_tab".to_string(),
         serde_json::Value::Bool(settings.reuse_view_tab),
     );
-    // 序列化失败时保留原配置，绝不写空串覆盖
-    let json = match serde_json::to_string_pretty(&obj) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[nexshell] 序列化 UI 设置失败，保留原配置: {e}");
-            return;
-        }
-    };
-    if let Some(dir) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("[nexshell] 创建配置目录失败: {e}");
-            return;
-        }
-    }
-    // 先写临时文件再 rename，避免写到一半崩溃损坏原配置
-    let tmp = path.with_extension("json.tmp");
-    if let Err(e) = std::fs::write(&tmp, &json) {
-        eprintln!("[nexshell] 写 UI 设置失败: {e}");
-        return;
-    }
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        eprintln!("[nexshell] 替换 UI 设置失败: {e}");
-        let _ = std::fs::remove_file(&tmp);
-    }
 }
 
 pub(crate) fn resolve_locale(choice: LanguageChoice) -> &'static str {
@@ -241,5 +265,41 @@ pub(crate) fn resolve_locale(choice: LanguageChoice) -> &'static str {
                 "en"
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal_grid_element::GlassQualityChoice;
+
+    #[test]
+    fn ui_settings_value_defaults_glass_quality_to_frosted() {
+        let settings = ui_settings_from_value(serde_json::json!({}));
+
+        assert_eq!(settings.glass_quality, GlassQualityChoice::Frosted);
+    }
+
+    #[test]
+    fn ui_settings_value_loads_liquid_glass_quality() {
+        let settings = ui_settings_from_value(serde_json::json!({
+            "glass_quality": "liquid"
+        }));
+
+        assert_eq!(settings.glass_quality, GlassQualityChoice::Liquid);
+    }
+
+    #[test]
+    fn write_ui_settings_inserts_top_level_glass_quality() {
+        let mut settings = UiSettings::default();
+        settings.glass_quality = GlassQualityChoice::Off;
+
+        let mut obj = serde_json::Map::new();
+        write_ui_settings_to_object(&mut obj, &settings);
+
+        assert_eq!(
+            obj.get("glass_quality").and_then(|v| v.as_str()),
+            Some("off")
+        );
     }
 }

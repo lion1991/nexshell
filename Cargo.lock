@@ -6043,6 +6043,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bitflags 2.13.0",
+ "block",
  "bounded-vec-deque",
  "cc",
  "cfg-if",

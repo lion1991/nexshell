@@ -42,6 +42,7 @@ use warpui_core::{
 
 use nexshell::file_panel::FilePanelSelectMode;
 use nexshell::git_panel::GitPanelSelectMode;
+pub use nexshell::glass_backdrop::GlassQuality as GlassQualityChoice;
 use nexshell::terminal_runtime::{
     dim_color, encode_sgr_mouse_report, encode_terminal_key_event_with_modes,
     encode_terminal_modifier_key_with_modes, mouse_mode_bits_app_active,
@@ -52,6 +53,10 @@ use nexshell::terminal_runtime::{
     TerminalRuntimeSnapshot,
 };
 use nexshell::warp_tab_context_menu::TabContextMenuAnchor;
+
+use crate::terminal_grid_glass_dirty::{
+    TerminalGlassContentFingerprint, TerminalGlassDirtyTracker,
+};
 
 pub const TERMINAL_CURSOR_POSITION_ID: &str = "terminal_view:cursor_native_shell_spike";
 
@@ -591,6 +596,7 @@ impl CellMetrics {
 
 pub struct TerminalGridElement {
     snapshot: Arc<TerminalRuntimeSnapshot>,
+    glass_dirty_snapshot: Arc<TerminalRuntimeSnapshot>,
     cell_metrics: CellMetrics,
     font_family: FamilyId,
     font_size: f32,
@@ -605,6 +611,7 @@ pub struct TerminalGridElement {
     smooth_scroll_px: Arc<Mutex<f64>>,
     cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
     shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
+    glass_dirty_tracker: Arc<Mutex<TerminalGlassDirtyTracker>>,
     terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
     shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
     /// 鼠标上报模式实时镜像。发报告前查它而非渲染快照：TUI 退出瞬间快照
@@ -1080,6 +1087,7 @@ pub enum TerminalGridAction {
     SetTheme(ThemeChoice),
     SetTerminalFontSize(f32),
     SetOpacity(u8),
+    SetGlassQuality(GlassQualityChoice),
     SetCursorStyle(CursorStyleChoice),
     SetFontFamily(String),
     SetFontWeight(warpui::fonts::Weight),
@@ -1276,6 +1284,7 @@ pub enum NexSettingsSection {
 impl TerminalGridElement {
     pub fn new(
         snapshot: Arc<TerminalRuntimeSnapshot>,
+        glass_dirty_snapshot: Arc<TerminalRuntimeSnapshot>,
         cell_metrics: CellMetrics,
         font_family: FamilyId,
         font_size: f32,
@@ -1290,6 +1299,7 @@ impl TerminalGridElement {
         smooth_scroll_px: Arc<Mutex<f64>>,
         cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
         shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
+        glass_dirty_tracker: Arc<Mutex<TerminalGlassDirtyTracker>>,
         terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
         shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
         pane_id: Option<NexPaneId>,
@@ -1302,6 +1312,7 @@ impl TerminalGridElement {
             .unwrap_or_else(|_| Arc::new(std::sync::atomic::AtomicU8::new(0)));
         Self {
             snapshot,
+            glass_dirty_snapshot,
             cell_metrics,
             font_family,
             font_size,
@@ -1316,6 +1327,7 @@ impl TerminalGridElement {
             smooth_scroll_px,
             cursor_smear,
             shaped_line_cache,
+            glass_dirty_tracker,
             terminal_ime_layout,
             shell_is_foreground,
             mouse_modes,
@@ -1331,6 +1343,27 @@ impl TerminalGridElement {
         RuntimeGridView {
             grid: &self.snapshot.grid,
             palette: &self.palette,
+        }
+    }
+
+    fn mark_terminal_content_dirty_for_glass(&self, ctx: &mut PaintContext) {
+        let grid = &self.glass_dirty_snapshot.grid;
+        let fingerprint = TerminalGlassContentFingerprint::from_visible_lines(
+            grid.cols,
+            grid.rows,
+            grid.display_offset,
+            grid.history_size,
+            grid.lines.iter().map(|line| line.text.as_str()),
+        );
+        let dirty = self
+            .glass_dirty_tracker
+            .lock()
+            .map(|mut tracker| {
+                tracker.did_content_change(&self.glass_dirty_snapshot.session_id, fingerprint)
+            })
+            .unwrap_or(false);
+        if dirty {
+            ctx.scene.set_terminal_content_dirty_for_glass(true);
         }
     }
 
@@ -2727,6 +2760,7 @@ impl Element for TerminalGridElement {
 
     fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, _: &AppContext) {
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
+        self.mark_terminal_content_dirty_for_glass(ctx);
 
         let grid = self.grid();
         let cell_w = self.cell_metrics.width;

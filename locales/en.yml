@@ -242,6 +242,10 @@ appearance_theme: Theme
 appearance_themes: Themes
 appearance_window: Window
 appearance_window_opacity: "Window Opacity: %{value}"
+appearance_glass_quality: Glass
+appearance_glass_quality_off: "Off"
+appearance_glass_quality_frosted: Frosted
+appearance_glass_quality_liquid: Liquid
 appearance_text: Text
 appearance_terminal_font: Terminal font
 appearance_view_all_fonts: View all available system fonts

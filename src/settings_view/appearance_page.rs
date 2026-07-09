@@ -21,7 +21,7 @@ use warpui::{
 };
 
 use super::super::terminal_grid_element::{
-    CursorStyleChoice, LanguageChoice, TerminalGridAction, ThemeChoice,
+    CursorStyleChoice, GlassQualityChoice, LanguageChoice, TerminalGridAction, ThemeChoice,
 };
 use super::render_helpers::{
     render_category_header, render_page_title, render_setting_row, CONTENT_FONT_SIZE,
@@ -38,6 +38,8 @@ pub struct AppearancePageState {
     pub current_theme_state: MouseStateHandle,
     pub reuse_view_tab_switch: SwitchStateHandle,
     pub opacity_slider_state: SliderStateHandle,
+    pub glass_quality_radio_state: RadioButtonStateHandle,
+    pub glass_quality_mouse_states: Vec<MouseStateHandle>,
     pub cursor_style_radio_state: RadioButtonStateHandle,
     pub cursor_style_mouse_states: Vec<MouseStateHandle>,
     // Text 区块
@@ -59,6 +61,11 @@ impl Default for AppearancePageState {
             current_theme_state: Arc::new(Mutex::new(MouseState::default())),
             reuse_view_tab_switch: SwitchStateHandle::default(),
             opacity_slider_state: SliderStateHandle::default(),
+            glass_quality_radio_state: RadioButtonStateHandle::default(),
+            glass_quality_mouse_states: GlassQualityChoice::ALL
+                .iter()
+                .map(|_| Arc::new(Mutex::new(MouseState::default())))
+                .collect(),
             cursor_style_radio_state: RadioButtonStateHandle::default(),
             cursor_style_mouse_states: CursorStyleChoice::ALL
                 .iter()
@@ -86,6 +93,7 @@ pub fn render_appearance_page(
     current_font_size: f32,
     line_height_ratio: f32,
     window_opacity: u8,
+    current_glass_quality: GlassQualityChoice,
     cursor_style: CursorStyleChoice,
     current_font_weight: warpui::fonts::Weight,
     current_font_name: &str,
@@ -168,6 +176,39 @@ pub fn render_appearance_page(
         .finish();
 
     col.add_child(render_setting_row(opacity_label, opacity_slider));
+
+    let glass_label = Text::new_inline(
+        rust_i18n::t!("appearance_glass_quality"),
+        ui_font,
+        CONTENT_FONT_SIZE,
+    )
+    .with_color(theme.active_ui_text_color().into())
+    .finish();
+
+    let glass_radio = appearance
+        .ui_builder()
+        .radio_buttons(
+            state.glass_quality_mouse_states.clone(),
+            GlassQualityChoice::ALL
+                .iter()
+                .map(|quality| RadioButtonItem::text(quality.label()))
+                .collect(),
+            state.glass_quality_radio_state.clone(),
+            Some(current_glass_quality.to_index()),
+            CONTENT_FONT_SIZE,
+            RadioButtonLayout::Row,
+        )
+        .on_change(Rc::new(move |ctx, _, index| {
+            if let Some(idx) = index {
+                if let Some(quality) = GlassQualityChoice::from_index(idx) {
+                    ctx.dispatch_typed_action(TerminalGridAction::SetGlassQuality(quality));
+                }
+            }
+        }))
+        .build()
+        .finish();
+
+    col.add_child(render_setting_row(glass_label, glass_radio));
     col.add_child(crate::settings_view::render_helpers::render_separator(
         appearance,
     ));

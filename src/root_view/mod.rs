@@ -86,9 +86,11 @@ use crate::host_management_view::HostManagementViewStates;
 #[cfg(target_os = "macos")]
 use crate::macos_window_util;
 use crate::terminal_grid_element::{
-    CursorStyleChoice, FindPanelState, LanguageChoice, ScrollbarDrag, TerminalGridAction,
-    TerminalImeLayout, TerminalShapedLineCache, ThemeChoice, TERMINAL_CURSOR_POSITION_ID,
+    CursorStyleChoice, FindPanelState, GlassQualityChoice, LanguageChoice, ScrollbarDrag,
+    TerminalGridAction, TerminalImeLayout, TerminalShapedLineCache, ThemeChoice,
+    TERMINAL_CURSOR_POSITION_ID,
 };
+use crate::terminal_grid_glass_dirty::TerminalGlassDirtyTracker;
 use crate::terminal_view_helpers::{
     connected_serial_tab_port, inactive_terminal_runtime, occupied_serial_port_index,
     root_debug_key_log, root_overlay_event_dispatch_mode, serial_port_from_host_config,
@@ -262,6 +264,7 @@ pub(crate) struct RootView {
     smooth_scroll_px: Arc<Mutex<f64>>,
     cursor_smear: Arc<Mutex<crate::cursor_smear::CursorSmear>>,
     shaped_line_cache: Arc<Mutex<TerminalShapedLineCache>>,
+    terminal_glass_dirty_tracker: Arc<Mutex<TerminalGlassDirtyTracker>>,
     terminal_ime_layout: Arc<Mutex<Option<TerminalImeLayout>>>,
     terminal_font_size: f32,
     line_height_ratio: f32,
@@ -289,6 +292,7 @@ pub(crate) struct RootView {
     // 随主题缓存的设计 token（chrome/overview/host 三套派生色）
     design_tokens: DesignTokens,
     window_opacity: u8,
+    glass_quality: GlassQualityChoice,
     cursor_style: CursorStyleChoice,
     monospace_font_name: String,
     monospace_font_weight: warpui::fonts::Weight,
@@ -355,6 +359,7 @@ impl RootView {
         ctx.focus_self();
         Self::sync_titlebar_height(ctx);
         Self::apply_window_opacity(ctx, ui_settings.opacity);
+        nexshell::glass_backdrop::set_glass_quality(ui_settings.glass_quality);
 
         // 不为占位 spawn 真 shell（Warp 无此物，PTY 仅真会话时才建）；首个真终端按需 spawn。
         let terminal = LocalTerminalRuntime::failed("placeholder", "");
@@ -723,6 +728,9 @@ impl RootView {
             smooth_scroll_px: Arc::new(Mutex::new(0.0)),
             cursor_smear: Arc::new(Mutex::new(crate::cursor_smear::CursorSmear::new())),
             shaped_line_cache: Arc::new(Mutex::new(TerminalShapedLineCache::default())),
+            terminal_glass_dirty_tracker: Arc::new(
+                Mutex::new(TerminalGlassDirtyTracker::default()),
+            ),
             terminal_ime_layout: Arc::new(Mutex::new(None)),
             terminal_font_size: ui_settings.font_size,
             line_height_ratio: ui_settings.line_height_ratio,
@@ -740,6 +748,7 @@ impl RootView {
             cached_warp_theme,
             design_tokens,
             window_opacity: ui_settings.opacity,
+            glass_quality: ui_settings.glass_quality,
             cursor_style: ui_settings.cursor_style,
             monospace_font_name: ui_settings.font_family.clone(),
             monospace_font_weight: ui_settings.font_weight,
@@ -2423,6 +2432,9 @@ impl TypedActionView for RootView {
                 self.handle_set_terminal_font_size(*size, ctx)
             }
             TerminalGridAction::SetOpacity(value) => self.handle_set_opacity(*value, ctx),
+            TerminalGridAction::SetGlassQuality(choice) => {
+                self.handle_set_glass_quality(*choice, ctx)
+            }
             TerminalGridAction::SetCursorStyle(style) => self.handle_set_cursor_style(*style, ctx),
             TerminalGridAction::SetFontFamily(name) => {
                 self.handle_set_font_family(name.clone(), ctx)
@@ -3195,6 +3207,7 @@ impl RootView {
             line_height_ratio: self.line_height_ratio,
             git_history_height: self.git_history_height,
             opacity: self.window_opacity,
+            glass_quality: self.glass_quality,
             cursor_style: self.cursor_style,
             font_family: self.monospace_font_name.clone(),
             font_weight: self.monospace_font_weight,
