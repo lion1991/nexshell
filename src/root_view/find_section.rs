@@ -5,10 +5,12 @@
 // 分发；render_find_bar 由 mod.rs impl View::render 调用——均用 pub(in crate::root_view)。
 // 仅本文件内调用的 handle_find_editor_event 保持私有。find_match_label 已于 step 10 归 terminal_view_helpers。
 
+use nexshell::terminal_runtime::{encode_terminal_key_event_with_modes, TerminalInputModes};
 use nexshell::text_editor::{
     EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
 };
 use warp_core::ui::theme::color::internal_colors::{neutral_2, neutral_3, neutral_4};
+use warp_editor::editor::NavigationKey;
 use warpui::color::ColorU;
 use warpui::elements::{
     Align, Border, Clipped, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Fill,
@@ -51,6 +53,14 @@ impl RootView {
         if !find_active {
             return;
         }
+        if let Ok(rt) = self.terminal.lock() {
+            let input_modes = rt.snapshot().grid.input_modes;
+            if let Some(bytes) = find_editor_terminal_input_bytes(event, input_modes) {
+                rt.send_input(bytes);
+                ctx.notify();
+                return;
+            }
+        }
         match event {
             EditorEvent::Edited(_) => {
                 let query = self.find_editor.as_ref(ctx).buffer_text(ctx);
@@ -59,18 +69,6 @@ impl RootView {
                 }
                 if let Ok(rt) = self.terminal.lock() {
                     rt.set_find_query((!query.is_empty()).then(|| query));
-                }
-                ctx.notify();
-            }
-            EditorEvent::Enter => {
-                if let Ok(rt) = self.terminal.lock() {
-                    rt.step_find(1);
-                }
-                ctx.notify();
-            }
-            EditorEvent::ShiftEnter => {
-                if let Ok(rt) = self.terminal.lock() {
-                    rt.step_find(-1);
                 }
                 ctx.notify();
             }
@@ -356,5 +354,55 @@ impl RootView {
             .top_right()
             .finish(),
         )
+    }
+}
+
+fn find_editor_terminal_input_bytes(
+    event: &EditorEvent,
+    input_modes: TerminalInputModes,
+) -> Option<Vec<u8>> {
+    let (key, shift) = match event {
+        EditorEvent::Enter => ("enter", false),
+        EditorEvent::ShiftEnter => ("enter", true),
+        EditorEvent::Navigate(NavigationKey::Up) => ("up", false),
+        EditorEvent::Navigate(NavigationKey::Down) => ("down", false),
+        _ => return None,
+    };
+    encode_terminal_key_event_with_modes(key, None, None, false, false, shift, false, input_modes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_find_editor_forwards_shell_navigation_keys_to_terminal_input() {
+        let modes = nexshell::terminal_runtime::TerminalInputModes::default();
+
+        assert_eq!(
+            find_editor_terminal_input_bytes(&EditorEvent::Enter, modes),
+            Some(b"\r".to_vec()),
+            "Enter should submit terminal input while the find bar is focused"
+        );
+        assert_eq!(
+            find_editor_terminal_input_bytes(&EditorEvent::ShiftEnter, modes),
+            Some(b"\\\r".to_vec()),
+            "Shift-Enter should preserve terminal shift-enter encoding"
+        );
+        assert_eq!(
+            find_editor_terminal_input_bytes(&EditorEvent::Navigate(NavigationKey::Up), modes),
+            Some(b"\x1b[A".to_vec()),
+            "Up should remain terminal history/navigation input"
+        );
+        assert_eq!(
+            find_editor_terminal_input_bytes(&EditorEvent::Navigate(NavigationKey::Down), modes),
+            Some(b"\x1b[B".to_vec()),
+            "Down should remain terminal history/navigation input"
+        );
+        assert_eq!(
+            find_editor_terminal_input_bytes(&EditorEvent::Navigate(NavigationKey::Tab), modes),
+            None,
+            "Tab remains focus navigation, not terminal input"
+        );
     }
 }

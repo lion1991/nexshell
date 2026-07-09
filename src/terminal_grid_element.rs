@@ -1781,14 +1781,14 @@ fn terminal_action_needs_notify(action: &TerminalGridAction) -> bool {
     !matches!(action, TerminalGridAction::CopySelection)
 }
 
-// 焦点在终端时 find bar 的快捷键（文字输入由 EditorView 处理）
+// 焦点在终端时只保留 find bar 关闭键；Enter/方向键继续走正常终端输入。
 fn find_action_for_key(
     key: &str,
     _chars: &str,
     _cmd: bool,
     _ctrl: bool,
     _alt: bool,
-    shift: bool,
+    _shift: bool,
     active: bool,
     _current_query: &str,
 ) -> Option<TerminalGridAction> {
@@ -1797,9 +1797,6 @@ fn find_action_for_key(
     }
     match key {
         "escape" => Some(TerminalGridAction::CloseFindBar),
-        "enter" => Some(TerminalGridAction::FindStep(if shift { -1 } else { 1 })),
-        "up" => Some(TerminalGridAction::FindStep(-1)),
-        "down" => Some(TerminalGridAction::FindStep(1)),
         _ => None,
     }
 }
@@ -4950,18 +4947,26 @@ mod tests {
     }
 
     #[test]
-    fn active_find_keys_update_query_and_step_matches() {
+    fn active_find_keys_only_close_find_and_leave_terminal_input_keys_alone() {
         assert_eq!(
             find_action_for_key("escape", "", false, false, false, false, true, "abc"),
             Some(TerminalGridAction::CloseFindBar)
         );
         assert_eq!(
             find_action_for_key("enter", "", false, false, false, false, true, "abc"),
-            Some(TerminalGridAction::FindStep(1))
+            None
         );
         assert_eq!(
             find_action_for_key("enter", "", false, false, false, true, true, "abc"),
-            Some(TerminalGridAction::FindStep(-1))
+            None
+        );
+        assert_eq!(
+            find_action_for_key("up", "", false, false, false, false, true, "abc"),
+            None
+        );
+        assert_eq!(
+            find_action_for_key("down", "", false, false, false, false, true, "abc"),
+            None
         );
         // backspace / 字符输入由 EditorView 处理，不再经过 find_action_for_key
         assert_eq!(
