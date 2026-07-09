@@ -2838,11 +2838,13 @@ impl<A: Action + Clone> SubMenu<A> {
                     container = container.with_border(border);
                 }
 
+                // 投影层圆角须与菜单盒一致：阴影镂空跟此层走，方角会在圆角外露出深色月牙。
                 let mut menu = Container::new(
                     ConstrainedBox::new(container.finish())
                         .with_width(submenu_width)
                         .finish(),
-                );
+                )
+                .with_corner_radius(corner_radius);
 
                 if with_drop_shadow {
                     menu = Elevation::overlay().apply_container(menu);

@@ -217,6 +217,7 @@ impl RootView {
                     .borrow_mut()
                     .search_bar
                     .protocol_dropdown_open = false;
+                self.sync_container_fleet(ctx);
                 ctx.notify();
             }
             EditorEvent::Escape => {
@@ -230,6 +231,7 @@ impl RootView {
                         editor.system_reset_buffer_text("", ctx);
                     }
                 });
+                self.sync_container_fleet(ctx);
                 ctx.notify();
             }
             _ => {}

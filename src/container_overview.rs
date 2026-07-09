@@ -263,6 +263,14 @@ pub fn container_logs_command(name_or_id: &str) -> String {
     )
 }
 
+/// 生成交互 shell 命令：优先 bash，无 bash 落回 sh。转义规则同 container_action_command。
+pub fn container_shell_command(name_or_id: &str) -> String {
+    format!(
+        "docker exec -it {} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'",
+        shell_single_quote(name_or_id)
+    )
+}
+
 /// POSIX 单引号转义：' → '\''。
 fn shell_single_quote(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
@@ -756,6 +764,18 @@ Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docke
         assert_eq!(
             container_logs_command("a'b"),
             "docker logs -f --tail 200 'a'\\''b'"
+        );
+    }
+
+    #[test]
+    fn shell_command_prefers_bash_falls_back_to_sh() {
+        assert_eq!(
+            container_shell_command("web"),
+            "docker exec -it 'web' sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'"
+        );
+        assert_eq!(
+            container_shell_command("a'b"),
+            "docker exec -it 'a'\\''b' sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'"
         );
     }
 

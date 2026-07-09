@@ -54,7 +54,7 @@ use nexshell::git_panel::{apply_git_event, spawn_git_worker, GitEvent, GitPanelS
 use nexshell::host_management::{
     default_database_path, load_or_initialize_host_management_snapshot_from_db_path,
     unavailable_host_management_snapshot, HostConnectionConfig, HostConnectionPlan,
-    HostManagementState, RecentHostSnapshot,
+    HostManagementState, HostViewMode, RecentHostSnapshot,
 };
 use nexshell::host_overview::{
     should_run_host_overview_monitor, should_show_host_overview_sidebar,
@@ -1463,6 +1463,14 @@ impl RootView {
                 .gauge_anim
                 .borrow()
                 .any_animating(now)
+            || (self.app_page == AppPage::HostManagement
+                && self.host_state.view_mode == HostViewMode::Containers
+                && self
+                    .host_view_states
+                    .borrow()
+                    .container_cards
+                    .loading_animating
+                    .get())
             || self
                 .host_view_states
                 .borrow()
@@ -2289,6 +2297,16 @@ impl TypedActionView for RootView {
                 container_id,
                 container_name,
             } => self.handle_container_open_logs(
+                host_id.clone(),
+                container_id.clone(),
+                container_name.clone(),
+                ctx,
+            ),
+            TerminalGridAction::ContainerOpenShell {
+                host_id,
+                container_id,
+                container_name,
+            } => self.handle_container_open_shell(
                 host_id.clone(),
                 container_id.clone(),
                 container_name.clone(),

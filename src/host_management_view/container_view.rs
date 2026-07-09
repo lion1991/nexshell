@@ -1,18 +1,21 @@
 // 容器管理视图：按主机分组的容器卡片网格（ServerCat Containers 风格）。
 // 数据来自 RootView 的 ContainerFleet；操作菜单通过 TerminalGridAction 派发给 RootView。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use pathfinder_geometry::{rect::RectF, vector::vec2f};
 use warpui::{
     color::ColorU,
     elements::{
-        Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
-        Hoverable, MainAxisSize, MouseState, MouseStateHandle, ParentElement, Radius, Text,
+        AfterLayoutContext, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+        Empty, Expanded, Flex, Hoverable, LayoutContext, MainAxisSize, MouseState,
+        MouseStateHandle, ParentElement, Point, Radius, SizeConstraint, Text,
     },
-    fonts, Element,
+    event::DispatchedEvent,
+    fonts, AppContext, Element, EventContext, PaintContext,
 };
 
 use nexshell::container_fleet::ContainerFleet;
@@ -27,15 +30,24 @@ use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
 
 const CONTAINER_GRID_COLUMNS: usize = 2;
+const LOADING_DOT_COUNT: usize = 3;
+const LOADING_DOT_SIZE: f32 = 7.0;
+const LOADING_DOT_GAP: f32 = 7.0;
+const LOADING_DOT_CYCLE: f32 = 0.9;
 
 /// 容器卡片 "⋯" 菜单按钮的 hover 状态，按容器 id 持久（容器列表随刷新变化，用 map 而非 Vec）。
 #[derive(Default)]
 pub struct ContainerCardStates {
     menu_button_states: RefCell<HashMap<String, MouseStateHandle>>,
+    /// 卡片整卡右键的 hover 状态占位（不驱动视觉），key 规则同 menu_button_states。
+    card_hover_states: RefCell<HashMap<String, MouseStateHandle>>,
     /// CPU 环 sweep 过渡（key = "{host_id}:{container_id}"）。
     pub gauge_anim: RefCell<nexshell::ui_anim::FloatTransitionMap<String>>,
     /// 容器名搜索框 hover 态，供 render_search_input 用。
     pub search_input_state: MouseStateHandle,
+    /// 页面级加载动画是否活跃；RootView 的 16ms UI tick 读取它来驱动重绘。
+    pub loading_animating: Cell<bool>,
+    loading_started_at: RefCell<Option<Instant>>,
 }
 
 impl ContainerCardStates {
@@ -51,6 +63,34 @@ impl ContainerCardStates {
             .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
             .clone()
     }
+
+    fn card_hover_state(&self, key: String) -> MouseStateHandle {
+        self.card_hover_states
+            .borrow_mut()
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
+            .clone()
+    }
+
+    fn loading_started_at(&self, now: Instant) -> Instant {
+        let mut started_at = self.loading_started_at.borrow_mut();
+        *started_at.get_or_insert(now)
+    }
+
+    fn set_loading_animating(&self, loading: bool) {
+        self.loading_animating.set(loading);
+        if !loading {
+            *self.loading_started_at.borrow_mut() = None;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContainerPageFallback {
+    None,
+    Loading,
+    Empty,
+    SearchNoMatch,
 }
 
 pub fn render_container_view(
@@ -66,6 +106,7 @@ pub fn render_container_view(
         .filter(|host| host.protocol.eq_ignore_ascii_case("SSH"))
         .collect();
     if ssh_hosts.is_empty() {
+        states.set_loading_animating(false);
         return Container::new(Empty::new().finish())
             .with_background_color(hc.panel_bg)
             .finish();
@@ -79,6 +120,10 @@ pub fn render_container_view(
         .menu_button_states
         .borrow_mut()
         .retain(|key, _| host_alive(key));
+    states
+        .card_hover_states
+        .borrow_mut()
+        .retain(|key, _| host_alive(key));
 
     let mut col = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
@@ -87,15 +132,12 @@ pub fn render_container_view(
     let needle = query.trim().to_lowercase();
     let searching = !needle.is_empty();
     let mut any_visible = false;
-    let mut any_settled = false;
+    let mut any_loading = false;
+    let mut all_hosts_empty = true;
     for host in ssh_hosts.iter() {
         let state = fleet.state(&host.id);
-        if let Some(ui) = state {
-            let snap = &ui.snapshot;
-            if snap.has_collected_data() || snap.status == ContainerCollectStatus::Ready {
-                any_settled = true;
-            }
-        }
+        any_loading |= host_container_is_loading(state);
+        all_hosts_empty &= host_has_empty_container_conclusion(state);
         // 搜索态：无匹配容器的主机整节隐藏（不管加载/错误/无 docker）；非搜索态走原隐藏判定。
         let hidden = if searching {
             !host_has_match(state, &needle)
@@ -113,22 +155,33 @@ pub fn render_container_view(
         ));
         any_visible = true;
     }
-    if !any_visible {
-        if searching {
+    let page_fallback =
+        container_page_fallback(searching, any_visible, any_loading, all_hosts_empty);
+    states.set_loading_animating(page_fallback == ContainerPageFallback::Loading);
+    match page_fallback {
+        ContainerPageFallback::SearchNoMatch => {
             col.add_child(render_none_visible_placeholder_text(
                 rust_i18n::t!("container_search_no_match").to_string(),
                 ui_font,
                 hc,
             ));
-        } else if any_settled {
-            // 全部隐藏时：仅在至少一台主机已有确定结论（真无容器/无 docker 等）时提示；
-            // 若都还在加载/连不上（无结论）则留空，不误显占位、也不显示加载过程。
+        }
+        ContainerPageFallback::Loading => {
+            col.add_child(render_loading_placeholder(
+                states.loading_started_at(now),
+                now,
+                ui_font,
+                hc,
+            ));
+        }
+        ContainerPageFallback::Empty => {
             col.add_child(render_none_visible_placeholder_text(
                 rust_i18n::t!("host_container_none_visible").to_string(),
                 ui_font,
                 hc,
             ));
         }
+        ContainerPageFallback::None => {}
     }
 
     Container::new(col.finish())
@@ -148,10 +201,55 @@ fn host_has_match(state: Option<&ContainerOverviewUiState>, needle: &str) -> boo
     })
 }
 
+fn container_page_fallback(
+    searching: bool,
+    any_visible: bool,
+    any_loading: bool,
+    all_hosts_empty: bool,
+) -> ContainerPageFallback {
+    if any_visible {
+        return ContainerPageFallback::None;
+    }
+    if searching {
+        return ContainerPageFallback::SearchNoMatch;
+    }
+    if any_loading {
+        return ContainerPageFallback::Loading;
+    }
+    if all_hosts_empty {
+        return ContainerPageFallback::Empty;
+    }
+    ContainerPageFallback::None
+}
+
+fn host_container_is_loading(state: Option<&ContainerOverviewUiState>) -> bool {
+    let Some(ui) = state else { return true };
+    let snap = &ui.snapshot;
+    !snap.has_collected_data()
+        && !matches!(
+            snap.status,
+            ContainerCollectStatus::Ready | ContainerCollectStatus::Error(_)
+        )
+}
+
+fn host_has_empty_container_conclusion(state: Option<&ContainerOverviewUiState>) -> bool {
+    let Some(ui) = state else { return false };
+    let snap = &ui.snapshot;
+    snap.containers.is_empty()
+        && matches!(
+            (&snap.status, &snap.error),
+            (ContainerCollectStatus::Ready, None)
+                | (
+                    ContainerCollectStatus::Ready,
+                    Some(ContainerProbeError::NoDocker)
+                )
+        )
+}
+
 /// 隐藏无意义的整节：从未采到数据的过渡/失败态（初次等待/重连采集中/连不上）、未装 docker、已就绪且无容器。
 /// 保留：有存量容器的瞬时错误（操作失败，has_collected_data 为真）、权限拒绝、其他错误、有容器。
 fn host_section_hidden(state: Option<&ContainerOverviewUiState>) -> bool {
-    let Some(ui) = state else { return false };
+    let Some(ui) = state else { return true };
     let snap = &ui.snapshot;
     // 从未采到有效数据、且未落到 Ready 的态（Waiting/Collecting/连不上的 Error）一律隐藏——
     // 重连的 Collecting 占位帧不再闪「加载中」；有存量容器的瞬时 Error 因 has_collected_data 为真而保留。
@@ -187,6 +285,125 @@ fn render_none_visible_placeholder_text(
             .finish(),
         )
         .finish()
+}
+
+fn render_loading_placeholder(
+    started_at: Instant,
+    now: Instant,
+    ui_font: fonts::FamilyId,
+    hc: &HostUiColors,
+) -> Box<dyn Element> {
+    Flex::column()
+        .with_main_axis_size(MainAxisSize::Min)
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_child(
+            Container::new(LoadingDots::new(started_at, now, hc.text_secondary).finish())
+                .with_padding_top(34.0)
+                .with_padding_bottom(12.0)
+                .finish(),
+        )
+        .with_child(
+            Text::new_inline(
+                rust_i18n::t!("host_container_loading").to_string(),
+                ui_font,
+                UI_FONT_SIZE,
+            )
+            .with_color(hc.text_secondary)
+            .finish(),
+        )
+        .finish()
+}
+
+struct LoadingDots {
+    started_at: Instant,
+    now: Instant,
+    color: ColorU,
+    origin: Option<Point>,
+}
+
+impl LoadingDots {
+    fn new(started_at: Instant, now: Instant, color: ColorU) -> Self {
+        Self {
+            started_at,
+            now,
+            color,
+            origin: None,
+        }
+    }
+
+    fn finish(self) -> Box<dyn Element> {
+        Box::new(self)
+    }
+
+    fn size_vec() -> pathfinder_geometry::vector::Vector2F {
+        vec2f(
+            LOADING_DOT_COUNT as f32 * LOADING_DOT_SIZE
+                + LOADING_DOT_COUNT.saturating_sub(1) as f32 * LOADING_DOT_GAP,
+            LOADING_DOT_SIZE,
+        )
+    }
+}
+
+impl Element for LoadingDots {
+    fn layout(
+        &mut self,
+        _constraint: SizeConstraint,
+        _ctx: &mut LayoutContext,
+        _app: &AppContext,
+    ) -> pathfinder_geometry::vector::Vector2F {
+        Self::size_vec()
+    }
+
+    fn after_layout(&mut self, _ctx: &mut AfterLayoutContext, _app: &AppContext) {}
+
+    fn paint(
+        &mut self,
+        origin: pathfinder_geometry::vector::Vector2F,
+        ctx: &mut PaintContext,
+        _app: &AppContext,
+    ) {
+        self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
+        let phase = loading_phase(self.now.saturating_duration_since(self.started_at));
+        for dot in 0..LOADING_DOT_COUNT {
+            let x = dot as f32 * (LOADING_DOT_SIZE + LOADING_DOT_GAP);
+            let mut color = self.color;
+            color.a = loading_dot_alpha(phase, dot);
+            ctx.scene
+                .draw_rect_without_hit_recording(RectF::new(
+                    origin + vec2f(x, 0.0),
+                    vec2f(LOADING_DOT_SIZE, LOADING_DOT_SIZE),
+                ))
+                .with_corner_radius(CornerRadius::with_all(Radius::Percentage(50.0)))
+                .with_background(color);
+        }
+    }
+
+    fn size(&self) -> Option<pathfinder_geometry::vector::Vector2F> {
+        Some(Self::size_vec())
+    }
+
+    fn origin(&self) -> Option<Point> {
+        self.origin
+    }
+
+    fn dispatch_event(
+        &mut self,
+        _event: &DispatchedEvent,
+        _ctx: &mut EventContext,
+        _app: &AppContext,
+    ) -> bool {
+        false
+    }
+}
+
+fn loading_phase(elapsed: Duration) -> f32 {
+    (elapsed.as_secs_f32() / LOADING_DOT_CYCLE).fract()
+}
+
+fn loading_dot_alpha(phase: f32, dot: usize) -> u8 {
+    let dot_phase = dot as f32 / LOADING_DOT_COUNT as f32;
+    let wave = ((phase - dot_phase) * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+    (0x55 as f32 + wave * 0xaa as f32).round() as u8
 }
 
 /// 单主机节：标题 + 容器双列网格 / 异常占位文案。
@@ -426,12 +643,32 @@ fn render_container_card(
         .with_child(body)
         .finish();
 
-    Container::new(content)
+    let card = Container::new(content)
         .with_horizontal_padding(CARD_PADDING)
         .with_vertical_padding(CARD_PADDING)
         .with_background_color(hc.card_bg)
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(CARD_CORNER_RADIUS)))
         .with_border(Border::all(1.0).with_border_color(hc.card_border))
+        .finish();
+
+    // 整卡右键：与 "⋯" 按钮派发同一 action；hover 态仅占位，不改卡片视觉。
+    let card_hover_state = states.card_hover_state(format!("{host_id}:card:{}", container.id));
+    let host_id = host_id.to_string();
+    let container_id = container.id.clone();
+    let container_name = container.name.clone();
+    let container_state = container.state;
+
+    Hoverable::new(card_hover_state, move |_| card)
+        .with_defer_events_to_children()
+        .on_right_click(move |ctx, _, position| {
+            ctx.dispatch_typed_action(TerminalGridAction::ContainerShowMenu {
+                host_id: host_id.clone(),
+                container_id: container_id.clone(),
+                container_name: container_name.clone(),
+                state: container_state,
+                position,
+            });
+        })
         .finish()
 }
 
@@ -623,6 +860,39 @@ fn render_net_segment(
         .with_child(spacer_v(6.0))
         .with_child(inline_stat_row("↓", rx, ui_font, hc))
         .finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn container_page_fallback_keeps_loading_until_all_hosts_are_empty() {
+        assert_eq!(
+            container_page_fallback(false, false, true, false),
+            ContainerPageFallback::Loading
+        );
+        assert_eq!(
+            container_page_fallback(false, false, false, true),
+            ContainerPageFallback::Empty
+        );
+    }
+
+    #[test]
+    fn loading_dot_alpha_staggers_three_dots() {
+        let first_dot_peak = loading_dot_alpha(0.0, 0);
+        let second_dot_at_first_peak = loading_dot_alpha(0.0, 1);
+        let second_dot_peak = loading_dot_alpha(1.0 / 3.0, 1);
+
+        assert!(first_dot_peak > second_dot_at_first_peak);
+        assert!(second_dot_peak > second_dot_at_first_peak);
+    }
+
+    #[test]
+    fn missing_host_state_is_page_level_loading_not_host_section() {
+        assert!(host_container_is_loading(None));
+        assert!(host_section_hidden(None));
+    }
 }
 
 /// 行内 "标签 数字单位"：标签灰小字，值 bold + 单位小灰。

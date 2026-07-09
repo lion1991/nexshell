@@ -888,6 +888,11 @@ pub enum TerminalGridAction {
         container_id: String,
         container_name: String,
     },
+    ContainerOpenShell {
+        host_id: String,
+        container_id: String,
+        container_name: String,
+    },
     ShowHostManagement,
     OpenProcessList,
     OpenNetworkList,

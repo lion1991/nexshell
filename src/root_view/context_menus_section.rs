@@ -475,7 +475,7 @@ impl RootView {
         warpui::elements::ChildView::new(&self.container_card_context_menu).finish()
     }
 
-    /// 容器卡片右键 / "⋯" 菜单：内容按容器当前状态出（Running 停止+重启，非 Running 启动），日志常显。
+    /// 容器卡片右键 / "⋯" 菜单：五项常驻（Logs/Shell/Start/Restart/Stop），按状态灰显不可用项。
     pub(crate) fn show_container_card_context_menu(
         &mut self,
         host_id: String,
@@ -514,49 +514,56 @@ impl RootView {
     ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
         use nexshell::container_overview::{ContainerAction, ContainerState};
         use nexshell::menu::{MenuItem, MenuItemFields};
+        use nexshell::ui_components::icons::Icon;
 
-        let mut items = Vec::new();
-        if state == ContainerState::Running {
-            items.push(
-                MenuItemFields::new(rust_i18n::t!("host_container_menu_stop"))
-                    .with_on_select_action(TerminalGridAction::ContainerExec {
-                        host_id: host_id.clone(),
-                        container_id: container_id.clone(),
-                        action: ContainerAction::Stop,
-                    })
-                    .into_item(),
-            );
-            items.push(
-                MenuItemFields::new(rust_i18n::t!("host_container_menu_restart"))
-                    .with_on_select_action(TerminalGridAction::ContainerExec {
-                        host_id: host_id.clone(),
-                        container_id: container_id.clone(),
-                        action: ContainerAction::Restart,
-                    })
-                    .into_item(),
-            );
-        } else {
-            items.push(
-                MenuItemFields::new(rust_i18n::t!("host_container_menu_start"))
-                    .with_on_select_action(TerminalGridAction::ContainerExec {
-                        host_id: host_id.clone(),
-                        container_id: container_id.clone(),
-                        action: ContainerAction::Start,
-                    })
-                    .into_item(),
-            );
-        }
-        items.push(MenuItem::Separator);
-        items.push(
+        let running = state == ContainerState::Running;
+        vec![
             MenuItemFields::new(rust_i18n::t!("host_container_menu_logs"))
+                .with_icon(Icon::File)
                 .with_on_select_action(TerminalGridAction::ContainerOpenLogs {
-                    host_id,
-                    container_id,
+                    host_id: host_id.clone(),
+                    container_id: container_id.clone(),
+                    container_name: container_name.clone(),
+                })
+                .into_item(),
+            MenuItemFields::new(rust_i18n::t!("host_container_menu_shell"))
+                .with_icon(Icon::Terminal)
+                .with_disabled(!running)
+                .with_on_select_action(TerminalGridAction::ContainerOpenShell {
+                    host_id: host_id.clone(),
+                    container_id: container_id.clone(),
                     container_name,
                 })
                 .into_item(),
-        );
-        items
+            MenuItem::Separator,
+            MenuItemFields::new(rust_i18n::t!("host_container_menu_start"))
+                .with_icon(Icon::Play)
+                .with_disabled(running)
+                .with_on_select_action(TerminalGridAction::ContainerExec {
+                    host_id: host_id.clone(),
+                    container_id: container_id.clone(),
+                    action: ContainerAction::Start,
+                })
+                .into_item(),
+            MenuItemFields::new(rust_i18n::t!("host_container_menu_restart"))
+                .with_icon(Icon::RefreshCw04)
+                .with_disabled(!running)
+                .with_on_select_action(TerminalGridAction::ContainerExec {
+                    host_id: host_id.clone(),
+                    container_id: container_id.clone(),
+                    action: ContainerAction::Restart,
+                })
+                .into_item(),
+            MenuItemFields::new(rust_i18n::t!("host_container_menu_stop"))
+                .with_icon(Icon::Stop)
+                .with_disabled(!running)
+                .with_on_select_action(TerminalGridAction::ContainerExec {
+                    host_id,
+                    container_id,
+                    action: ContainerAction::Stop,
+                })
+                .into_item(),
+        ]
     }
 
     pub(crate) fn show_process_list_context_menu(

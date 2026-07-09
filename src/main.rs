@@ -256,6 +256,15 @@ impl AssetProvider for EmbeddedAssets {
             "bundled/svg/chevron-down.svg" => {
                 include_bytes!("../assets/bundled/svg/chevron-down.svg")
             }
+            "bundled/svg/file.svg" => include_bytes!("../assets/bundled/svg/file.svg"),
+            "bundled/svg/terminal.svg" => include_bytes!("../assets/bundled/svg/terminal.svg"),
+            "bundled/svg/play-white.svg" => {
+                include_bytes!("../assets/bundled/svg/play-white.svg")
+            }
+            "bundled/svg/refresh-cw-04.svg" => {
+                include_bytes!("../assets/bundled/svg/refresh-cw-04.svg")
+            }
+            "bundled/svg/stop.svg" => include_bytes!("../assets/bundled/svg/stop.svg"),
             TAB_COLOR_ICON_PATH => {
                 include_bytes!("../assets/bundled/svg/ellipse.svg")
             }

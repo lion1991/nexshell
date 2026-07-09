@@ -115,6 +115,7 @@ host_container_menu_start: 启动
 host_container_menu_stop: 停止
 host_container_menu_restart: 重启
 host_container_menu_logs: 日志
+host_container_menu_shell: Shell
 container_search_placeholder: 搜索容器名…
 container_search_no_match: 无匹配的容器
 container_action_error: 操作失败

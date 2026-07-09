@@ -160,6 +160,60 @@ impl RootView {
         }
     }
 
+    /// 容器 shell：同 handle_container_open_logs，命令换成交互 shell（优先 bash）。
+    pub(in crate::root_view) fn handle_container_open_shell(
+        &mut self,
+        host_id: String,
+        container_id: String,
+        container_name: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(config) = self
+            .host_state
+            .host_by_id(&host_id)
+            .map(|h| h.connection.clone())
+        else {
+            return;
+        };
+        let session_id = format!("container-shell-{host_id}-{container_id}");
+        let tab_session_id = self.unique_terminal_tab_id(&session_id);
+        let (cols, rows) = self
+            .last_resize_cells
+            .lock()
+            .map(|cells| *cells)
+            .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS));
+        let status = format!(
+            "connecting SSH: {}@{}:{}",
+            config.username.trim(),
+            config.host.trim(),
+            config.port
+        );
+        let terminal = LocalTerminalRuntime::spawn_remote_ssh_or_failed(
+            &tab_session_id,
+            nexshell::host_overview::remote_ssh_config_from_host_config(&config),
+            status,
+            cols,
+            rows,
+        );
+        let label = format!("shell: {container_name}");
+        self.push_terminal_tab(
+            terminal,
+            &tab_session_id,
+            label,
+            TerminalSessionKind::Remote,
+            Some(host_id),
+            None,
+            ctx,
+        );
+        let command = format!(
+            "{}\n",
+            nexshell::container_overview::container_shell_command(&container_id)
+        );
+        if let Ok(rt) = self.terminal.lock() {
+            rt.paste(&command);
+        }
+    }
+
     pub(in crate::root_view) fn handle_host_toggle_select(
         &mut self,
         host_id: String,
