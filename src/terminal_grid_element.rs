@@ -18,7 +18,10 @@ use nexshell::pane_tree::DraggedBorder;
 use warp_util::path::ShellFamily;
 
 use crate::external_editor::EditorChoice;
+#[cfg(not(target_os = "macos"))]
 use crate::underline_decor;
+#[cfg(target_os = "macos")]
+use warpui_core::scene::{TerminalDecorationKind, TerminalDecorationRun};
 use warpui_core::{
     clipboard_utils,
     elements::{
@@ -2274,19 +2277,22 @@ fn terminal_cell_decoration_rects(
                 UnderlineKind::Dashed | UnderlineKind::Dotted => {
                     let color = cell.underline_color.unwrap_or(cell.fg);
                     let run_cols = decoration_run_cols(snapshot, row, col, cell.underline, color);
-                    let segs = if cell.underline == UnderlineKind::Dashed {
-                        underline_decor::dashed_rects(col, run_cols, cell_w, cell_h, thickness)
-                    } else {
-                        underline_decor::dotted_rects(col, run_cols, cell_w, cell_h, thickness)
-                    };
-                    for seg in segs {
-                        rects.push(DecorationRect::new(
-                            seg.x,
-                            row as f32 * cell_h + seg.y,
-                            seg.width,
-                            seg.height,
-                            color,
-                        ));
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let segs = if cell.underline == UnderlineKind::Dashed {
+                            underline_decor::dashed_rects(col, run_cols, cell_w, cell_h, thickness)
+                        } else {
+                            underline_decor::dotted_rects(col, run_cols, cell_w, cell_h, thickness)
+                        };
+                        for seg in segs {
+                            rects.push(DecorationRect::new(
+                                seg.x,
+                                row as f32 * cell_h + seg.y,
+                                seg.width,
+                                seg.height,
+                                color,
+                            ));
+                        }
                     }
                     col += run_cols;
                 }
@@ -2313,14 +2319,15 @@ fn terminal_cell_decoration_rects(
     rects
 }
 
-fn terminal_cell_decoration_curls(
+#[cfg(target_os = "macos")]
+fn terminal_cell_decoration_runs(
     snapshot: &impl TerminalGridAccess,
     cell_metrics: CellMetrics,
-) -> Vec<DecorationQuad> {
+) -> Vec<TerminalDecorationRun> {
     let cell_w = cell_metrics.width.max(1.0);
     let cell_h = cell_metrics.height.max(1.0);
     let thickness = decoration_thickness(cell_w);
-    let mut quads = Vec::new();
+    let mut runs = Vec::new();
 
     for row in 0..snapshot.rows() {
         let mut col = 0;
@@ -2329,24 +2336,79 @@ fn terminal_cell_decoration_curls(
                 col += 1;
                 continue;
             };
-            if cell.underline != UnderlineKind::Curl {
+            let Some(kind) = (match cell.underline {
+                UnderlineKind::Curl => Some(TerminalDecorationKind::Undercurl),
+                UnderlineKind::Dotted => Some(TerminalDecorationKind::DottedUnderline),
+                UnderlineKind::Dashed => Some(TerminalDecorationKind::DashedUnderline),
+                UnderlineKind::None | UnderlineKind::Single | UnderlineKind::Double => None,
+            }) else {
                 col += 1;
                 continue;
-            }
+            };
+
             let color = cell.underline_color.unwrap_or(cell.fg);
-            let run_cols = decoration_run_cols(snapshot, row, col, UnderlineKind::Curl, color);
-            let row_offset = Vector2F::new(0.0, row as f32 * cell_h);
-            for corners in underline_decor::curl_quads(col, run_cols, cell_w, cell_h, thickness) {
-                quads.push(DecorationQuad {
-                    corners: corners.map(|c| c + row_offset),
-                    color,
-                });
-            }
+            let run_cols = decoration_run_cols(snapshot, row, col, cell.underline, color);
+            let origin = Vector2F::new(col as f32 * cell_w, row as f32 * cell_h);
+            runs.push(TerminalDecorationRun {
+                origin,
+                size: Vector2F::new(run_cols as f32 * cell_w, cell_h),
+                cell_width: cell_w,
+                thickness,
+                phase_x: origin.x(),
+                kind,
+                color,
+            });
             col += run_cols;
         }
     }
 
-    quads
+    runs
+}
+
+fn terminal_cell_decoration_curls(
+    snapshot: &impl TerminalGridAccess,
+    cell_metrics: CellMetrics,
+) -> Vec<DecorationQuad> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (snapshot, cell_metrics);
+        return Vec::new();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let cell_w = cell_metrics.width.max(1.0);
+        let cell_h = cell_metrics.height.max(1.0);
+        let thickness = decoration_thickness(cell_w);
+        let mut quads = Vec::new();
+
+        for row in 0..snapshot.rows() {
+            let mut col = 0;
+            while col < snapshot.cols() {
+                let Some(cell) = snapshot.cell(row, col) else {
+                    col += 1;
+                    continue;
+                };
+                if cell.underline != UnderlineKind::Curl {
+                    col += 1;
+                    continue;
+                }
+                let color = cell.underline_color.unwrap_or(cell.fg);
+                let run_cols = decoration_run_cols(snapshot, row, col, UnderlineKind::Curl, color);
+                let row_offset = Vector2F::new(0.0, row as f32 * cell_h);
+                for corners in underline_decor::curl_quads(col, run_cols, cell_w, cell_h, thickness)
+                {
+                    quads.push(DecorationQuad {
+                        corners: corners.map(|c| c + row_offset),
+                        color,
+                    });
+                }
+                col += run_cols;
+            }
+        }
+
+        quads
+    }
 }
 
 #[allow(dead_code)]
@@ -2736,6 +2798,11 @@ impl Element for TerminalGridElement {
         for quad in terminal_cell_decoration_curls(&grid, self.cell_metrics) {
             let (corners, colors) = quad.to_scene(content_origin);
             ctx.scene.draw_quad(corners, colors);
+        }
+        #[cfg(target_os = "macos")]
+        for mut run in terminal_cell_decoration_runs(&grid, self.cell_metrics) {
+            run.origin = run.origin + content_origin;
+            ctx.scene.draw_terminal_decoration_run(run);
         }
 
         let cursor_color = u32_to_color(self.palette.cursor);
@@ -3489,6 +3556,9 @@ impl Element for TerminalGridElement {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::terminal_cell_decoration_runs;
+
     use super::{
         accumulate_scroll_px, cursor_rects, encode_terminal_key_event_with_modes,
         find_action_for_key, mouse_report_bytes, repeat_mouse_report_bytes,
@@ -3516,6 +3586,8 @@ mod tests {
     use std::sync::Arc;
     use warpui_core::event::ModifiersState;
     use warpui_core::fonts::{Properties, Style, Weight};
+    #[cfg(target_os = "macos")]
+    use warpui_core::scene::TerminalDecorationKind;
 
     #[test]
     fn cell_metrics_fields_are_accessible() {
@@ -4105,6 +4177,43 @@ mod tests {
                 pathfinder_color::ColorU::new(1, 2, 3, 255)
             )
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn terminal_cell_decoration_runs_merge_gpu_underline_styles_with_phase() {
+        let mut grid = active_mouse_grid();
+        grid.cols = 5;
+        grid.rows = 1;
+        grid.cells = vec![GridCell::empty(); 5];
+        grid.cells[1].underline = UnderlineKind::Curl;
+        grid.cells[2].underline = UnderlineKind::Curl;
+        grid.cells[3].underline = UnderlineKind::Dashed;
+        grid.cells[4].underline = UnderlineKind::Dotted;
+        grid.cells[1].fg = ColorU::new(1, 2, 3, 255);
+        grid.cells[2].fg = grid.cells[1].fg;
+        grid.cells[3].fg = ColorU::new(4, 5, 6, 255);
+        grid.cells[4].fg = ColorU::new(7, 8, 9, 255);
+        let cell = CellMetrics {
+            width: 10.0,
+            height: 20.0,
+            baseline_y: 14.0,
+        };
+
+        let runs = terminal_cell_decoration_runs(&grid, cell);
+
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].origin, Vector2F::new(10.0, 0.0));
+        assert_eq!(runs[0].size, Vector2F::new(20.0, 20.0));
+        assert_eq!(runs[0].cell_width, 10.0);
+        assert_eq!(runs[0].thickness, 1.5);
+        assert_eq!(runs[0].phase_x, 10.0);
+        assert_eq!(runs[0].kind, TerminalDecorationKind::Undercurl);
+        assert_eq!(runs[0].color, ColorU::new(1, 2, 3, 255));
+        assert_eq!(runs[1].kind, TerminalDecorationKind::DashedUnderline);
+        assert_eq!(runs[1].phase_x, 30.0);
+        assert_eq!(runs[2].kind, TerminalDecorationKind::DottedUnderline);
+        assert_eq!(runs[2].phase_x, 40.0);
     }
 
     #[test]
