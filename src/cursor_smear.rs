@@ -1,5 +1,5 @@
 //! 光标拖影（Neovide 风格）：四角独立指数趋近目标格，运动前侧角快、尾侧角慢，
-//! 中间态是变形四边形（scene::Quad 绘制）。坐标系与 CursorRect 一致（content 相对逻辑 px）。
+//! 中间态是变形四边形（scene::Quad 绘制）。调用方需传入最终绘制坐标系下的逻辑 px。
 
 use std::time::Instant;
 

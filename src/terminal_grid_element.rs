@@ -671,6 +671,32 @@ impl CursorRect {
     }
 }
 
+fn snap_terminal_rect_to_device_pixels(rect: RectF, scale_factor: f32) -> RectF {
+    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    let origin = rect.origin();
+    let lower_right = rect.lower_right();
+    let x0 = (origin.x() * scale).round();
+    let y0 = (origin.y() * scale).round();
+    let mut x1 = (lower_right.x() * scale).round();
+    let mut y1 = (lower_right.y() * scale).round();
+
+    if rect.width() > 0.0 && x1 <= x0 {
+        x1 = x0 + 1.0;
+    }
+    if rect.height() > 0.0 && y1 <= y0 {
+        y1 = y0 + 1.0;
+    }
+
+    RectF::new(
+        Vector2F::new(x0 / scale, y0 / scale),
+        Vector2F::new((x1 - x0) / scale, (y1 - y0) / scale),
+    )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DecorationRect {
     x: f32,
@@ -2701,6 +2727,7 @@ impl Element for TerminalGridElement {
 
         // Grid 内容偏移：左边距 + 上边距 + 平滑滚动亚行偏移。
         let content_origin = origin + grid_content_offset() + Vector2F::new(0.0, sub_offset);
+        let device_scale = ctx.scene.scale_factor();
 
         if self.is_focused_pane {
             if let Ok(mut layout) = self.terminal_ime_layout.lock() {
@@ -2748,8 +2775,12 @@ impl Element for TerminalGridElement {
                 rect.color
             };
             ctx.scene
-                .draw_rect_with_hit_recording(rect.to_rect(content_origin))
-                .with_background(color);
+                .draw_rect_with_hit_recording(snap_terminal_rect_to_device_pixels(
+                    rect.to_rect(content_origin),
+                    device_scale,
+                ))
+                .with_background(color)
+                .with_edge_aa_outset(1.0);
         }
 
         for row in 0..grid.rows() {
@@ -2792,8 +2823,12 @@ impl Element for TerminalGridElement {
 
         for rect in terminal_cell_decoration_rects(&grid, self.cell_metrics) {
             ctx.scene
-                .draw_rect_without_hit_recording(rect.to_rect(content_origin))
-                .with_background(rect.color);
+                .draw_rect_without_hit_recording(snap_terminal_rect_to_device_pixels(
+                    rect.to_rect(content_origin),
+                    device_scale,
+                ))
+                .with_background(rect.color)
+                .with_edge_aa_outset(1.0);
         }
         for quad in terminal_cell_decoration_curls(&grid, self.cell_metrics) {
             let (corners, colors) = quad.to_scene(content_origin);
@@ -2815,15 +2850,17 @@ impl Element for TerminalGridElement {
         if let Ok(mut smear) = self.cursor_smear.lock() {
             match (cursor_rect_list.as_slice(), grid.display_offset()) {
                 ([rect], 0) if smear_allowed => {
-                    let target = rect.to_rect(Vector2F::zero());
+                    let target = snap_terminal_rect_to_device_pixels(
+                        rect.to_rect(content_origin),
+                        device_scale,
+                    );
                     if let Some(sq) = smear.update(target, std::time::Instant::now()) {
                         let colors = sq.alphas.map(|a| {
                             let mut c = cursor_color;
                             c.a = (c.a as f32 * a) as u8;
                             c
                         });
-                        ctx.scene
-                            .draw_quad(sq.corners.map(|c| c + content_origin), colors);
+                        ctx.scene.draw_quad(sq.corners, colors);
                         smeared = true;
                     }
                 }
@@ -2833,8 +2870,12 @@ impl Element for TerminalGridElement {
         if !smeared {
             for rect in cursor_rect_list {
                 ctx.scene
-                    .draw_rect_with_hit_recording(rect.to_rect(content_origin))
-                    .with_background(cursor_color);
+                    .draw_rect_with_hit_recording(snap_terminal_rect_to_device_pixels(
+                        rect.to_rect(content_origin),
+                        device_scale,
+                    ))
+                    .with_background(cursor_color)
+                    .with_edge_aa_outset(1.0);
             }
         }
 
@@ -3563,9 +3604,10 @@ mod tests {
         accumulate_scroll_px, cursor_rects, encode_terminal_key_event_with_modes,
         find_action_for_key, mouse_report_bytes, repeat_mouse_report_bytes,
         resize_cells_for_available_size, scrollbar_display_offset_for_center,
-        scrollbar_display_offset_for_pointer_movement, split_pane_terminal_body_size,
-        terminal_action_needs_notify, terminal_background_rects, terminal_cell_decoration_rects,
-        terminal_drag_drop_input, terminal_font_properties_for_cell, terminal_ime_cursor_rect,
+        scrollbar_display_offset_for_pointer_movement, snap_terminal_rect_to_device_pixels,
+        split_pane_terminal_body_size, terminal_action_needs_notify, terminal_background_rects,
+        terminal_cell_decoration_rects, terminal_drag_drop_input,
+        terminal_font_properties_for_cell, terminal_ime_cursor_rect,
         terminal_ime_cursor_rect_for_layout, terminal_input_bytes_should_reset_smooth_scroll,
         terminal_input_editor_should_defer_keydown_to_typed_characters,
         terminal_mouse_position_is_in_bounds, terminal_page_scroll_lines_for_key,
@@ -3582,6 +3624,7 @@ mod tests {
         TerminalGridSnapshot, TerminalInputModes, TerminalPalette,
     };
     use pathfinder_color::ColorU;
+    use pathfinder_geometry::rect::RectF;
     use pathfinder_geometry::vector::Vector2F;
     use std::sync::Arc;
     use warpui_core::event::ModifiersState;
@@ -4239,6 +4282,26 @@ mod tests {
             cursor_rects(&grid, cell),
             vec![CursorRect::new(20.0, 38.5, 10.0, 1.5)]
         );
+    }
+
+    #[test]
+    fn terminal_rect_snapping_aligns_edges_to_device_pixels() {
+        let rect = RectF::new(Vector2F::new(10.25, 20.25), Vector2F::new(1.5, 9.5));
+
+        let snapped = snap_terminal_rect_to_device_pixels(rect, 2.0);
+
+        assert_eq!(snapped.origin(), Vector2F::new(10.5, 20.5));
+        assert_eq!(snapped.size(), Vector2F::new(1.5, 9.5));
+    }
+
+    #[test]
+    fn terminal_rect_snapping_keeps_thin_rect_visible() {
+        let rect = RectF::new(Vector2F::new(20.4, 0.0), Vector2F::new(0.1, 20.0));
+
+        let snapped = snap_terminal_rect_to_device_pixels(rect, 2.0);
+
+        assert_eq!(snapped.width(), 0.5);
+        assert_eq!(snapped.height(), 20.0);
     }
 
     #[test]
