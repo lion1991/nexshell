@@ -41,12 +41,94 @@ const MENU_VERTICAL_PADDING: f32 = 9.;
 pub const MENU_ITEM_VERTICAL_PADDING: f32 = 5.;
 pub const MENU_ITEM_HORIZONTAL_PADDING: f32 = 14.;
 pub const SEPARATOR_VERTICAL_MARGIN: f32 = 4.;
+const MENU_CONTAINER_CORNER_RADIUS: f32 = 14.;
+const MENU_FLATTENED_GLASS_CORNER_RADIUS: f32 = 0.;
+const MENU_SELECTION_HIGHLIGHT_HORIZONTAL_OUTSET: f32 = -3.;
+const MENU_SELECTION_HIGHLIGHT_VERTICAL_OUTSET: f32 = 1.;
+const MENU_SELECTION_HIGHLIGHT_CORNER_RADIUS: f32 = 8.;
 const MINIMUM_MENU_ITEM_FONT_SIZE: f32 = 5.;
 const PADDING_TO_ICON_SIZE_MULTIPLIER: f32 = 3.;
 const MENU_ITEM_LEFT_PADDING_MULTIPLIER: f32 = 1.5;
 use crate::design_tokens::Elevation;
 use crate::glass_backdrop::GlassBackdrop;
 const SECONDARY_TEXT_RATIO: f32 = 0.9;
+
+#[derive(Clone, Copy, Debug)]
+struct MenuSelectionHighlightStyle {
+    horizontal_outset: f32,
+    vertical_outset: f32,
+    corner_radius: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MenuContainerCornerStyle {
+    corner_radius: f32,
+    glass_radius: f32,
+    flatten_bottom_corners: bool,
+}
+
+fn menu_container_corner_style(
+    flatten_bottom_corners: bool,
+    depth: usize,
+) -> MenuContainerCornerStyle {
+    let flatten_bottom_corners = flatten_bottom_corners && depth == 0;
+    MenuContainerCornerStyle {
+        corner_radius: MENU_CONTAINER_CORNER_RADIUS,
+        glass_radius: if flatten_bottom_corners {
+            MENU_FLATTENED_GLASS_CORNER_RADIUS
+        } else {
+            MENU_CONTAINER_CORNER_RADIUS
+        },
+        flatten_bottom_corners,
+    }
+}
+
+fn menu_container_corner_radius(style: MenuContainerCornerStyle) -> CornerRadius {
+    if style.flatten_bottom_corners {
+        CornerRadius::with_top(Radius::Pixels(style.corner_radius))
+    } else {
+        CornerRadius::with_all(Radius::Pixels(style.corner_radius))
+    }
+}
+
+fn menu_selection_highlight_style() -> MenuSelectionHighlightStyle {
+    MenuSelectionHighlightStyle {
+        horizontal_outset: MENU_SELECTION_HIGHLIGHT_HORIZONTAL_OUTSET,
+        vertical_outset: MENU_SELECTION_HIGHLIGHT_VERTICAL_OUTSET,
+        corner_radius: MENU_SELECTION_HIGHLIGHT_CORNER_RADIUS,
+    }
+}
+
+fn render_menu_selection_highlighted_row(
+    content: Box<dyn Element>,
+    background_color: Fill,
+) -> Box<dyn Element> {
+    let style = menu_selection_highlight_style();
+    let highlight = Container::new(
+        Rect::new()
+            .with_background(background_color)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(style.corner_radius)))
+            .finish(),
+    )
+    .with_margin_left(-style.horizontal_outset)
+    .with_margin_right(-style.horizontal_outset)
+    .with_margin_top(-style.vertical_outset)
+    .with_margin_bottom(-style.vertical_outset)
+    .finish();
+
+    let mut stack = Stack::new();
+    stack.add_positioned_child(
+        highlight,
+        OffsetPositioning::offset_from_parent(
+            vec2f(0., 0.),
+            ParentOffsetBounds::ParentBySize,
+            ParentAnchor::TopLeft,
+            ChildAnchor::TopLeft,
+        ),
+    );
+    stack.extend(Some(content));
+    stack.finish()
+}
 
 #[derive(Clone, Debug)]
 /// At the current time, its not recommended to have more than 1 nested submenu due to
@@ -1333,10 +1415,11 @@ impl<A: Action + Clone> MenuItemFields<A> {
             .with_padding_left(left_padding)
             .with_padding_right(horizontal_padding);
 
+            let content_element = container.finish();
             let container_element = if let Some(background_color) = background_color {
-                container.with_background(background_color).finish()
+                render_menu_selection_highlighted_row(content_element, background_color)
             } else {
-                container.finish()
+                content_element
             };
 
             // Render tooltip if present and hovered
@@ -2781,11 +2864,8 @@ impl<A: Action + Clone> SubMenu<A> {
             .into_iter()
             .enumerate()
             .for_each(|(depth, submenu)| {
-                let corner_radius = if flatten_bottom_corners && depth == 0 {
-                    CornerRadius::with_top(Radius::Pixels(5.))
-                } else {
-                    CornerRadius::with_all(Radius::Pixels(5.))
-                };
+                let corner_style = menu_container_corner_style(flatten_bottom_corners, depth);
+                let corner_radius = menu_container_corner_radius(corner_style);
 
                 // At depth 0, place pinned header/footer inside the styled container
                 // so they inherit the menu box background, border, and corner radius.
@@ -2851,11 +2931,7 @@ impl<A: Action + Clone> SubMenu<A> {
                 }
 
                 // 玻璃圆角随菜单盒：压平底角时取 0，避免圆角玻璃在方角盒外露/缺角。
-                let glass_radius = if flatten_bottom_corners && depth == 0 {
-                    0.0
-                } else {
-                    5.0
-                };
+                let glass_radius = corner_style.glass_radius;
                 let menu =
                     GlassBackdrop::new(menu.finish(), glass_radius, background_color.into_solid())
                         .finish();
@@ -3005,6 +3081,36 @@ impl<A: Action + Clone> MenuItem<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_selection_highlight_uses_macos_like_outset_pill() {
+        let style = menu_selection_highlight_style();
+
+        assert_eq!(style.horizontal_outset, -3.0);
+        assert_eq!(style.vertical_outset, 1.0);
+        assert_eq!(style.corner_radius, 8.0);
+    }
+
+    #[test]
+    fn menu_container_uses_macos_like_outer_corner_radius() {
+        let style = menu_container_corner_style(false, 0);
+
+        assert_eq!(style.corner_radius, 14.0);
+        assert_eq!(style.glass_radius, 14.0);
+        assert!(!style.flatten_bottom_corners);
+
+        let submenu_style = menu_container_corner_style(true, 1);
+
+        assert_eq!(submenu_style.corner_radius, 14.0);
+        assert_eq!(submenu_style.glass_radius, 14.0);
+        assert!(!submenu_style.flatten_bottom_corners);
+
+        let flattened_style = menu_container_corner_style(true, 0);
+
+        assert_eq!(flattened_style.corner_radius, 14.0);
+        assert_eq!(flattened_style.glass_radius, 0.0);
+        assert!(flattened_style.flatten_bottom_corners);
+    }
 
     #[test]
     fn menu_cursor_position_uses_origin_when_no_row_is_selected() {
