@@ -442,6 +442,18 @@ enum RdpConnectionPhase {
     Disconnected { reason: String },
 }
 
+impl RdpConnectionPhase {
+    fn on_transport_connected(&mut self) {
+        // 首帧上传前继续显示连接态，避免稳定 asset key 暴露上一会话的缓存画面。
+    }
+
+    fn on_frame_uploaded(&mut self) {
+        if matches!(self, Self::Connecting) {
+            *self = Self::Connected;
+        }
+    }
+}
+
 /// RDP 会话随 tab 生命周期存活的状态。drop = 断开（RdpSessionHandle::Drop 优雅关闭），
 /// 关 tab 时随 TerminalSessionTab 一并 drop，不走终端 shutdown 路径。
 struct RdpTabState {
@@ -1112,7 +1124,7 @@ mod tests {
     // 仅保留跨模块集成 / i18n / 启动类测试；各 helper 的单元测试已随 fn 迁出（附录 C）。
     use super::{
         accepts_generation, GenerationAllocator, HostFleetSyncDebounce, PanePresentationState,
-        TerminalSessionKind,
+        RdpConnectionPhase, TerminalSessionKind,
     };
     use crate::terminal_view_helpers::terminal_tab_kind_uses_side_panel_layout;
     use nexshell::pane_state::NexPaneId;
@@ -1209,6 +1221,17 @@ mod tests {
         assert!(!debounce.accept(first));
         assert!(debounce.accept(latest));
         assert!(!debounce.accept(latest));
+    }
+
+    #[test]
+    fn rdp_presentation_waits_for_the_first_frame_after_transport_connects() {
+        let mut phase = RdpConnectionPhase::Connecting;
+
+        phase.on_transport_connected();
+        assert!(matches!(phase, RdpConnectionPhase::Connecting));
+
+        phase.on_frame_uploaded();
+        assert!(matches!(phase, RdpConnectionPhase::Connected));
     }
 
     #[test]

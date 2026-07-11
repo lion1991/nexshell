@@ -196,7 +196,7 @@ impl RootView {
         match event {
             RdpEvent::Connected => {
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
-                    rdp.phase = RdpConnectionPhase::Connected;
+                    rdp.phase.on_transport_connected();
                 }
                 // 已连接：启动动态分辨率检测（窗口尺寸/全屏变化 → 重设远端分辨率）。
                 if !self.rdp_resize_ticking {
@@ -255,6 +255,7 @@ impl RootView {
                 });
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
                     rdp.last_uploaded_generation = generation;
+                    rdp.phase.on_frame_uploaded();
                 }
                 ctx.notify();
             }
