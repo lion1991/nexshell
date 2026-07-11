@@ -1515,6 +1515,13 @@ impl RootView {
                 .view_mode_icon_transitions
                 .borrow()
                 .any_animating(now)
+            || self
+                .host_view_states
+                .borrow()
+                .selection_bar
+                .slide
+                .borrow()
+                .is_animating()
     }
 
     /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。

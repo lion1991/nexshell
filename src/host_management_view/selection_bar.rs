@@ -1,15 +1,17 @@
+use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
 use warpui::{
     elements::{
         Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex, Hoverable, Icon,
-        MainAxisAlignment, MainAxisSize, MouseState, MouseStateHandle, ParentElement, Radius, Text,
+        MainAxisSize, MouseState, MouseStateHandle, ParentElement, Radius, Text,
     },
     fonts, Element,
 };
 
 use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
+use nexshell::ui_anim::SpringAnim;
 
 pub struct SelectionBarStates {
     pub connect_state: MouseStateHandle,
@@ -18,6 +20,10 @@ pub struct SelectionBarStates {
     pub delete_state: MouseStateHandle,
     pub cancel_state: MouseStateHandle,
     pub reorder_done_state: MouseStateHandle,
+    /// 底部条滑动弹簧：0=完全露出，SELECTION_BAR_LET_ROOM=完全滑出下缘。
+    pub slide: RefCell<SpringAnim>,
+    /// 滑出期间 show_bar 已假，记住最后一次显示的是选择条还是重排条。
+    pub last_is_reorder: Cell<bool>,
 }
 
 impl SelectionBarStates {
@@ -29,6 +35,8 @@ impl SelectionBarStates {
             delete_state: Arc::new(Mutex::new(MouseState::default())),
             cancel_state: Arc::new(Mutex::new(MouseState::default())),
             reorder_done_state: Arc::new(Mutex::new(MouseState::default())),
+            slide: RefCell::new(SpringAnim::new(SELECTION_BAR_LET_ROOM)),
+            last_is_reorder: Cell::new(false),
         }
     }
 }
@@ -39,9 +47,9 @@ pub fn render_selection_bar(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    // Min：药丸收拢包住内容，Align 负责水平居中（通栏太空，浮动胶囊更像 macOS）。
     let row = Flex::row()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_main_axis_alignment(MainAxisAlignment::Center)
+        .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(render_bar_button(
             &states.connect_state,
@@ -90,20 +98,29 @@ pub fn render_selection_bar(
         ))
         .finish();
 
-    Container::new(
-        Container::new(row)
-            .with_horizontal_padding(24.0)
-            .with_vertical_padding(10.0)
-            .with_background_color(hc.action_bar_bg)
-            .with_border(Border::all(1.0).with_border_color(hc.action_bar_border))
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
-            .finish(),
-    )
-    .with_horizontal_padding(24.0)
-    .with_vertical_padding(8.0)
-    .with_background_color(hc.panel_bg)
-    .with_border(Border::top(1.0).with_border_color(hc.toolbar_border))
-    .finish()
+    wrap_action_bar_glass(row, hc)
+}
+
+/// 药丸液态玻璃包裹：去实色改玻璃+阴影，外层 padding 改 margin（margin 区不记命中，
+/// 悬浮药丸四周缝隙仍可点到下方卡片）。selection/reorder 两条 bar 共用。
+fn wrap_action_bar_glass(row: Box<dyn Element>, hc: &HostUiColors) -> Box<dyn Element> {
+    let pill = Container::new(row)
+        .with_horizontal_padding(24.0)
+        .with_vertical_padding(10.0)
+        .with_border(Border::all(1.0).with_border_color(hc.action_bar_border))
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)));
+    let pill = nexshell::design_tokens::Elevation::popover()
+        .apply_container(pill)
+        .finish();
+    let pill = nexshell::glass_backdrop::GlassBackdrop::new(pill, 8.0, hc.action_bar_bg)
+        .with_glass(nexshell::design_tokens::Glass::popover())
+        .with_own_layer()
+        .finish();
+
+    Container::new(pill)
+        .with_horizontal_margin(24.0)
+        .with_vertical_margin(8.0)
+        .finish()
 }
 
 fn render_bar_button(
@@ -161,9 +178,9 @@ pub fn render_reorder_bar(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    // Min：同选择条，胶囊收拢包住内容。
     let row = Flex::row()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_main_axis_alignment(MainAxisAlignment::Center)
+        .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(
             Container::new(
@@ -189,18 +206,5 @@ pub fn render_reorder_bar(
         ))
         .finish();
 
-    Container::new(
-        Container::new(row)
-            .with_horizontal_padding(24.0)
-            .with_vertical_padding(10.0)
-            .with_background_color(hc.action_bar_bg)
-            .with_border(Border::all(1.0).with_border_color(hc.action_bar_border))
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
-            .finish(),
-    )
-    .with_horizontal_padding(24.0)
-    .with_vertical_padding(8.0)
-    .with_background_color(hc.panel_bg)
-    .with_border(Border::top(1.0).with_border_color(hc.toolbar_border))
-    .finish()
+    wrap_action_bar_glass(row, hc)
 }

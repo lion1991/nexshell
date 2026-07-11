@@ -50,6 +50,10 @@ pub const SEARCH_BAR_VERTICAL_PADDING: f32 = 10.0;
 /// 工具栏总高 = 纵向 padding×2(10×2) + BUTTON_HEIGHT(32) + 底边框(1)，body 顶部让位用此值。
 pub const SEARCH_BAR_TOTAL_HEIGHT: f32 = 53.0;
 
+// --- 底部选择/重排操作条（液态玻璃悬浮药丸） ---
+/// 悬浮条让位高度 = 外层纵向 margin×2(8×2) + 药丸纵向 padding×2(10×2) + 边框×2(1×2) + 内容行高(28)。
+pub const SELECTION_BAR_LET_ROOM: f32 = 66.0;
+
 // --- 卡片 ---
 #[allow(dead_code)]
 pub const CARD_MIN_WIDTH: f32 = 320.0;

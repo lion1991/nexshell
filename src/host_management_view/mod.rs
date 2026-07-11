@@ -9,9 +9,9 @@ pub mod status_view;
 
 use warpui::{
     elements::{
-        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
-        CrossAxisAlignment, DragAxis, Draggable, DraggableState, EventDispatchMode, Expanded, Fill,
-        Flex, MainAxisSize, ParentElement, SavePosition, ScrollbarWidth, Stack,
+        Align, Clipped, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
+        CrossAxisAlignment, DragAxis, Draggable, DraggableState, Empty, EventDispatchMode,
+        Expanded, Fill, Flex, MainAxisSize, ParentElement, SavePosition, ScrollbarWidth, Stack,
     },
     fonts, Element, ViewHandle,
 };
@@ -84,6 +84,28 @@ pub fn render_host_management_panel(
 ) -> Box<dyn Element> {
     let groups = state.groups_for_render();
     let filtered = state.filtered_hosts();
+    let show_bar = state.reorder_mode || state.selected_count() > 0;
+
+    // 底部条滑动：0=完全露出，SELECTION_BAR_LET_ROOM=完全滑出下缘；取整防亚像素发虚。
+    let (bar_offset, bar_sliding) = {
+        let mut slide = view_states.selection_bar.slide.borrow_mut();
+        slide.set_target(if show_bar {
+            0.0
+        } else {
+            SELECTION_BAR_LET_ROOM
+        });
+        (
+            slide.sample(std::time::Instant::now()).round(),
+            slide.is_animating(),
+        )
+    };
+    let bar_visible = show_bar || bar_sliding;
+    if show_bar {
+        view_states
+            .selection_bar
+            .last_is_reorder
+            .set(state.reorder_mode);
+    }
 
     view_states.group_nav.ensure_group_count(groups.len());
     view_states
@@ -202,9 +224,10 @@ pub fn render_host_management_panel(
             HostViewMode::Containers => warpui::elements::Empty::new().finish(),
             HostViewMode::Keys => warpui::elements::Empty::new().finish(),
         };
-        // 滚动内容顶部让出工具栏高度，卡片上滚时从玻璃下穿过。
+        // 滚动内容顶部让出工具栏高度，卡片上滚时从玻璃下穿过；底部让位随滑动连续变化，末排能滚到条上方。
         let card_grid = Container::new(card_grid)
             .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
+            .with_padding_bottom((SELECTION_BAR_LET_ROOM - bar_offset).max(0.0))
             .finish();
 
         let scrollbar_thumb = Fill::Solid(hc.scrollbar_thumb);
@@ -223,23 +246,16 @@ pub fn render_host_management_panel(
         .finish()
     };
 
-    let show_bar = state.reorder_mode || state.selected_count() > 0;
-
-    // body 铺满、工具栏贴顶叠上去（后加的先画在上层，玻璃才能采样到 body）。
+    // body 铺满、工具栏贴顶叠上去（后加的先画在上层，玻璃才能采样到 body）；
+    // 选择/重排条同层悬浮贴底，同理后加先画在上层。
     // Align 把工具栏受到的高度约束下限重置为 0，避免它被 Stack 传来的满高 tight 约束强行撑满；
     // 顶层 Flex row 已是 MainAxisSize::Max，故不需要横向拉伸也能撑满宽度（同 find_section.rs 用法）。
     // 显式 Waterfall：默认值 debug/release 不一致（release 是 Broadcast 会双派发），overlay Stack 仓库惯例同 root_view。
     let mut body_stack = Stack::new().with_event_dispatch_mode(EventDispatchMode::Waterfall);
     body_stack.add_child(body);
     body_stack.add_child(Align::new(search).top_center().finish());
-    let body_stack = body_stack.finish();
-
-    let mut content = Flex::column()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
-    content.add_child(Expanded::new(1.0, body_stack).finish());
-    if show_bar {
-        let bar = if state.reorder_mode {
+    if bar_visible {
+        let bar = if view_states.selection_bar.last_is_reorder.get() {
             render_reorder_bar(&view_states.selection_bar, ui_font, hc)
         } else {
             render_selection_bar(
@@ -249,8 +265,28 @@ pub fn render_host_management_panel(
                 hc,
             )
         };
-        content.add_child(bar);
+        // 裁剪窗贴底，窗内用 spacer 把胶囊往下推 bar_offset，超出窗底的部分被裁掉 → 滑升/滑落。
+        let inner = Flex::column()
+            .with_child(
+                ConstrainedBox::new(Empty::new().finish())
+                    .with_height(bar_offset)
+                    .finish(),
+            )
+            .with_child(Align::new(bar).top_center().finish())
+            .finish();
+        // Align 汇报尺寸=constraint.max(W×让位高)，给 Clipped 一个固定裁剪窗；column 超高部分被裁。
+        let window =
+            ConstrainedBox::new(Clipped::new(Align::new(inner).top_left().finish()).finish())
+                .with_height(SELECTION_BAR_LET_ROOM)
+                .finish();
+        body_stack.add_child(Align::new(window).bottom_center().finish());
     }
+    let body_stack = body_stack.finish();
+
+    let mut content = Flex::column()
+        .with_main_axis_size(MainAxisSize::Max)
+        .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+    content.add_child(Expanded::new(1.0, body_stack).finish());
 
     let content_col = Container::new(content.finish())
         .with_background_color(hc.panel_bg)
