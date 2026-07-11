@@ -53,6 +53,11 @@ impl TerminalGlassDirtyTracker {
             .insert(key.to_string(), fingerprint)
             .map_or(false, |previous| previous != fingerprint)
     }
+
+    /// 会话关闭时移除对应指纹，避免长期累积残留
+    pub(crate) fn remove(&mut self, key: &str) {
+        self.fingerprints.remove(key);
+    }
 }
 
 fn hash_byte(hash: u64, byte: u8) -> u64 {
@@ -161,5 +166,17 @@ mod tests {
 
         assert!(!tracker.did_content_change("pane-1", first.fingerprint()));
         assert!(!tracker.did_content_change("pane-1", second.fingerprint()));
+    }
+
+    #[test]
+    fn terminal_glass_dirty_tracker_remove_clears_fingerprint() {
+        let mut tracker = TerminalGlassDirtyTracker::default();
+        let first = state(vec!["abcd", "efgh"]);
+
+        tracker.did_content_change("pane-1", first.fingerprint());
+        tracker.remove("pane-1");
+
+        // 移除后同一指纹应被判定为“新内容”（无历史记录）
+        assert!(!tracker.did_content_change("pane-1", first.fingerprint()));
     }
 }

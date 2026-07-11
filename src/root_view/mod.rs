@@ -2985,14 +2985,26 @@ impl RootView {
 
     fn remove_terminal_tab_at(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
         let mut rdp_asset_id = None;
+        let mut glass_keys: Vec<String> = Vec::new();
         if let Some(tab) = self.terminal_tabs.get(index) {
             self.code_viewer_pending_post.remove(&tab.id);
             rdp_asset_id = tab.rdp.as_ref().map(|r| r.asset_id.clone());
+            for rt in std::iter::once(&tab.terminal).chain(tab.pane_terminals.values()) {
+                if let Ok(rt) = rt.lock() {
+                    glass_keys.push(rt.snapshot().session_id.clone());
+                }
+            }
         }
         self.terminal_tabs.remove(index);
         // RDP tab：同 key 覆盖插入透明帧，释放滞留的最后一帧 CPU/GPU 资产。
         if let Some(asset_id) = rdp_asset_id {
             Self::evict_rdp_frame_asset(asset_id, ctx);
+        }
+        // 清掉该 tab 全部会话的玻璃脏区指纹，避免单例 tracker 残留。
+        if let Ok(mut tracker) = self.terminal_glass_dirty_tracker.lock() {
+            for key in &glass_keys {
+                tracker.remove(key);
+            }
         }
         if let Ok(mut flags) = self.foreground_flags.lock() {
             if index < flags.len() {

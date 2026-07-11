@@ -326,6 +326,26 @@ impl RootView {
         commits: &[nexshell::git_ops::CommitRow],
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
+        // 淘汰已不在 history 列表里的 commit 行/详情卡/滚动状态（key 均为 commit.sha）。
+        {
+            let valid: std::collections::HashSet<&str> =
+                commits.iter().map(|c| c.sha.as_str()).collect();
+            tab.git_panel_commit_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+            tab.git_panel_commit_detail_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+            tab.git_panel_commit_copy_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+            tab.git_panel_commit_detail_files_scroll_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+            tab.git_panel_commit_detail_body_scroll_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+        }
         let title = rust_i18n::t!("git_panel_section_history").to_string();
         let header = Text::new_inline(format!("{title} ({})", commits.len()), self.ui_font, 11.0)
             .with_style(fonts::Properties::default().weight(fonts::Weight::Bold))

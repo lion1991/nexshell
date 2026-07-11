@@ -98,6 +98,29 @@ impl RootView {
             );
         }
 
+        // 淘汰已不在 status 快照里的行/按钮 hover 状态（key 构造与 render 处同源）。
+        {
+            let mut valid = std::collections::HashSet::new();
+            let mut valid_action = std::collections::HashSet::new();
+            for (entries, is_staged) in [
+                (&state.status.staged, true),
+                (&state.status.unstaged, false),
+                (&state.status.untracked, false),
+                (&state.status.unmerged, false),
+            ] {
+                for e in entries {
+                    valid.insert(git_panel_entry_state_key(&e.path, is_staged));
+                    valid_action.insert(git_panel_entry_action_state_key(&e.path, is_staged));
+                }
+            }
+            tab.git_panel_entry_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k));
+            tab.git_panel_entry_action_states
+                .borrow_mut()
+                .retain(|k, _| valid_action.contains(k));
+        }
+
         let mut changes_column =
             Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 

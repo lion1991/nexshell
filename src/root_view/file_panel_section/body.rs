@@ -160,6 +160,14 @@ impl RootView {
             return file_panel_message("（空目录）", self.ui_font, colors.text_muted);
         }
 
+        // 淘汰已不可见行（折叠/切目录）的 hover 状态；本地树 key = row.path。
+        {
+            let valid: std::collections::HashSet<&str> =
+                rows.iter().map(|r| r.path.as_str()).collect();
+            tab.file_panel_entry_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+        }
         let uc = self.ui_colors();
         let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
         for row in &rows {
@@ -410,6 +418,14 @@ impl RootView {
             return file_panel_message("（空目录）", self.ui_font, colors.text_muted);
         }
 
+        // 淘汰已不在列表里的 hover 状态（同 host_monitor 进程行 retain 模式）。
+        {
+            let valid: std::collections::HashSet<&str> =
+                state.entries.iter().map(|e| e.name.as_str()).collect();
+            tab.file_panel_entry_states
+                .borrow_mut()
+                .retain(|k, _| valid.contains(k.as_str()));
+        }
         let uc = self.ui_colors();
         let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
         for entry in &state.entries {
@@ -452,6 +468,14 @@ impl RootView {
         let transfers = &tab.file_panel_state.transfers;
         if transfers.is_empty() {
             return None;
+        }
+        // 淘汰已不在传输列表里的取消按钮状态。
+        {
+            let valid: std::collections::HashSet<u64> =
+                transfers.iter().map(|t| t.transfer_id).collect();
+            tab.file_panel_transfer_cancel_states
+                .borrow_mut()
+                .retain(|id, _| valid.contains(id));
         }
         let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
         let title = Text::new_inline("任务", self.ui_font, 11.0)

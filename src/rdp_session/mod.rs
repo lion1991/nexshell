@@ -1155,12 +1155,25 @@ fn key_trace() -> bool {
 }
 
 /// DecodedPointer(Arc) → RdpPointer::Bitmap；与上次同一指针（同 cache_key）则返回 None 去重。
-/// cache_key 取 Arc 内容地址：IronRDP 对同一 cache_index 复用同一 Arc，稳定可判等。
+/// cache_key 取内容 hash 而非 Arc 地址：地址在 Arc 释放后可被新指针复用，
+/// 会让 UI 光标缓存/去重误命中旧指针。位图仅数 KB 且只在指针变化时触发，开销可忽略。
 fn pointer_to_event(
     pointer: &std::sync::Arc<ironrdp_graphics::pointer::DecodedPointer>,
     last_pointer_key: &mut Option<u64>,
 ) -> Option<RdpPointer> {
-    let cache_key = std::sync::Arc::as_ptr(pointer) as u64;
+    let cache_key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (
+            pointer.width,
+            pointer.height,
+            pointer.hotspot_x,
+            pointer.hotspot_y,
+        )
+            .hash(&mut hasher);
+        pointer.bitmap_data.hash(&mut hasher);
+        hasher.finish()
+    };
     if *last_pointer_key == Some(cache_key) {
         return None;
     }
@@ -1567,8 +1580,15 @@ mod tests {
                 assert_eq!(rgba, vec![9u8; 16]);
                 assert_eq!((width, height), (2, 2));
                 assert_eq!((hotspot_x, hotspot_y), (1.0, 0.0));
-                assert_eq!(cache_key, Arc::as_ptr(&p) as u64);
                 assert_eq!(last, Some(cache_key));
+                // 内容 hash：不同 Arc、同内容 → 同 key（地址语义做不到）。
+                let mut last2 = None;
+                match pointer_to_event(&make_pointer(9), &mut last2)
+                    .expect("second pointer emitted")
+                {
+                    RdpPointer::Bitmap { cache_key: k2, .. } => assert_eq!(cache_key, k2),
+                    other => panic!("expected Bitmap, got {other:?}"),
+                }
             }
             other => panic!("expected Bitmap, got {other:?}"),
         }
@@ -1589,7 +1609,15 @@ mod tests {
         let a = make_pointer(1);
         let b = make_pointer(2);
         assert!(pointer_to_event(&a, &mut last).is_some());
-        // 不同 Arc（不同地址）→ 重新发送。
+        // 内容不同 → 重新发送。
         assert!(pointer_to_event(&b, &mut last).is_some());
+    }
+
+    #[test]
+    fn pointer_same_content_different_arc_dedups() {
+        let mut last = None;
+        assert!(pointer_to_event(&make_pointer(1), &mut last).is_some());
+        // 新 Arc 但内容相同 → 内容 hash 去重返回 None（地址语义会误重发）。
+        assert!(pointer_to_event(&make_pointer(1), &mut last).is_none());
     }
 }

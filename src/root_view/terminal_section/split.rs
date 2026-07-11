@@ -164,6 +164,11 @@ impl RootView {
 
         let pane_id = tab.focused_pane_id;
         tab.pane_tree.remove(pane_id);
+        // 记下被关 pane 的会话 id，稍后清玻璃脏区指纹。
+        let glass_key = tab
+            .pane_terminals
+            .get(&pane_id)
+            .and_then(|rt| rt.lock().ok().map(|rt| rt.snapshot().session_id.clone()));
         tab.pane_terminals.remove(&pane_id);
 
         let new_focus = tab.pane_tree.pane_ids().first().copied();
@@ -179,6 +184,11 @@ impl RootView {
         }
         tab.pane_presentation.clear_maximized();
 
+        if let Some(key) = glass_key {
+            if let Ok(mut tracker) = self.terminal_glass_dirty_tracker.lock() {
+                tracker.remove(&key);
+            }
+        }
         if let Ok(mut layout) = self.terminal_ime_layout.lock() {
             *layout = None;
         }

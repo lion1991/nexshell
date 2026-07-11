@@ -566,6 +566,19 @@ fn upsert_transfer_started(
         status: TransferStatus::Active,
         is_upload,
     });
+    // 历史记录只增不减会随传输次数无限累积；UI 只显示最近 5 条，
+    // 超上限时从头淘汰最老的已结束记录（Active 保留，取消按钮仍要用）。
+    const MAX_TRANSFER_ROWS: usize = 64;
+    while state.transfers.len() > MAX_TRANSFER_ROWS {
+        let Some(pos) = state
+            .transfers
+            .iter()
+            .position(|t| !matches!(t.status, TransferStatus::Active))
+        else {
+            break;
+        };
+        state.transfers.remove(pos);
+    }
 }
 
 fn apply_transfer_progress(state: &mut FilePanelState, p: &TransferProgress) {
