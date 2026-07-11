@@ -99,15 +99,20 @@ impl RootView {
                     .get(index)
                     .filter(|tab| tab.rdp.is_some())
                     .map(|_| TerminalGridAction::ToggleRdpConnectionInfo(index)),
-                toggle_recording: (!is_content_tab)
-                    .then(|| TerminalGridAction::ToggleTabRecording(index)),
+                toggle_recording: self
+                    .terminal_tabs
+                    .get(index)
+                    .filter(|tab| tab.kind.supports_terminal_recording())
+                    .map(|_| TerminalGridAction::ToggleTabRecording(index)),
                 // 与 handler 同一解析：焦点 pane 回退主终端，分屏下文案才与实际一致。
                 is_recording: self.terminal_tabs.get(index).map_or(false, |tab| {
-                    tab.pane_terminals
-                        .get(&tab.focused_pane_id)
-                        .unwrap_or(&tab.terminal)
-                        .lock()
-                        .map_or(false, |rt| rt.is_recording())
+                    tab.kind.supports_terminal_recording()
+                        && tab
+                            .pane_terminals
+                            .get(&tab.focused_pane_id)
+                            .unwrap_or(&tab.terminal)
+                            .lock()
+                            .map_or(false, |rt| rt.is_recording())
                 }),
                 save_current_tab_as_new_config: None,
                 color_options: Some(HorizontalTabColorOptions {
@@ -259,7 +264,12 @@ impl RootView {
             .get(self.active_tab_index)
             .map_or(false, |t| t.pane_tree.len() > 1);
         if in_split {
-            let maximize_label = if self.maximized_pane.is_some() {
+            let maximize_label = if self
+                .terminal_tabs
+                .get(self.active_tab_index)
+                .and_then(|tab| tab.pane_presentation.maximized_pane())
+                .is_some()
+            {
                 rust_i18n::t!("ctx_restore_pane")
             } else {
                 rust_i18n::t!("ctx_maximize_pane")

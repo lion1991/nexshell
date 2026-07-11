@@ -12,6 +12,7 @@ use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionKind, TerminalSessionTab};
 use nexshell::code_editor::{CodeEditorEvent, CodeEditorRenderOptions, CodeEditorView};
+use nexshell::generation::{accepts_generation, Generation};
 use nexshell::remote_edit_io::{self, RemoteMeta, RemoteReadOutcome, RemoteSaveOutcome};
 use nexshell::ssh_session::SshHandle;
 use nexshell::terminal_runtime::LocalTerminalRuntime;
@@ -264,7 +265,7 @@ impl RootView {
         else {
             return;
         };
-        let saving = tab.code_viewer_saving;
+        let saving = tab.code_viewer_is_saving();
         let handle = tab.code_viewer_ssh_handle.clone();
         let tab_id = tab.id.clone();
         let expected = tab.code_viewer_remote_meta;
@@ -318,9 +319,11 @@ impl RootView {
         post: PostSave,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
-            tab.code_viewer_saving = true;
-        }
+        let save_generation = self.async_generations.allocate();
+        let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) else {
+            return;
+        };
+        tab.code_viewer_save_generation = Some(save_generation);
         ctx.notify();
         let rx = remote_edit_io::spawn_remote_save(
             handle.clone(),
@@ -336,6 +339,7 @@ impl RootView {
                     outcome,
                     tab_id.clone(),
                     path.clone(),
+                    save_generation,
                     handle.clone(),
                     snapshot.clone(),
                     post.clone(),
@@ -353,6 +357,7 @@ impl RootView {
         outcome: RemoteSaveOutcome,
         tab_id: String,
         path: String,
+        save_generation: Generation,
         handle: SshHandle,
         snapshot: String,
         post: PostSave,
@@ -365,16 +370,22 @@ impl RootView {
             .find(|t| t.id == tab_id)
             .map_or(false, |t| {
                 t.code_viewer_path.as_deref() == Some(path.as_str())
+                    && accepts_generation(t.code_viewer_save_generation, save_generation)
             });
         if !still_same {
             // tab 已换文件/已关：本次结果作废。不动 pending——它属于当前占用者，由其生命周期管理。
             return;
         }
         if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
-            tab.code_viewer_saving = false;
+            tab.code_viewer_save_generation = None;
         }
         match outcome {
             RemoteSaveOutcome::Saved { meta } => {
+                // 保存期间追加的用户动作更新，优先于保存启动时携带的续作。
+                let post = self
+                    .code_viewer_pending_post
+                    .remove(&tab_id)
+                    .unwrap_or(post);
                 let view = self
                     .terminal_tabs
                     .iter()
@@ -391,13 +402,13 @@ impl RootView {
                 }
                 ctx.notify();
                 self.run_post_save(post, &tab_id, ctx);
-                // 补执行保存在途期间暂存的续作（review C）。
-                if let Some(pending) = self.code_viewer_pending_post.remove(&tab_id) {
-                    self.run_post_save(pending, &tab_id, ctx);
-                }
             }
             RemoteSaveOutcome::Conflict { .. } => {
-                self.code_viewer_pending_post.remove(&tab_id);
+                // 覆盖重试携带保存期间用户追加的最终续作。
+                let post = self
+                    .code_viewer_pending_post
+                    .remove(&tab_id)
+                    .unwrap_or(post);
                 ctx.notify();
                 self.confirm_overwrite_remote(tab_id, path, handle, post, ctx);
             }
@@ -616,7 +627,7 @@ impl RootView {
             tab.code_viewer_saved_content = Some(baseline);
             tab.code_viewer_dirty = false;
             // 换文件即新会话：清旧文件残留的保存中态，旧在途保存回来会因路径不符作废（review F）。
-            tab.code_viewer_saving = false;
+            tab.code_viewer_save_generation = None;
             tab.code_viewer_ssh_handle = handle;
             tab.code_viewer_remote_meta = meta;
             tab.fallback_label = code_viewer_tab_label(&path);
@@ -627,11 +638,11 @@ impl RootView {
     }
 
     /// 是否存在未保存或保存中的编辑器标签（关窗 / 退出 app 前检测）。
-    /// 含 code_viewer_saving：远程异步写在途时退出会无声打断（review A）。
+    /// 含 code_viewer_save_generation：远程异步写在途时退出会无声打断（review A）。
     pub(crate) fn has_unsaved_code_viewer(&self) -> bool {
         self.terminal_tabs.iter().any(|t| {
             matches!(t.kind, TerminalSessionKind::CodeViewer)
-                && (t.code_viewer_dirty || t.code_viewer_saving)
+                && (t.code_viewer_dirty || t.code_viewer_is_saving())
         })
     }
 

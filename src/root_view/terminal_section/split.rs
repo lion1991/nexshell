@@ -140,9 +140,9 @@ impl RootView {
             .insert(new_pane_id, Arc::clone(&new_terminal));
         tab.focused_pane_id = new_pane_id;
         tab.terminal = Arc::clone(&new_terminal);
+        tab.pane_presentation.clear_maximized();
         self.terminal = new_terminal;
 
-        self.maximized_pane = None;
         if let Ok(mut layout) = self.terminal_ime_layout.lock() {
             *layout = None;
         }
@@ -177,8 +177,8 @@ impl RootView {
             tab.terminal = Arc::clone(&t);
             self.terminal = t;
         }
+        tab.pane_presentation.clear_maximized();
 
-        self.maximized_pane = None;
         if let Ok(mut layout) = self.terminal_ime_layout.lock() {
             *layout = None;
         }
@@ -263,12 +263,9 @@ impl RootView {
         &mut self,
         ctx: &mut ViewContext<Self>,
     ) {
-        if self.maximized_pane.is_some() {
-            self.maximized_pane = None;
-        } else if let Some(tab) = self.terminal_tabs.get(self.active_tab_index) {
-            if tab.pane_tree.len() > 1 {
-                self.maximized_pane = Some(tab.focused_pane_id);
-            }
+        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
+            tab.pane_presentation
+                .toggle_maximize(tab.pane_tree.len(), tab.focused_pane_id);
         }
         ctx.notify();
     }

@@ -37,6 +37,7 @@ pub mod features;
 pub mod file_drop_target;
 pub mod file_panel;
 pub mod frame_export;
+pub mod generation;
 pub mod git_ops;
 pub mod git_panel;
 pub mod glass_backdrop;

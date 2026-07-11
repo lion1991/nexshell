@@ -75,7 +75,8 @@ impl RootView {
             return;
         }
         tab.git_panel_open = true;
-        self.git_panel_slide_pending.set(true); // 首帧按实际宽度起搏滑入
+        // 首帧按实际宽度起搏滑入。
+        self.git_panel_slide_pending.set(true);
         // 文件面板已开（且不在关门中）时：git 槽位出现使其布局左移 G+1（含边框），
         // 给它补同量内容偏移从旧屏幕位置同弹簧滑到新位置——git 面板推着它走。
         if self.should_render_file_panel() && self.file_panel_closing.borrow().is_none() {

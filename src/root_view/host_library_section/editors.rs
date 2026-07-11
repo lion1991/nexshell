@@ -3,13 +3,17 @@
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
 // create_*_editor（含密钥 name/passphrase）/ handle_host_*_editor_event 由 RootView::new() 调用（pub(crate)）。
 
+use std::time::Duration;
+
 use crate::RootView;
 use nexshell::host_management::{default_database_path, upsert_host_card_in_db_path};
 use nexshell::text_editor::{
     EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions,
 };
 use warp_core::ui::appearance::Appearance;
-use warpui::{SingletonEntity as _, ViewContext};
+use warpui::{r#async::Timer, SingletonEntity as _, ViewContext};
+
+const HOST_FLEET_SEARCH_DEBOUNCE: Duration = Duration::from_millis(200);
 
 impl RootView {
     pub(crate) fn create_host_search_editor(
@@ -217,7 +221,7 @@ impl RootView {
                     .borrow_mut()
                     .search_bar
                     .protocol_dropdown_open = false;
-                self.sync_container_fleet(ctx);
+                self.schedule_host_fleet_sync(ctx);
                 ctx.notify();
             }
             EditorEvent::Escape => {
@@ -231,11 +235,25 @@ impl RootView {
                         editor.system_reset_buffer_text("", ctx);
                     }
                 });
-                self.sync_container_fleet(ctx);
+                self.sync_host_fleets(ctx);
                 ctx.notify();
             }
             _ => {}
         }
+    }
+
+    fn schedule_host_fleet_sync(&mut self, ctx: &mut ViewContext<Self>) {
+        let generation = self
+            .host_fleet_sync_debounce
+            .schedule(&mut self.async_generations);
+        ctx.spawn(
+            Timer::after(HOST_FLEET_SEARCH_DEBOUNCE),
+            move |view, _, ctx| {
+                if view.host_fleet_sync_debounce.accept(generation) {
+                    view.sync_host_fleets(ctx);
+                }
+            },
+        );
     }
 
     pub(in crate::root_view) fn handle_container_search_editor_event(

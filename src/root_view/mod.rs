@@ -50,6 +50,7 @@ use nexshell::container_fleet::ContainerFleet;
 use nexshell::file_panel::{
     apply_sftp_event, spawn_sftp_worker, FilePanelState, FilePanelWorkerHandle, SftpRequest,
 };
+use nexshell::generation::GenerationAllocator;
 use nexshell::git_panel::{apply_git_event, spawn_git_worker, GitEvent, GitPanelState, GitRequest};
 use nexshell::host_management::{
     default_database_path, load_or_initialize_host_management_snapshot_from_db_path,
@@ -109,8 +110,8 @@ use nexshell::ui_anim::{SpringAnim, TransitionMap};
 
 // crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
-    AppPage, CursorBlinkState, FilePanelInputIntent, HostPasswordIntent, TabModel,
-    TerminalSessionKind, TerminalSessionTab,
+    AppPage, CursorBlinkState, FilePanelInputIntent, HostFleetSyncDebounce, HostPasswordIntent,
+    TabModel, TerminalSessionKind, TerminalSessionTab,
 };
 // crate root 保留的布局/资源常量。
 use crate::{
@@ -137,8 +138,10 @@ pub(crate) struct RootView {
     host_state: HostManagementState,
     host_view_states: RefCell<HostManagementViewStates>,
     host_status_fleet: HostOverviewFleet,
-    // 容器管理舰队：进入 Containers 视图 start，离开 stop，与状态总览互斥
+    // 容器管理舰队：进入 Containers 视图启动，离开时暂停并保留快照；与状态总览互斥。
     container_fleet: ContainerFleet,
+    // 主机搜索输入防抖；查询结果立即更新，监控连接只按最后一次输入同步。
+    host_fleet_sync_debounce: HostFleetSyncDebounce,
     // 密钥库缓存：(记录, 关联主机数)，进入密钥页 / 导入 / 删除时刷新
     host_keys: Vec<(SshKeyRecord, usize)>,
     // 选中密钥推导出的 openssh 公钥缓存（选中时算一次，避免每帧解密私钥）
@@ -277,7 +280,6 @@ pub(crate) struct RootView {
     /// 各 tab 的前台进程 flag，与 on_should_close_window 回调共享
     foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
     dragged_border: Option<DraggedBorder>,
-    maximized_pane: Option<NexPaneId>,
 
     // === 设置页（settings_section）===
     settings_tab_open: bool,
@@ -314,6 +316,8 @@ pub(crate) struct RootView {
     last_host_swap_time: Option<std::time::Instant>,
     /// 远程保存在途时，关闭/换文件确认的「保存」续作暂存于此，待写成功后补执行（review C）。按 tab_id 键。
     code_viewer_pending_post: std::collections::HashMap<String, code_viewer_section::PostSave>,
+    /// RDP、远程保存和主机搜索防抖共享的单调 generation 分配器。
+    async_generations: GenerationAllocator,
 
     // === UI 过渡动画（ui_anim）===
     /// tab hover 背景过渡，key = tab index。
@@ -507,6 +511,7 @@ impl RootView {
             host_view_states: RefCell::new(HostManagementViewStates::new()),
             host_status_fleet: HostOverviewFleet::new(),
             container_fleet: ContainerFleet::new(),
+            host_fleet_sync_debounce: HostFleetSyncDebounce::default(),
             host_keys: Vec::new(),
             host_selected_key_public: None,
             host_recent: Vec::new(),
@@ -739,7 +744,6 @@ impl RootView {
             last_window_title: DEFAULT_WINDOW_TITLE.to_string(),
             foreground_flags,
             dragged_border: None,
-            maximized_pane: None,
             settings_tab_open: false,
             settings_tab_state: Arc::new(Mutex::new(MouseState::default())),
             settings_tab_close_state: Arc::new(Mutex::new(MouseState::default())),
@@ -763,6 +767,7 @@ impl RootView {
             settings_prewarmed: std::cell::Cell::new(false),
             last_host_swap_time: None,
             code_viewer_pending_post: std::collections::HashMap::new(),
+            async_generations: GenerationAllocator::default(),
             tab_hover_transitions: RefCell::new(TransitionMap::new()),
             titlebar_btn_transitions: RefCell::new(TransitionMap::new()),
             tab_accent_bar_x: RefCell::new(SpringAnim::new(0.0)),
@@ -1243,14 +1248,14 @@ impl RootView {
         ctx.notify();
     }
 
-    /// app_page 统一入口：改页后联动容器 fleet（离开容器页即暂停采集，回到即复活刷新）。
+    /// app_page 统一入口：改页后联动 Status / Containers fleet，不可见即暂停采集。
     pub(in crate::root_view) fn set_app_page(
         &mut self,
         page: AppPage,
         ctx: &mut ViewContext<Self>,
     ) {
         self.app_page = page;
-        self.sync_container_fleet(ctx);
+        self.sync_host_fleets(ctx);
     }
 
     fn sync_host_overview_monitor(&mut self, ctx: &mut ViewContext<Self>) {
@@ -1829,7 +1834,7 @@ impl View for RootView {
         } else {
             let active_tab = self.terminal_tabs.get(self.active_tab_index);
             let in_split = active_tab.map_or(false, |t| t.pane_tree.len() > 1);
-            let maybe_maximized = self.maximized_pane;
+            let maybe_maximized = active_tab.and_then(|tab| tab.pane_presentation.maximized_pane());
 
             let terminal_content: Box<dyn Element> = if in_split && maybe_maximized.is_none() {
                 self.render_split_terminal_body(app)
@@ -1901,7 +1906,10 @@ impl View for RootView {
             .get(self.active_tab_index)
             .map(|tab| tab.pane_tree.len())
             .unwrap_or(0);
-        let root_key_maximized_pane = self.maximized_pane;
+        let root_key_maximized_pane = self
+            .terminal_tabs
+            .get(self.active_tab_index)
+            .and_then(|tab| tab.pane_presentation.maximized_pane());
         let sweep_git_commit_hover = self
             .active_git_panel_tab_index()
             .and_then(|idx| self.terminal_tabs.get(idx))
@@ -2777,6 +2785,7 @@ impl RootView {
                 pane_tree: PaneData::new(pane_id),
                 pane_terminals,
                 focused_pane_id: pane_id,
+                pane_presentation: Default::default(),
                 file_panel_open: false,
                 file_panel_width: FILE_PANEL_WIDTH_DEFAULT,
                 file_panel_state: FilePanelState::new(),
@@ -2827,7 +2836,7 @@ impl RootView {
                 code_viewer_dirty: false,
                 code_viewer_saved_content: None,
                 code_viewer_ssh_handle: None,
-                code_viewer_saving: false,
+                code_viewer_save_generation: None,
                 code_viewer_remote_meta: None,
                 rdp: None,
             },
@@ -2954,6 +2963,9 @@ impl RootView {
     }
 
     fn remove_terminal_tab_at(&mut self, index: usize) {
+        if let Some(tab_id) = self.terminal_tabs.get(index).map(|tab| tab.id.clone()) {
+            self.code_viewer_pending_post.remove(&tab_id);
+        }
         self.terminal_tabs.remove(index);
         if let Ok(mut flags) = self.foreground_flags.lock() {
             if index < flags.len() {

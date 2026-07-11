@@ -63,6 +63,7 @@ use warpui::{
 use warpui::platform::current::AppExt;
 
 use nexshell::file_panel::{FilePanelState, FilePanelWorkerHandle};
+use nexshell::generation::{accepts_generation, Generation, GenerationAllocator};
 use nexshell::git_panel::{GitPanelState, GitWorkerHandle};
 use nexshell::host_overview::{HostOverviewMonitorHandle, HostOverviewUiState};
 use nexshell::pane_state::NexPaneId;
@@ -377,6 +378,61 @@ impl TerminalSessionKind {
             Self::Rdp => rust_i18n::t!("tab_rdp").to_string(),
         }
     }
+
+    fn supports_terminal_recording(self) -> bool {
+        matches!(
+            self,
+            Self::Local | Self::Remote | Self::Serial | Self::Direct
+        )
+    }
+}
+
+#[derive(Default)]
+struct PanePresentationState {
+    maximized_pane: Option<NexPaneId>,
+}
+
+impl PanePresentationState {
+    fn maximized_pane(&self) -> Option<NexPaneId> {
+        self.maximized_pane
+    }
+
+    fn clear_maximized(&mut self) {
+        self.maximized_pane = None;
+    }
+
+    fn toggle_maximize(&mut self, pane_count: usize, focused_pane: NexPaneId) {
+        if self.maximized_pane.is_some() {
+            self.maximized_pane = None;
+        } else if pane_count > 1 {
+            self.maximized_pane = Some(focused_pane);
+        }
+    }
+}
+
+#[derive(Default)]
+struct HostFleetSyncDebounce {
+    pending: Option<Generation>,
+}
+
+impl HostFleetSyncDebounce {
+    fn schedule(&mut self, allocator: &mut GenerationAllocator) -> Generation {
+        let generation = allocator.allocate();
+        self.pending = Some(generation);
+        generation
+    }
+
+    fn accept(&mut self, generation: Generation) -> bool {
+        if !accepts_generation(self.pending, generation) {
+            return false;
+        }
+        self.pending = None;
+        true
+    }
+
+    fn cancel(&mut self) {
+        self.pending = None;
+    }
 }
 
 /// RDP 整页 tab 的连接状态三态（连接中 / 已连接渲染帧 / 已断开）。
@@ -393,6 +449,7 @@ struct RdpTabState {
     handle: nexshell::rdp_session::RdpSessionHandle,
     /// 重连用连接参数（分辨率连接时定一次，重连沿用同一分辨率）。
     config: nexshell::rdp_session::RdpSessionConfig,
+    session_generation: Generation,
     phase: RdpConnectionPhase,
     /// image cache 稳定键（每会话一个，逐帧覆盖同一条目，不堆积不泄漏）。
     asset_id: String,
@@ -455,6 +512,7 @@ struct TerminalSessionTab {
     pane_tree: PaneData,
     pane_terminals: HashMap<NexPaneId, Arc<Mutex<LocalTerminalRuntime>>>,
     focused_pane_id: NexPaneId,
+    pane_presentation: PanePresentationState,
     file_panel_open: bool,
     file_panel_width: f32,
     file_panel_state: FilePanelState,
@@ -531,8 +589,8 @@ struct TerminalSessionTab {
     code_viewer_saved_content: Option<String>,
     /// 远程编辑器的 SSH handle clone（ADR 0005）；Some=远程文件经 SFTP 读写，None=本地走 fs。
     code_viewer_ssh_handle: Option<SshHandle>,
-    /// 远程保存进行中（异步网络写）；驱动标签「保存中」指示，防并发重复保存。
-    code_viewer_saving: bool,
+    /// 当前远程保存操作；completion 必须携带同一 generation 才能回写此 tab。
+    code_viewer_save_generation: Option<Generation>,
     /// 远程文件基线元数据 (size, modified)；保存前 re-stat 对比做冲突检测。modified 可能缺失（服务端未报）。
     code_viewer_remote_meta: Option<(u64, Option<std::time::SystemTime>)>,
     /// RDP 整页会话状态（仅 Rdp kind 持有；drop 即断开）。
@@ -560,6 +618,10 @@ impl TerminalSessionTab {
 
     fn window_title(&self) -> String {
         self.label()
+    }
+
+    fn code_viewer_is_saving(&self) -> bool {
+        self.code_viewer_save_generation.is_some()
     }
 
     /// 任一 pane 在录制即视为录制中（驱动标签红点）。
@@ -1048,8 +1110,12 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     // 仅保留跨模块集成 / i18n / 启动类测试；各 helper 的单元测试已随 fn 迁出（附录 C）。
-    use super::TerminalSessionKind;
+    use super::{
+        accepts_generation, GenerationAllocator, HostFleetSyncDebounce, PanePresentationState,
+        TerminalSessionKind,
+    };
     use crate::terminal_view_helpers::terminal_tab_kind_uses_side_panel_layout;
+    use nexshell::pane_state::NexPaneId;
 
     #[test]
     fn git_diff_tab_uses_side_panel_layout_so_git_panel_stays_visible() {
@@ -1064,6 +1130,85 @@ mod tests {
         assert!(terminal_tab_kind_uses_side_panel_layout(
             TerminalSessionKind::CodeViewer
         ));
+    }
+
+    #[test]
+    fn only_terminal_grid_tabs_support_recording() {
+        for kind in [
+            TerminalSessionKind::Local,
+            TerminalSessionKind::Remote,
+            TerminalSessionKind::Serial,
+            TerminalSessionKind::Direct,
+        ] {
+            assert!(kind.supports_terminal_recording(), "{kind:?}");
+        }
+
+        for kind in [
+            TerminalSessionKind::ProcessList,
+            TerminalSessionKind::NetworkList,
+            TerminalSessionKind::SystemInfo,
+            TerminalSessionKind::GitDiff,
+            TerminalSessionKind::CodeViewer,
+            TerminalSessionKind::Rdp,
+        ] {
+            assert!(!kind.supports_terminal_recording(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn pane_presentation_instances_toggle_independently() {
+        let pane_a = NexPaneId::new();
+        let pane_b = NexPaneId::new();
+        let mut tab_a = PanePresentationState::default();
+        let mut tab_b = PanePresentationState::default();
+
+        tab_a.toggle_maximize(2, pane_a);
+        assert_eq!(tab_a.maximized_pane(), Some(pane_a));
+        assert_eq!(tab_b.maximized_pane(), None);
+
+        tab_b.toggle_maximize(1, pane_b);
+        assert_eq!(tab_b.maximized_pane(), None);
+
+        tab_b.toggle_maximize(2, pane_b);
+        assert_eq!(tab_b.maximized_pane(), Some(pane_b));
+        assert_eq!(tab_a.maximized_pane(), Some(pane_a));
+
+        tab_a.toggle_maximize(2, pane_a);
+        assert_eq!(tab_a.maximized_pane(), None);
+        assert_eq!(tab_b.maximized_pane(), Some(pane_b));
+    }
+
+    #[test]
+    fn generation_allocator_issues_distinct_values_and_rejects_stale_ones() {
+        let mut allocator = GenerationAllocator::default();
+        let old_tab_session = allocator.allocate();
+        let reopened_tab_session = allocator.allocate();
+        let first_save_after_reopen = allocator.allocate();
+
+        assert_ne!(old_tab_session, reopened_tab_session);
+        assert_ne!(old_tab_session, first_save_after_reopen);
+        assert_ne!(reopened_tab_session, first_save_after_reopen);
+        assert!(accepts_generation(
+            Some(reopened_tab_session),
+            reopened_tab_session
+        ));
+        assert!(!accepts_generation(
+            Some(reopened_tab_session),
+            old_tab_session
+        ));
+        assert!(!accepts_generation(None, old_tab_session));
+    }
+
+    #[test]
+    fn host_fleet_search_debounce_only_accepts_the_latest_scheduled_sync() {
+        let mut allocator = GenerationAllocator::default();
+        let mut debounce = HostFleetSyncDebounce::default();
+        let first = debounce.schedule(&mut allocator);
+        let latest = debounce.schedule(&mut allocator);
+
+        assert!(!debounce.accept(first));
+        assert!(debounce.accept(latest));
+        assert!(!debounce.accept(latest));
     }
 
     #[test]

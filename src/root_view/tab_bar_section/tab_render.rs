@@ -50,7 +50,7 @@ impl RootView {
             tab.label.clone()
         } else {
             match self.terminal_tabs.get(index) {
-                Some(t) if t.code_viewer_saving => format!("… {}", tab.label),
+                Some(t) if t.code_viewer_is_saving() => format!("… {}", tab.label),
                 Some(t) if t.code_viewer_dirty => format!("● {}", tab.label),
                 _ => tab.label.clone(),
             }

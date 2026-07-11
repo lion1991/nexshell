@@ -25,6 +25,7 @@ use crate::{
     RdpConnectionPhase, RdpTabState, RootView, TerminalSessionKind, TITLE_BAR_BORDER_HEIGHT,
     TITLE_BAR_HEIGHT,
 };
+use nexshell::generation::{accepts_generation, Generation};
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
 use nexshell::rdp_session::{
     default_enable_egfx, spawn_rdp_session, RdpEvent, RdpResizeRequest, RdpSessionConfig,
@@ -63,6 +64,7 @@ impl RootView {
 
         let handle = spawn_rdp_session(rdp_config.clone());
         let frame_rx = handle.frame_rx.clone();
+        let session_generation = self.async_generations.allocate();
 
         // 占位终端（failed，connected 恒 false）：RDP 不走 PTY，仅让 tab 结构成立。
         let placeholder = LocalTerminalRuntime::failed(session_id, "rdp session");
@@ -83,6 +85,7 @@ impl RootView {
             tab.rdp = Some(RdpTabState {
                 handle,
                 config: rdp_config,
+                session_generation,
                 phase: RdpConnectionPhase::Connecting,
                 asset_id,
                 last_uploaded_generation: 0,
@@ -100,7 +103,7 @@ impl RootView {
                 resize_debounce: Default::default(),
             });
         }
-        self.attach_rdp_frame_stream(tab_id, frame_rx, ctx);
+        self.attach_rdp_frame_stream(tab_id, session_generation, frame_rx, ctx);
         self.host_state.notice = Some(rust_i18n::t!("toast_connecting", title = title).to_string());
     }
 
@@ -121,12 +124,14 @@ impl RootView {
 
         let handle = spawn_rdp_session(config.clone());
         let frame_rx = handle.frame_rx.clone();
+        let session_generation = self.async_generations.allocate();
         if let Some(rdp) = self
             .terminal_tabs
             .get_mut(index)
             .and_then(|t| t.rdp.as_mut())
         {
             rdp.stats = Arc::clone(&handle.stats); // 新会话新统计（旧的随旧 handle drop）。
+            rdp.session_generation = session_generation;
             rdp.conn_info_last_sample = None;
             rdp.conn_info_mbps = 0.0;
             rdp.conn_info_fps = 0.0;
@@ -137,7 +142,7 @@ impl RootView {
                 *vp = None;
             }
         }
-        self.attach_rdp_frame_stream(tab_id, frame_rx, ctx);
+        self.attach_rdp_frame_stream(tab_id, session_generation, frame_rx, ctx);
         ctx.notify();
     }
 
@@ -159,13 +164,14 @@ impl RootView {
     fn attach_rdp_frame_stream(
         &mut self,
         tab_id: String,
+        session_generation: Generation,
         frame_rx: async_channel::Receiver<RdpEvent>,
         ctx: &mut ViewContext<Self>,
     ) {
         ctx.spawn_stream_local(
             frame_rx,
             move |view, event, ctx| {
-                view.handle_rdp_event_for_tab(&tab_id, event, ctx);
+                view.handle_rdp_event_for_tab(&tab_id, session_generation, event, ctx);
             },
             |_, _| {},
         );
@@ -174,9 +180,19 @@ impl RootView {
     fn handle_rdp_event_for_tab(
         &mut self,
         tab_id: &str,
+        session_generation: Generation,
         event: RdpEvent,
         ctx: &mut ViewContext<Self>,
     ) {
+        let current = self
+            .terminal_tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .and_then(|tab| tab.rdp.as_ref())
+            .map(|rdp| rdp.session_generation);
+        if !accepts_generation(current, session_generation) {
+            return;
+        }
         match event {
             RdpEvent::Connected => {
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {

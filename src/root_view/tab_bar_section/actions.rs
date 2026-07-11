@@ -206,6 +206,10 @@ impl RootView {
             let Some(tab) = self.terminal_tabs.get(index) else {
                 return;
             };
+            if !tab.kind.supports_terminal_recording() {
+                self.show_tab_right_click_menu = None;
+                return;
+            }
             // 先取标题：window_title 内部会 lock tab.terminal，持锁后再调会重入死锁。
             let title = tab.window_title();
             // 与菜单状态读取同一解析：焦点 pane 回退主终端。

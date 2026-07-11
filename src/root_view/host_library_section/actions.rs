@@ -96,8 +96,10 @@ impl RootView {
             rx,
             move |view, result, ctx| {
                 if let Err(error) = result {
-                    view.container_fleet
-                        .apply_event(&error_host_id, ContainerOverviewEvent::ActionError(error));
+                    view.container_fleet.apply_action_event(
+                        &error_host_id,
+                        ContainerOverviewEvent::ActionError(error),
+                    );
                     ctx.notify();
                 }
             },
@@ -246,7 +248,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.host_state.select_group(&group_id);
-        self.sync_container_fleet(ctx);
+        self.sync_host_fleets(ctx);
         ctx.notify();
     }
 
@@ -256,7 +258,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.host_state.toggle_tag(&tag);
-        self.sync_container_fleet(ctx);
+        self.sync_host_fleets(ctx);
         ctx.notify();
     }
 
@@ -280,7 +282,7 @@ impl RootView {
             .borrow_mut()
             .search_bar
             .protocol_dropdown_open = false;
-        self.sync_container_fleet(ctx);
+        self.sync_host_fleets(ctx);
         ctx.notify();
     }
 
@@ -302,12 +304,7 @@ impl RootView {
             }
         });
         // 状态总览 / 容器监控互斥，同一主机不叠加两条监控连接。
-        if mode == HostViewMode::Status {
-            self.start_host_status_fleet(ctx);
-        } else {
-            self.host_status_fleet.stop_all();
-        }
-        self.sync_container_fleet(ctx);
+        self.sync_host_fleets(ctx);
         if mode == HostViewMode::Keys {
             self.reload_host_keys();
         }
@@ -323,23 +320,44 @@ impl RootView {
             .filter(|host| host.protocol.eq_ignore_ascii_case("SSH"))
             .map(|host| (host.id, host.connection))
             .collect();
-        for (host_id, receiver) in self.host_status_fleet.start(&hosts) {
+        for (host_id, generation, receiver) in self.host_status_fleet.start(&hosts) {
             ctx.spawn_stream_local(
                 receiver,
                 move |view, event, ctx| {
-                    view.host_status_fleet.apply_event(&host_id, event);
-                    ctx.notify();
+                    if view
+                        .host_status_fleet
+                        .apply_event_for_generation(&host_id, generation, event)
+                    {
+                        ctx.notify();
+                    }
                 },
                 |_, _| {},
             );
         }
     }
 
-    /// 按当前页面状态同步容器 fleet：在容器视图则启动/复活采集，否则暂停（留态、停通信）。
-    pub(in crate::root_view) fn sync_container_fleet(&mut self, ctx: &mut ViewContext<Self>) {
-        let should_run = self.app_page == AppPage::HostManagement
-            && self.host_state.view_mode == HostViewMode::Containers;
-        if should_run {
+    /// 按页面与视图同步两个互斥 fleet；不可见时释放连接/线程但保留快照。
+    pub(in crate::root_view) fn sync_host_fleets(&mut self, ctx: &mut ViewContext<Self>) {
+        self.host_fleet_sync_debounce.cancel();
+        let known_ssh_hosts = self
+            .host_state
+            .snapshot
+            .hosts
+            .iter()
+            .filter(|host| host.protocol.eq_ignore_ascii_case("SSH"))
+            .map(|host| host.id.as_str())
+            .collect();
+        self.host_status_fleet.retain_known_hosts(&known_ssh_hosts);
+        self.container_fleet.retain_known_hosts(&known_ssh_hosts);
+
+        let host_management_visible = self.app_page == AppPage::HostManagement;
+        if host_management_visible && self.host_state.view_mode == HostViewMode::Status {
+            self.start_host_status_fleet(ctx);
+        } else {
+            self.host_status_fleet.pause_all();
+        }
+
+        if host_management_visible && self.host_state.view_mode == HostViewMode::Containers {
             self.start_container_fleet(ctx);
         } else {
             self.container_fleet.pause_all();
@@ -355,12 +373,16 @@ impl RootView {
             .filter(|host| host.protocol.eq_ignore_ascii_case("SSH"))
             .map(|host| (host.id, host.connection))
             .collect();
-        for (host_id, receiver) in self.container_fleet.start(&hosts) {
+        for (host_id, generation, receiver) in self.container_fleet.start(&hosts) {
             ctx.spawn_stream_local(
                 receiver,
                 move |view, event, ctx| {
-                    view.container_fleet.apply_event(&host_id, event);
-                    ctx.notify();
+                    if view
+                        .container_fleet
+                        .apply_event_for_generation(&host_id, generation, event)
+                    {
+                        ctx.notify();
+                    }
                 },
                 |_, _| {},
             );
