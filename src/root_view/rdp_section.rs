@@ -177,6 +177,26 @@ impl RootView {
         );
     }
 
+    /// 关 tab 后用同 key 覆盖插入 1×1 透明帧：AssetCache 同 key 替换释放旧全帧字节，
+    /// 并顺带 evict 对应 GPU 纹理；否则最后一帧滞留到 320MB 淘汰水位才释放。
+    pub(in crate::root_view) fn evict_rdp_frame_asset(
+        asset_id: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let header = CustomImageHeader {
+            width: 1,
+            height: 1,
+            image_format: CustomImageFormat::Rgba,
+        }
+        .create_header();
+        let mut bytes = Vec::with_capacity(header.len() + 4);
+        bytes.extend_from_slice(header.as_bytes());
+        bytes.extend_from_slice(&[0u8; 4]);
+        AssetCache::handle(ctx).update(ctx, |cache, ctx| {
+            cache.insert_raw_asset_bytes::<ImageType>(asset_id, &bytes, ctx);
+        });
+    }
+
     fn handle_rdp_event_for_tab(
         &mut self,
         tab_id: &str,

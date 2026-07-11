@@ -2983,11 +2983,17 @@ impl RootView {
         self.sync_host_overview_monitor(ctx);
     }
 
-    fn remove_terminal_tab_at(&mut self, index: usize) {
-        if let Some(tab_id) = self.terminal_tabs.get(index).map(|tab| tab.id.clone()) {
-            self.code_viewer_pending_post.remove(&tab_id);
+    fn remove_terminal_tab_at(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let mut rdp_asset_id = None;
+        if let Some(tab) = self.terminal_tabs.get(index) {
+            self.code_viewer_pending_post.remove(&tab.id);
+            rdp_asset_id = tab.rdp.as_ref().map(|r| r.asset_id.clone());
         }
         self.terminal_tabs.remove(index);
+        // RDP tab：同 key 覆盖插入透明帧，释放滞留的最后一帧 CPU/GPU 资产。
+        if let Some(asset_id) = rdp_asset_id {
+            Self::evict_rdp_frame_asset(asset_id, ctx);
+        }
         if let Ok(mut flags) = self.foreground_flags.lock() {
             if index < flags.len() {
                 flags.remove(index);
@@ -3034,7 +3040,7 @@ impl RootView {
 
         self.tab_fixed_width = None;
         self.show_tab_right_click_menu = None;
-        self.remove_terminal_tab_at(index);
+        self.remove_terminal_tab_at(index, ctx);
 
         if self.terminal_tabs.is_empty() {
             self.active_tab_index = 0;
