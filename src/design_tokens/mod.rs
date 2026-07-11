@@ -157,6 +157,8 @@ pub struct HostColors {
     pub toolbar_border: ColorU,
     pub search_bar_bg: ColorU,
     pub search_bar_border: ColorU,
+    /// 玻璃工具栏上的 inset 控件底（半透明，让玻璃透出）。
+    pub toolbar_inset_bg: ColorU,
     pub card_bg: ColorU,
     pub card_bg_hover: ColorU,
     pub card_border: ColorU,
@@ -203,6 +205,7 @@ impl HostColors {
             toolbar_border: outline,
             search_bar_bg: p.neutral_2,
             search_bar_border: p.neutral_3,
+            toolbar_inset_bg: ThemePalette::with_alpha(p.neutral_2, 0xb3),
             card_bg: p.neutral_2,
             card_bg_hover: p.neutral_3,
             card_border: p.neutral_3,

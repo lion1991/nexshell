@@ -1501,6 +1501,20 @@ impl RootView {
                 .terminal_tabs
                 .iter()
                 .any(|tab| tab.host_overview_gauge_anim.borrow().any_animating(now))
+            || self
+                .host_view_states
+                .borrow()
+                .search_bar
+                .view_mode_thumb
+                .borrow()
+                .is_animating()
+            || self
+                .host_view_states
+                .borrow()
+                .search_bar
+                .view_mode_icon_transitions
+                .borrow()
+                .any_animating(now)
     }
 
     /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。

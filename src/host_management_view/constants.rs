@@ -44,9 +44,11 @@ pub const KEY_LIST_WIDTH: f32 = 340.0;
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
 pub const TOOLBAR_TITLE_SIZE: f32 = 15.0;
 
-// --- 搜索栏 ---
-#[allow(dead_code)]
-pub const SEARCH_BAR_HEIGHT: f32 = 40.0;
+// --- 搜索栏（顶部工具栏，液态玻璃通栏） ---
+pub const SEARCH_BAR_HORIZONTAL_PADDING: f32 = 24.0;
+pub const SEARCH_BAR_VERTICAL_PADDING: f32 = 10.0;
+/// 工具栏总高 = 纵向 padding×2(10×2) + BUTTON_HEIGHT(32) + 底边框(1)，body 顶部让位用此值。
+pub const SEARCH_BAR_TOTAL_HEIGHT: f32 = 53.0;
 
 // --- 卡片 ---
 #[allow(dead_code)]

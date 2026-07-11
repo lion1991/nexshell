@@ -1,15 +1,16 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use nexshell::text_editor::EditorView;
 use warp_core::ui::appearance::Appearance;
 use warpui::{
     color::ColorU,
     elements::{
-        Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Expanded, Flex,
-        Hoverable, Icon, MainAxisSize, MouseState, MouseStateHandle, ParentElement, Radius,
-        SavePosition, Stack, Text,
+        Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+        EventDispatchMode, Expanded, Flex, Hoverable, Icon, MainAxisSize, MouseState,
+        MouseStateHandle, ParentElement, Radius, SavePosition, Stack, Text,
     },
     fonts,
     ui_components::components::{Coords, UiComponent, UiComponentStyles},
@@ -20,6 +21,11 @@ use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::warp_dropdown::{render_warp_dropdown, WarpDropdownOption, WarpDropdownProps};
 use nexshell::host_management::{HostViewMode, ProtocolFilter};
+use nexshell::ui_anim::{SpringAnim, TransitionMap};
+
+/// 视图切换分段控件：单格宽高，thumb 与按钮共用。
+const VIEW_MODE_SEGMENT_WIDTH: f32 = 32.0;
+const VIEW_MODE_SEGMENT_HEIGHT: f32 = 28.0;
 
 pub struct SearchBarStates {
     pub search_input_state: MouseStateHandle,
@@ -39,6 +45,11 @@ pub struct SearchBarStates {
     pub connect_selected_state: MouseStateHandle,
     pub move_selected_state: MouseStateHandle,
     pub delete_selected_state: MouseStateHandle,
+    /// 视图切换 thumb 弹簧位移（液态玻璃滑动）。
+    pub view_mode_thumb: RefCell<SpringAnim>,
+    pub view_mode_thumb_init: Cell<bool>,
+    /// 三格图标颜色过渡，key = 段索引。
+    pub view_mode_icon_transitions: RefCell<TransitionMap<usize>>,
 }
 
 impl SearchBarStates {
@@ -61,6 +72,9 @@ impl SearchBarStates {
             connect_selected_state: Arc::new(Mutex::new(MouseState::default())),
             move_selected_state: Arc::new(Mutex::new(MouseState::default())),
             delete_selected_state: Arc::new(Mutex::new(MouseState::default())),
+            view_mode_thumb: RefCell::new(SpringAnim::new(0.0)),
+            view_mode_thumb_init: Cell::new(false),
+            view_mode_icon_transitions: RefCell::new(TransitionMap::new()),
         }
     }
 }
@@ -142,11 +156,22 @@ pub fn render_search_bar(
     row.add_child(toolbar_divider(hc));
     row.add_child(render_toolbar_actions(states, ui_font, hc));
 
-    Container::new(row.finish())
-        .with_horizontal_padding(24.0)
-        .with_vertical_padding(10.0)
-        .with_background_color(hc.panel_bg)
+    let bar = Container::new(row.finish())
+        .with_horizontal_padding(SEARCH_BAR_HORIZONTAL_PADDING)
+        .with_vertical_padding(SEARCH_BAR_VERTICAL_PADDING)
         .with_border(Border::bottom(1.0).with_border_color(hc.toolbar_border))
+        .finish();
+
+    // 通栏液态玻璃：与下方内容（滚动列表）同层叠放，需自开层保证模糊采样到已画内容（同 find_section.rs）。
+    let bar = nexshell::glass_backdrop::GlassBackdrop::new(bar, 0.0, hc.panel_bg)
+        .with_glass(nexshell::design_tokens::Glass::popover())
+        .with_own_layer()
+        .finish();
+
+    // 定高锁死：overlay 下 Align 传来的 max.y 是有限全高，行内 Expanded 占位（Empty 取 max）
+    // 会把交叉轴撑满整页，玻璃跟着铺满。同 find_section.rs 的定高盒做法。
+    ConstrainedBox::new(bar)
+        .with_height(SEARCH_BAR_TOTAL_HEIGHT)
         .finish()
 }
 
@@ -348,36 +373,88 @@ fn render_view_mode_toggle(
     _ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
+    // Keys/Containers 视图不属于这三格，thumb 隐藏且弹簧保持不动。
+    let active_index = match view_mode {
+        HostViewMode::Grid => Some(0),
+        HostViewMode::List => Some(1),
+        HostViewMode::Status => Some(2),
+        HostViewMode::Containers | HostViewMode::Keys => None,
+    };
+
     let grid_btn = render_view_mode_button(
         &states.grid_state,
         ICON_GRID_VIEW,
-        matches!(view_mode, HostViewMode::Grid),
+        0,
+        active_index == Some(0),
         TerminalGridAction::HostSetViewMode(HostViewMode::Grid),
+        states,
         hc,
     );
     let list_btn = render_view_mode_button(
         &states.list_state,
         ICON_LIST_VIEW,
-        matches!(view_mode, HostViewMode::List),
+        1,
+        active_index == Some(1),
         TerminalGridAction::HostSetViewMode(HostViewMode::List),
+        states,
         hc,
     );
     let status_btn = render_view_mode_button(
         &states.status_state,
         ICON_ACTIVITY,
-        matches!(view_mode, HostViewMode::Status),
+        2,
+        active_index == Some(2),
         TerminalGridAction::HostSetViewMode(HostViewMode::Status),
+        states,
         hc,
     );
+    let button_row = Flex::row()
+        .with_child(grid_btn)
+        .with_child(list_btn)
+        .with_child(status_btn)
+        .finish();
+
+    let mut stack = Stack::new().with_event_dispatch_mode(EventDispatchMode::Waterfall);
+    if let Some(index) = active_index {
+        let target_x = index as f32 * VIEW_MODE_SEGMENT_WIDTH;
+        let x = {
+            let mut thumb = states.view_mode_thumb.borrow_mut();
+            if states.view_mode_thumb_init.get() {
+                thumb.set_target(target_x);
+            } else {
+                // 首帧直接落位，不从 0 滑过去。
+                thumb.snap(target_x);
+                states.view_mode_thumb_init.set(true);
+            }
+            // 取整到整像素，防止收敛尾部亚像素抖动发虚（同 tab 底条）。
+            thumb.sample(Instant::now()).round()
+        };
+        // thumb 底层，尺寸/圆角与按钮自画背景块同规格，margin_left 定位。
+        stack.add_child(
+            Container::new(
+                ConstrainedBox::new(warpui::elements::Empty::new().finish())
+                    .with_width(VIEW_MODE_SEGMENT_WIDTH)
+                    .with_height(VIEW_MODE_SEGMENT_HEIGHT)
+                    .finish(),
+            )
+            .with_margin_left(x)
+            .with_background_color(hc.card_bg_hover)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
+                BUTTON_CORNER_RADIUS - 1.0,
+            )))
+            .finish(),
+        );
+    }
+    stack.add_child(button_row);
 
     Container::new(
-        Flex::row()
-            .with_child(grid_btn)
-            .with_child(list_btn)
-            .with_child(status_btn)
+        // 锁死内容高度，保证 thumb 与三按钮顶边对齐，消除 Stack 约束歧义。
+        ConstrainedBox::new(stack.finish())
+            .with_height(VIEW_MODE_SEGMENT_HEIGHT)
             .finish(),
     )
-    .with_background_color(hc.search_bar_bg)
+    // 玻璃工具栏上用半透明 inset 底，实色块会挡玻璃穿透。
+    .with_background_color(hc.toolbar_inset_bg)
     .with_border(Border::all(1.0).with_border_color(hc.search_bar_border))
     .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BUTTON_CORNER_RADIUS)))
     .finish()
@@ -386,22 +463,29 @@ fn render_view_mode_toggle(
 fn render_view_mode_button(
     state: &MouseStateHandle,
     icon_path: &'static str,
+    index: usize,
     is_active: bool,
     action: TerminalGridAction,
+    states: &SearchBarStates,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     let hc = *hc;
     let state = state.clone();
-    let icon_color = if is_active {
+    let target_color = if is_active {
         hc.text_primary
     } else {
         hc.text_secondary
     };
+    let icon_color = {
+        let now = Instant::now();
+        let mut transitions = states.view_mode_icon_transitions.borrow_mut();
+        transitions.retarget(index, target_color, now);
+        transitions.sample(&index, now).unwrap_or(target_color)
+    };
 
     Hoverable::new(state, move |mouse| {
-        let bg = if is_active {
-            hc.card_bg_hover
-        } else if mouse.is_hovered() {
+        // active 底色交给 thumb，这里只在非 active 时画 hover 底。
+        let bg = if !is_active && mouse.is_hovered() {
             hc.group_hover_bg
         } else {
             ColorU::transparent_black()
@@ -417,14 +501,17 @@ fn render_view_mode_button(
                 )
                 .finish(),
             )
-            .with_width(32.0)
-            .with_height(28.0)
+            .with_width(VIEW_MODE_SEGMENT_WIDTH)
+            .with_height(VIEW_MODE_SEGMENT_HEIGHT)
             .finish(),
         )
         .with_background_color(bg)
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
+    .on_hover(|_, ctx, _, _| {
+        ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+    })
     .on_click(move |ctx, _, _| {
         ctx.dispatch_typed_action(action.clone());
     })

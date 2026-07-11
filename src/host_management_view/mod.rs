@@ -9,9 +9,9 @@ pub mod status_view;
 
 use warpui::{
     elements::{
-        ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, CrossAxisAlignment,
-        DragAxis, Draggable, DraggableState, Expanded, Fill, Flex, MainAxisSize, ParentElement,
-        SavePosition, ScrollbarWidth,
+        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
+        CrossAxisAlignment, DragAxis, Draggable, DraggableState, EventDispatchMode, Expanded, Fill,
+        Flex, MainAxisSize, ParentElement, SavePosition, ScrollbarWidth, Stack,
     },
     fonts, Element, ViewHandle,
 };
@@ -108,7 +108,8 @@ pub fn render_host_management_panel(
     );
 
     let body: Box<dyn Element> = if state.view_mode == HostViewMode::Keys {
-        render_key_manager_view(
+        // 不下穿玻璃，整体让出工具栏高度。
+        Container::new(render_key_manager_view(
             keys,
             selected_key_id,
             selected_key_public,
@@ -120,10 +121,13 @@ pub fn render_host_management_panel(
             &view_states.key_manager,
             ui_font,
             hc,
-        )
+        ))
+        .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
+        .finish()
     } else if filtered.is_empty() {
         Container::new(render_empty_state(ui_font, hc))
             .with_background_color(hc.panel_bg)
+            .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
             .finish()
     } else if state.view_mode == HostViewMode::Containers {
         // 容器视图常驻搜索栏：落在滚动区外，不随列表滚动。
@@ -159,11 +163,15 @@ pub fn render_host_management_panel(
         .with_overlayed_scrollbar()
         .finish();
 
-        Flex::column()
+        let container_panel = Flex::column()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
             .with_child(search_row)
             .with_child(Expanded::new(1.0, scrollable).finish())
+            .finish();
+        // 不下穿玻璃，整体让出工具栏高度。
+        Container::new(container_panel)
+            .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
             .finish()
     } else {
         let card_grid = match state.view_mode {
@@ -194,6 +202,10 @@ pub fn render_host_management_panel(
             HostViewMode::Containers => warpui::elements::Empty::new().finish(),
             HostViewMode::Keys => warpui::elements::Empty::new().finish(),
         };
+        // 滚动内容顶部让出工具栏高度，卡片上滚时从玻璃下穿过。
+        let card_grid = Container::new(card_grid)
+            .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
+            .finish();
 
         let scrollbar_thumb = Fill::Solid(hc.scrollbar_thumb);
         let scrollbar_thumb_active = Fill::Solid(hc.scrollbar_thumb_active);
@@ -213,11 +225,19 @@ pub fn render_host_management_panel(
 
     let show_bar = state.reorder_mode || state.selected_count() > 0;
 
+    // body 铺满、工具栏贴顶叠上去（后加的先画在上层，玻璃才能采样到 body）。
+    // Align 把工具栏受到的高度约束下限重置为 0，避免它被 Stack 传来的满高 tight 约束强行撑满；
+    // 顶层 Flex row 已是 MainAxisSize::Max，故不需要横向拉伸也能撑满宽度（同 find_section.rs 用法）。
+    // 显式 Waterfall：默认值 debug/release 不一致（release 是 Broadcast 会双派发），overlay Stack 仓库惯例同 root_view。
+    let mut body_stack = Stack::new().with_event_dispatch_mode(EventDispatchMode::Waterfall);
+    body_stack.add_child(body);
+    body_stack.add_child(Align::new(search).top_center().finish());
+    let body_stack = body_stack.finish();
+
     let mut content = Flex::column()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
-    content.add_child(search);
-    content.add_child(Expanded::new(1.0, body).finish());
+    content.add_child(Expanded::new(1.0, body_stack).finish());
     if show_bar {
         let bar = if state.reorder_mode {
             render_reorder_bar(&view_states.selection_bar, ui_font, hc)
