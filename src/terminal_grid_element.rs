@@ -603,7 +603,8 @@ pub struct TerminalGridElement {
     terminal: Arc<Mutex<LocalTerminalRuntime>>,
     input_editor: Arc<Mutex<TerminalInputEditor>>,
     selection_drag: Arc<Mutex<bool>>,
-    last_resize_cells: Arc<Mutex<(u16, u16)>>,
+    /// 共享的前台视口 cells，仅供 RootView 开新 tab 时取初始尺寸；None 表示非 focused pane，不写回。
+    last_resize_cells: Option<Arc<Mutex<(u16, u16)>>>,
     scrollbar_drag: Arc<Mutex<Option<ScrollbarDrag>>>,
     cursor_over_terminal: Arc<Mutex<bool>>,
     scrollbar_thumb_hovered: Arc<Mutex<bool>>,
@@ -1291,7 +1292,7 @@ impl TerminalGridElement {
         terminal: Arc<Mutex<LocalTerminalRuntime>>,
         input_editor: Arc<Mutex<TerminalInputEditor>>,
         selection_drag: Arc<Mutex<bool>>,
-        last_resize_cells: Arc<Mutex<(u16, u16)>>,
+        last_resize_cells: Option<Arc<Mutex<(u16, u16)>>>,
         scrollbar_drag: Arc<Mutex<Option<ScrollbarDrag>>>,
         cursor_over_terminal: Arc<Mutex<bool>>,
         scrollbar_thumb_hovered: Arc<Mutex<bool>>,
@@ -2113,21 +2114,6 @@ fn split_pane_terminal_body_size(available: Vector2F, header_height: f32) -> Vec
     )
 }
 
-fn resize_cells_for_available_size(
-    last: &mut (u16, u16),
-    available: Vector2F,
-    cell_metrics: CellMetrics,
-    fallback: (usize, usize),
-) -> Option<(u16, u16)> {
-    let next = viewport_cells_for_available_size(available, cell_metrics, fallback);
-    if next == *last {
-        return None;
-    }
-
-    *last = next;
-    Some(next)
-}
-
 /// 像素级平滑滚动：trackpad 直接用 pixel delta，discrete wheel 按
 /// Warp scrollable.rs:44 的 `NUM_PIXELS_PER_LINE = 40` 放大。
 const DISCRETE_SCROLL_LINES_PER_NOTCH: f64 = 3.0;
@@ -2734,15 +2720,16 @@ impl Element for TerminalGridElement {
     ) -> Vector2F {
         let grid = self.grid();
         let fallback = (grid.cols(), grid.rows());
-        let _cells = viewport_cells_for_available_size(constraint.max, self.cell_metrics, fallback);
-        let resize_target = self.last_resize_cells.lock().ok().and_then(|mut last| {
-            resize_cells_for_available_size(&mut last, constraint.max, self.cell_metrics, fallback)
-        });
+        let next = viewport_cells_for_available_size(constraint.max, self.cell_metrics, fallback);
 
-        if let Some((cols, rows)) = resize_target {
-            if let Ok(rt) = self.terminal.lock() {
-                let (cell_width, cell_height) = cell_metric_pixels(self.cell_metrics);
-                rt.resize_with_cell_size(cols, rows, cell_width, cell_height);
+        if let Ok(rt) = self.terminal.lock() {
+            let (cell_width, cell_height) = cell_metric_pixels(self.cell_metrics);
+            rt.resize_with_cell_size(next.0, next.1, cell_width, cell_height);
+        }
+
+        if let Some(shared) = &self.last_resize_cells {
+            if let Ok(mut last) = shared.lock() {
+                *last = next;
             }
         }
 
@@ -3667,11 +3654,10 @@ mod tests {
     use super::{
         accumulate_scroll_px, cursor_rects, encode_terminal_key_event_with_modes,
         find_action_for_key, grid_content_offset, mouse_report_bytes, repeat_mouse_report_bytes,
-        resize_cells_for_available_size, scrollbar_display_offset_for_center,
-        scrollbar_display_offset_for_pointer_movement, snap_terminal_rect_to_device_pixels,
-        split_pane_terminal_body_size, terminal_action_needs_notify, terminal_background_rects,
-        terminal_cell_decoration_rects, terminal_drag_drop_input,
-        terminal_font_properties_for_cell, terminal_ime_cursor_rect,
+        scrollbar_display_offset_for_center, scrollbar_display_offset_for_pointer_movement,
+        snap_terminal_rect_to_device_pixels, split_pane_terminal_body_size,
+        terminal_action_needs_notify, terminal_background_rects, terminal_cell_decoration_rects,
+        terminal_drag_drop_input, terminal_font_properties_for_cell, terminal_ime_cursor_rect,
         terminal_ime_cursor_rect_for_layout, terminal_input_bytes_should_reset_smooth_scroll,
         terminal_input_editor_should_defer_keydown_to_typed_characters,
         terminal_mouse_position_is_in_bounds, terminal_page_scroll_lines_for_key,
@@ -3762,39 +3748,6 @@ mod tests {
             viewport_cells_for_available_size(Vector2F::new(f32::INFINITY, 403.0), cell, (120, 40)),
             (120, 40)
         );
-    }
-
-    #[test]
-    fn resize_cells_only_emit_when_viewport_cell_count_changes() {
-        let cell = CellMetrics {
-            width: 10.0,
-            height: 20.0,
-            baseline_y: 14.0,
-        };
-        let mut last = (100, 30);
-
-        // usable = (828-16-12=800) x (404-4=400) → 80 × 20
-        assert_eq!(
-            resize_cells_for_available_size(
-                &mut last,
-                Vector2F::new(828.0, 404.0),
-                cell,
-                (100, 30)
-            ),
-            Some((80, 20))
-        );
-        assert_eq!(last, (80, 20));
-        // usable = (837-28=809) x (423-4=419) → 80 × 20 → no change
-        assert_eq!(
-            resize_cells_for_available_size(
-                &mut last,
-                Vector2F::new(837.0, 423.0),
-                cell,
-                (100, 30)
-            ),
-            None
-        );
-        assert_eq!(last, (80, 20));
     }
 
     #[test]

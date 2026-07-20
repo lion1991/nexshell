@@ -130,7 +130,7 @@ impl RootView {
                 Arc::clone(terminal),
                 Arc::clone(&self.input_editor),
                 Arc::clone(&self.selection_drag),
-                Arc::clone(&self.last_resize_cells),
+                Some(Arc::clone(&self.last_resize_cells)),
                 Arc::clone(&self.scrollbar_drag),
                 Arc::clone(&self.cursor_over_terminal),
                 Arc::clone(&self.scrollbar_thumb_hovered),
@@ -329,11 +329,7 @@ impl RootView {
                     Arc::new(Mutex::new(TerminalInputEditor::default()))
                 },
                 sel_drag,
-                if is_focused {
-                    Arc::clone(&self.last_resize_cells)
-                } else {
-                    Arc::new(Mutex::new((0, 0)))
-                },
+                is_focused.then(|| Arc::clone(&self.last_resize_cells)),
                 sb_drag,
                 cursor_over,
                 sb_hover,

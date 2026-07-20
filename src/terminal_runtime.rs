@@ -2804,6 +2804,8 @@ pub struct LocalTerminalRuntime {
     pty_fd: Option<LocalPtyDescriptor>,
     /// 前台进程是否为 shell（非 ssh/mosh），由 refresh_foreground_status 更新
     shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
+    /// 上一次实际下发的 resize 请求，None 表示从未请求过；用于去重跳过同尺寸重复 resize。
+    last_resize_request: std::sync::Mutex<Option<(u16, u16, u16, u16)>>,
 }
 
 impl LocalTerminalRuntime {
@@ -2988,6 +2990,7 @@ impl LocalTerminalRuntime {
             event_rx: Some(event_rx),
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            last_resize_request: std::sync::Mutex::new(None),
         })
     }
 
@@ -3039,6 +3042,7 @@ impl LocalTerminalRuntime {
             event_rx: Some(event_rx),
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            last_resize_request: std::sync::Mutex::new(None),
         })
     }
 
@@ -3082,6 +3086,7 @@ impl LocalTerminalRuntime {
             event_rx: None,
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            last_resize_request: std::sync::Mutex::new(None),
         }
     }
 
@@ -3146,6 +3151,7 @@ impl LocalTerminalRuntime {
             event_rx,
             pty_fd,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            last_resize_request: std::sync::Mutex::new(None),
         })
     }
 
@@ -3328,6 +3334,12 @@ impl LocalTerminalRuntime {
     }
 
     pub fn resize_with_cell_size(&self, cols: u16, rows: u16, cell_width: u16, cell_height: u16) {
+        let mut last = self.last_resize_request.lock().unwrap();
+        if resize_request_is_duplicate(&mut last, (cols, rows, cell_width, cell_height)) {
+            return;
+        }
+        drop(last);
+
         if let Some(event_loop) = &self.event_loop {
             let _ = event_loop.message_tx.send(Message::Resize(pty_size(
                 cols,
@@ -3658,6 +3670,18 @@ impl LocalTerminalRuntime {
 // EventLoopHandle::Drop sends Message::Shutdown, kills the child, and joins
 // the PTY thread, so LocalTerminalRuntime needs no extra Drop impl —
 // dropping `event_loop: Option<EventLoopHandle>` is enough.
+
+/// resize 请求与上次完全一致（含 cell 像素宽高）则判重复；否则记录并放行。
+fn resize_request_is_duplicate(
+    last: &mut Option<(u16, u16, u16, u16)>,
+    next: (u16, u16, u16, u16),
+) -> bool {
+    if *last == Some(next) {
+        return true;
+    }
+    *last = Some(next);
+    false
+}
 
 fn update_state(
     state: &Arc<FairMutex<TerminalRuntimeState>>,
@@ -5204,6 +5228,21 @@ fn hex_digit(b: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resize_request_dedup_only_lets_through_actual_changes() {
+        let mut last = None;
+        assert!(!resize_request_is_duplicate(&mut last, (80, 24, 9, 18)));
+        assert_eq!(last, Some((80, 24, 9, 18)));
+
+        assert!(resize_request_is_duplicate(&mut last, (80, 24, 9, 18)));
+
+        assert!(!resize_request_is_duplicate(&mut last, (81, 24, 9, 18)));
+        assert!(!resize_request_is_duplicate(&mut last, (81, 25, 9, 18)));
+        assert!(!resize_request_is_duplicate(&mut last, (81, 25, 10, 18)));
+        assert!(!resize_request_is_duplicate(&mut last, (81, 25, 10, 19)));
+        assert_eq!(last, Some((81, 25, 10, 19)));
+    }
 
     #[test]
     fn runtime_state_revision_advances_when_state_changes() {
