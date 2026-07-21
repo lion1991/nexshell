@@ -453,7 +453,9 @@ pub(crate) fn git_ssh_host_key_prompt_info(prompt: &SshHostKeyPrompt) -> String 
 pub(crate) fn render_git_panel_commit_row_content(
     commit: &CommitRow,
     colors: HostOverviewColors,
+    selected_bg: ColorU,
     ui_font: fonts::FamilyId,
+    selected: bool,
     hovered: bool,
 ) -> Box<dyn Element> {
     let dot = Text::new_inline("●".to_string(), ui_font, 12.0)
@@ -537,7 +539,9 @@ pub(crate) fn render_git_panel_commit_row_content(
         .with_padding_top(3.0)
         .with_padding_bottom(3.0)
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-    if hovered {
+    if selected {
+        container = container.with_background_color(selected_bg);
+    } else if hovered {
         container = container.with_background_color(colors.card_bg);
     }
     container.finish()
@@ -609,13 +613,15 @@ mod tests {
             kind,
         };
         let mut state = super::GitPanelState::default();
-        state.selected_entries = [
-            sel("staged.rs", GitDiffKind::Staged),
-            sel("changed.rs", GitDiffKind::Unstaged),
-            sel("new.txt", GitDiffKind::Untracked),
-        ]
-        .into_iter()
-        .collect();
+        state.selected_entries = std::sync::Arc::new(
+            [
+                sel("staged.rs", GitDiffKind::Staged),
+                sel("changed.rs", GitDiffKind::Unstaged),
+                sel("new.txt", GitDiffKind::Untracked),
+            ]
+            .into_iter()
+            .collect(),
+        );
 
         let target = sel("changed.rs", GitDiffKind::Unstaged);
         let paths = super::git_panel_context_paths(&state, &target);

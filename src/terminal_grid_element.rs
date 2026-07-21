@@ -1014,7 +1014,8 @@ pub enum TerminalGridAction {
         mode: GitPanelSelectMode,
     },
     GitPanelStage(String),
-    GitPanelStageAll(Vec<String>),
+    /// 无载荷：路径列表在 handler 里从当前快照现取，避免每帧把全部路径 clone 进按钮闭包。
+    GitPanelStageAll,
     GitPanelUnstage(String),
     GitPanelStagePaths {
         tab_id: String,

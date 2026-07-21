@@ -60,8 +60,8 @@ pub struct ChromeColors {
     pub combo_chevron_active_bg: ColorU,
     /// 活动 tab 底部 accent 焦点条。
     pub tab_accent_bar: ColorU,
-    /// 选中行 accent tint 圆角 pill 底色。
-    pub selection_pill_bg: ColorU,
+    /// 选中行底色（半透明 accent，与中性灰 hover 拉开区分；tint 档太淡已否）。
+    pub selection_bg: ColorU,
 }
 
 impl ChromeColors {
@@ -86,7 +86,7 @@ impl ChromeColors {
             combo_inner_hover_bg: p.neutral_2,
             combo_chevron_active_bg: p.fg_overlay_3,
             tab_accent_bar: p.accent,
-            selection_pill_bg: p.tint(p.accent),
+            selection_bg: ThemePalette::with_alpha(p.accent, 0x40),
         }
     }
 

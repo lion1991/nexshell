@@ -1,35 +1,33 @@
 // status section — RootView 的 git 状态视图：staged / unstaged / untracked / unmerged 三栏 + entries。
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
+// 文件区已虚拟化（UniformList，只构建可见行）：行模型/行构建自由函数在 git_panel_row_helpers.rs。
 // 同 section 调用：handle_git_panel_select_entry → diff_section::open_git_diff_tab；
 // render_git_panel_body → history_section::render_git_panel_history_divider / render_git_panel_history_section。
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 
-use pathfinder_geometry::vector::vec2f;
-
-use crate::file_panel_view_helpers::{file_panel_message, render_file_panel_icon_button};
-use crate::git_panel_view_helpers::{
-    git_panel_body_should_show_loading, git_panel_diff_kind_for_entry,
-    git_panel_entry_action_state_key, git_panel_entry_state_key,
-    git_panel_entry_tooltip_position_id, git_panel_entry_tooltip_text, git_panel_stage_all_paths,
+use crate::file_panel_view_helpers::file_panel_message;
+use crate::git_panel_row_helpers::{
+    build_git_panel_entry_row, build_git_panel_gap_row, build_git_panel_header_row,
+    git_panel_entry_at, git_panel_row_at, git_panel_row_sections, git_panel_total_rows,
+    GitPanelRowKind, GitPanelRowSection,
 };
-use crate::terminal_grid_element::TerminalGridAction;
+use crate::git_panel_view_helpers::{
+    git_panel_body_should_show_loading, git_panel_entry_action_state_key, git_panel_entry_state_key,
+};
 use crate::ui_colors::HostOverviewColors;
-use crate::{RootView, TerminalSessionTab, ICON_PATH_ARROW_DOWN, ICON_PATH_PLUS};
-use nexshell::git_ops::{GitDiffKind, GitDiffSelection};
+use crate::{RootView, TerminalSessionTab};
+use nexshell::git_ops::{GitDiffKind, GitDiffSelection, GitStatusSnapshot};
 use nexshell::git_panel::{
     apply_git_panel_selection, clamp_git_history_height, GitPanelSelectMode, GitRequest,
 };
 use warpui::color::ColorU;
 use warpui::elements::{
-    ChildAnchor, Clipped, ClippedScrollable, ConstrainedBox, Container, CornerRadius,
-    CrossAxisAlignment, DispatchEventResult, EventHandler, Expanded, Fill, Flex, Hoverable,
-    MainAxisSize, MouseState, OffsetPositioning, Padding, ParentElement, PositionedElementAnchor,
-    PositionedElementOffsetBounds, Radius, SavePosition, ScrollbarWidth, Stack, Text,
+    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Expanded, Fill, Flex,
+    MainAxisSize, ParentElement, Radius, Scrollable, ScrollableElement, ScrollbarWidth, Text,
+    UniformList,
 };
-use warpui::fonts;
 use warpui::{Element, ViewContext};
 
 impl RootView {
@@ -74,10 +72,6 @@ impl RootView {
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
         let state = &tab.git_panel_state;
-        let has_changes = !state.status.staged.is_empty()
-            || !state.status.unstaged.is_empty()
-            || !state.status.untracked.is_empty()
-            || !state.status.unmerged.is_empty();
         // 不在仓库内：有错误信息(致命，无快照可显示)整页错误，否则提示不在仓库。
         // 操作级错误(push/commit/stage 失败)快照仍在，不短路，下方挂提示条照常渲染。
         if !state.in_repo() {
@@ -98,78 +92,14 @@ impl RootView {
             );
         }
 
-        // 淘汰已不在 status 快照里的行/按钮 hover 状态（key 构造与 render 处同源）。
-        {
-            let mut valid = std::collections::HashSet::new();
-            let mut valid_action = std::collections::HashSet::new();
-            for (entries, is_staged) in [
-                (&state.status.staged, true),
-                (&state.status.unstaged, false),
-                (&state.status.untracked, false),
-                (&state.status.unmerged, false),
-            ] {
-                for e in entries {
-                    valid.insert(git_panel_entry_state_key(&e.path, is_staged));
-                    valid_action.insert(git_panel_entry_action_state_key(&e.path, is_staged));
-                }
-            }
-            tab.git_panel_entry_states
-                .borrow_mut()
-                .retain(|k, _| valid.contains(k));
-            tab.git_panel_entry_action_states
-                .borrow_mut()
-                .retain(|k, _| valid_action.contains(k));
-        }
+        let status = Arc::clone(&state.status);
+        self.prune_git_panel_hover_states_if_snapshot_changed(tab, &status);
 
-        let mut changes_column =
-            Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
+        let sections = git_panel_row_sections(&status);
+        let total_rows = git_panel_total_rows(&sections);
 
-        if !state.status.staged.is_empty() {
-            changes_column.add_child(self.render_git_panel_section(
-                tab,
-                &rust_i18n::t!("git_panel_section_staged"),
-                &state.status.staged,
-                true,
-                false,
-                false,
-                colors,
-            ));
-        }
-        if !state.status.unstaged.is_empty() {
-            changes_column.add_child(self.render_git_panel_section(
-                tab,
-                &rust_i18n::t!("git_panel_section_changes"),
-                &state.status.unstaged,
-                false,
-                true,
-                true,
-                colors,
-            ));
-        }
-        if !state.status.untracked.is_empty() {
-            changes_column.add_child(self.render_git_panel_section(
-                tab,
-                &rust_i18n::t!("git_panel_section_untracked"),
-                &state.status.untracked,
-                false,
-                false,
-                false,
-                colors,
-            ));
-        }
-        if !state.status.unmerged.is_empty() {
-            changes_column.add_child(self.render_git_panel_section(
-                tab,
-                &rust_i18n::t!("git_panel_section_unmerged"),
-                &state.status.unmerged,
-                false,
-                false,
-                false,
-                colors,
-            ));
-        }
-
-        if !has_changes {
+        let changes: Box<dyn Element> = if total_rows == 0 {
+            // 无变更：干净文案，不构建 UniformList。
             let clean = Text::new_inline(
                 rust_i18n::t!("git_panel_clean").to_string(),
                 self.ui_font,
@@ -177,19 +107,11 @@ impl RootView {
             )
             .with_color(colors.text_muted)
             .finish();
-            changes_column.add_child(Container::new(clean).with_padding_top(6.0).finish());
-        }
+            Container::new(clean).with_padding_top(6.0).finish()
+        } else {
+            self.build_git_panel_changes_list(tab, &status, sections, total_rows, colors)
+        };
 
-        let changes = ClippedScrollable::vertical(
-            tab.git_panel_scroll_state.clone(),
-            changes_column.finish(),
-            ScrollbarWidth::Custom(4.0),
-            Fill::Solid(colors.text_muted),
-            Fill::Solid(colors.text_primary),
-            Fill::None,
-        )
-        .with_overlayed_scrollbar()
-        .finish();
         let history = ConstrainedBox::new(self.render_git_panel_history_section(
             tab,
             &state.recent_commits,
@@ -207,6 +129,123 @@ impl RootView {
         body.add_child(self.render_git_panel_history_divider(tab, colors));
         body.add_child(history);
         body.finish()
+    }
+
+    /// 淘汰已不在 status 快照里的行/按钮 hover 状态（key 构造与行构建处同源）。
+    /// 用 Arc::ptr_eq 比较上次已处理的快照：快照没变的帧零开销，不再每帧全量 retain。
+    fn prune_git_panel_hover_states_if_snapshot_changed(
+        &self,
+        tab: &TerminalSessionTab,
+        status: &Arc<GitStatusSnapshot>,
+    ) {
+        let unchanged = tab
+            .git_panel_pruned_status
+            .borrow()
+            .as_ref()
+            .is_some_and(|prev| Arc::ptr_eq(prev, status));
+        if unchanged {
+            return;
+        }
+        let mut valid = std::collections::HashSet::new();
+        let mut valid_action = std::collections::HashSet::new();
+        for (entries, is_staged) in [
+            (&status.staged, true),
+            (&status.unstaged, false),
+            (&status.untracked, false),
+            (&status.unmerged, false),
+        ] {
+            for e in entries {
+                valid.insert(git_panel_entry_state_key(&e.path, is_staged));
+                valid_action.insert(git_panel_entry_action_state_key(&e.path, is_staged));
+            }
+        }
+        tab.git_panel_entry_states
+            .borrow_mut()
+            .retain(|k, _| valid.contains(k));
+        tab.git_panel_entry_action_states
+            .borrow_mut()
+            .retain(|k, _| valid_action.contains(k));
+        *tab.git_panel_pruned_status.borrow_mut() = Some(Arc::clone(status));
+    }
+
+    /// 文件变更列表：UniformList 虚拟滚动，只构建可见 range 的行（header/entry/gap）。
+    fn build_git_panel_changes_list(
+        &self,
+        tab: &TerminalSessionTab,
+        status: &Arc<GitStatusSnapshot>,
+        sections: Vec<GitPanelRowSection>,
+        total_rows: usize,
+        colors: &HostOverviewColors,
+    ) -> Box<dyn Element> {
+        let list_state = tab.git_panel_list_state.clone();
+        let status_for_list = Arc::clone(status);
+        let selected_entries = Arc::clone(&tab.git_panel_state.selected_entries);
+        let entry_states = tab.git_panel_entry_states.clone();
+        let entry_action_states = tab.git_panel_entry_action_states.clone();
+        let tab_id = tab.id.clone();
+        let ui_font = self.ui_font;
+        let overview = *colors;
+        let semantic = self.design_tokens.semantic;
+        let chrome = self.ui_colors();
+        let stage_all_state = tab.git_panel_stage_all_state.clone();
+        let text_muted = overview.text_muted;
+        let accent_text = overview.cpu_accent;
+        let header_hover_bg = chrome.tab_bg_hover;
+        let sections_for_list = sections;
+
+        let list = UniformList::new(list_state, total_rows, move |range, _ctx| {
+            range
+                .map(|index| match git_panel_row_at(&sections_for_list, index) {
+                    Some(GitPanelRowKind::SectionHeader(section_idx)) => {
+                        build_git_panel_header_row(
+                            &sections_for_list[section_idx],
+                            stage_all_state.clone(),
+                            ui_font,
+                            text_muted,
+                            accent_text,
+                            header_hover_bg,
+                        )
+                    }
+                    Some(GitPanelRowKind::Entry { section, index }) => {
+                        match git_panel_entry_at(
+                            &sections_for_list,
+                            &status_for_list,
+                            section,
+                            index,
+                        ) {
+                            Some(entry) => build_git_panel_entry_row(
+                                entry.clone(),
+                                sections_for_list[section].kind.is_staged(),
+                                sections_for_list[section].discard_enabled,
+                                Arc::clone(&selected_entries),
+                                entry_states.clone(),
+                                entry_action_states.clone(),
+                                tab_id.clone(),
+                                ui_font,
+                                overview,
+                                semantic,
+                                chrome,
+                            ),
+                            None => build_git_panel_gap_row(),
+                        }
+                    }
+                    Some(GitPanelRowKind::Gap) | None => build_git_panel_gap_row(),
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+        })
+        .finish_scrollable();
+
+        Scrollable::vertical(
+            tab.git_panel_scrollbar_state.clone(),
+            list,
+            ScrollbarWidth::Custom(4.0),
+            Fill::Solid(colors.text_muted),
+            Fill::Solid(colors.text_primary),
+            Fill::None,
+        )
+        .with_overlayed_scrollbar()
+        .finish()
     }
 
     /// 操作级错误(push/commit/stage 失败)的非阻断提示条；文件区/历史区仍正常显示。
@@ -231,273 +270,5 @@ impl RootView {
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
             .finish();
         Container::new(banner).with_padding_bottom(8.0).finish()
-    }
-
-    /// 单个分组（staged / unstaged / untracked / unmerged）。
-    fn render_git_panel_section(
-        &self,
-        tab: &TerminalSessionTab,
-        title: &str,
-        entries: &[nexshell::git_ops::GitFileEntry],
-        is_staged: bool,
-        show_stage_all: bool,
-        discard_enabled: bool,
-        colors: &HostOverviewColors,
-    ) -> Box<dyn Element> {
-        let header = Text::new_inline(format!("{title} ({})", entries.len()), self.ui_font, 11.0)
-            .with_style(fonts::Properties::default().weight(fonts::Weight::Bold))
-            .with_color(colors.text_muted)
-            .finish();
-        let mut header_row = Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(Expanded::new(1.0, header).finish());
-        if show_stage_all {
-            let paths = git_panel_stage_all_paths(entries);
-            let label = rust_i18n::t!("git_panel_stage_all").to_string();
-            let ui_font = self.ui_font;
-            let text_color = colors.cpu_accent;
-            let hover_bg = self.ui_colors().tab_bg_hover;
-            let button = Hoverable::new(tab.git_panel_stage_all_state.clone(), move |mouse| {
-                let label = Text::new_inline(label.clone(), ui_font, 10.0)
-                    .with_color(text_color)
-                    .finish();
-                let mut container = Container::new(
-                    Container::new(label)
-                        .with_horizontal_padding(6.0)
-                        .with_vertical_padding(2.0)
-                        .finish(),
-                )
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.0)));
-                if mouse.is_hovered() {
-                    container = container.with_background_color(hover_bg);
-                }
-                container.finish()
-            })
-            .with_cursor(warpui::platform::Cursor::PointingHand)
-            .on_click(move |ctx, _, _| {
-                ctx.dispatch_typed_action(TerminalGridAction::GitPanelStageAll(paths.clone()));
-            })
-            .finish();
-            header_row = header_row.with_child(button);
-        }
-
-        let mut col = Flex::column()
-            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_child(
-                Container::new(header_row.finish())
-                    .with_padding_bottom(4.0)
-                    .finish(),
-            );
-        for entry in entries {
-            col.add_child(self.render_git_panel_entry(
-                tab,
-                entry,
-                is_staged,
-                discard_enabled,
-                colors,
-            ));
-        }
-        Container::new(col.finish())
-            .with_padding_top(6.0)
-            .with_padding_bottom(6.0)
-            .finish()
-    }
-
-    /// 状态字母语义色：M→warn A→ok D→danger R/C→info 其余→muted，取变更主字母。
-    fn git_status_letter_color(
-        &self,
-        entry: &nexshell::git_ops::GitFileEntry,
-        muted: ColorU,
-    ) -> ColorU {
-        let sem = &self.design_tokens.semantic;
-        // porcelain v2 无变更位是 '.'（非空格）。
-        let letter = if !matches!(entry.index_status, ' ' | '.' | '?') {
-            entry.index_status
-        } else {
-            entry.worktree_status
-        };
-        match letter {
-            'M' => sem.warn,
-            'A' => sem.ok,
-            'D' => sem.danger,
-            'R' | 'C' => sem.info,
-            _ => muted,
-        }
-    }
-
-    fn render_git_panel_entry(
-        &self,
-        tab: &TerminalSessionTab,
-        entry: &nexshell::git_ops::GitFileEntry,
-        is_staged: bool,
-        discard_enabled: bool,
-        colors: &HostOverviewColors,
-    ) -> Box<dyn Element> {
-        let xy = format!("{}{}", entry.index_status, entry.worktree_status);
-        let label_text = git_panel_entry_tooltip_text(entry, &xy);
-        let diff_kind = git_panel_diff_kind_for_entry(entry, is_staged);
-        let diff_selection = GitDiffSelection {
-            path: entry.path.clone(),
-            kind: diff_kind,
-        };
-        // 高亮单一来源：只认 selected_entries，不 OR 焦点 selected_diff，避免右键/取消选中后残留高亮（对齐 Warp block 选择）
-        let is_selected = tab
-            .git_panel_state
-            .selected_entries
-            .contains(&diff_selection);
-
-        let path_for_action = entry.path.clone();
-        let action = if is_staged {
-            TerminalGridAction::GitPanelUnstage(path_for_action)
-        } else {
-            TerminalGridAction::GitPanelStage(path_for_action)
-        };
-
-        let state = tab
-            .git_panel_entry_states
-            .borrow_mut()
-            .entry(git_panel_entry_state_key(&entry.path, is_staged))
-            .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
-            .clone();
-        let action_state = tab
-            .git_panel_entry_action_states
-            .borrow_mut()
-            .entry(git_panel_entry_action_state_key(&entry.path, is_staged))
-            .or_insert_with(|| Arc::new(Mutex::new(MouseState::default())))
-            .clone();
-
-        let ui_font = self.ui_font;
-        let text_color = colors.text_primary;
-        let hover_bg = self.ui_colors().tab_bg_hover;
-        let selected_bg = colors.card_bg;
-        let tooltip_bg = self.ui_colors().tooltip_bg;
-        let tooltip_text_color = self.ui_colors().tooltip_text;
-        // 状态字母语义上色：xy 前缀单独染色，路径部分维持主文字色。
-        let status_color = self.git_status_letter_color(entry, colors.text_muted);
-        let status_prefix = xy.clone();
-        let path_rest = label_text[xy.len()..].to_string();
-        let tooltip_label = label_text.clone();
-        let tooltip_position_id = git_panel_entry_tooltip_position_id(&entry.path, is_staged);
-        let select_path = entry.path.clone();
-
-        let label = Hoverable::new(state, move |mouse| {
-            let label_row = Flex::row()
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    Text::new_inline(status_prefix.clone(), ui_font, 11.0)
-                        .with_color(status_color)
-                        .finish(),
-                )
-                .with_child(
-                    Text::new_inline(path_rest.clone(), ui_font, 11.0)
-                        .with_color(text_color)
-                        .finish(),
-                )
-                .finish();
-            let text =
-                SavePosition::new(Clipped::new(label_row).finish(), &tooltip_position_id).finish();
-            let mut container = Container::new(
-                Container::new(text)
-                    .with_padding_left(6.0)
-                    .with_padding_right(6.0)
-                    .with_padding_top(3.0)
-                    .with_padding_bottom(3.0)
-                    .finish(),
-            )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.0)));
-            if is_selected {
-                container = container.with_background_color(selected_bg);
-            } else if mouse.is_mouse_over_element() {
-                container = container.with_background_color(hover_bg);
-            }
-            let base = container.finish();
-            if !mouse.is_hovered() {
-                return base;
-            }
-
-            let tooltip = Container::new(
-                ConstrainedBox::new(
-                    Text::new(tooltip_label.clone(), ui_font, 12.0)
-                        .with_line_height_ratio(1.25)
-                        .with_color(tooltip_text_color)
-                        .finish(),
-                )
-                .with_max_width(520.0)
-                .finish(),
-            )
-            .with_background_color(tooltip_bg)
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
-            .with_padding(Padding::uniform(8.0))
-            .finish();
-
-            let mut stack = Stack::new().with_child(base);
-            stack.add_positioned_overlay_child(
-                tooltip,
-                OffsetPositioning::offset_from_save_position_element(
-                    tooltip_position_id.clone(),
-                    vec2f(0.0, 6.0),
-                    PositionedElementOffsetBounds::WindowByPosition,
-                    PositionedElementAnchor::BottomLeft,
-                    ChildAnchor::TopLeft,
-                ),
-            );
-            stack.finish()
-        })
-        .with_hover_in_delay(Duration::from_millis(500))
-        .with_cursor(warpui::platform::Cursor::PointingHand)
-        .on_click_with_modifiers(move |ctx, _, _, modifiers| {
-            let mode = if modifiers.shift {
-                GitPanelSelectMode::Range
-            } else if modifiers.cmd || modifiers.ctrl {
-                GitPanelSelectMode::Toggle
-            } else {
-                GitPanelSelectMode::Replace
-            };
-            ctx.dispatch_typed_action(TerminalGridAction::GitPanelSelectEntry {
-                path: select_path.clone(),
-                kind: diff_kind,
-                mode,
-            });
-        })
-        .finish();
-
-        let uc = self.ui_colors();
-        let action_icon = if is_staged {
-            ICON_PATH_ARROW_DOWN
-        } else {
-            ICON_PATH_PLUS
-        };
-        let action_button = render_file_panel_icon_button(
-            action_state,
-            action_icon,
-            uc.icon_color_inactive,
-            uc.icon_button_hover_bg,
-            action,
-        );
-
-        let tab_id_for_ctx = tab.id.clone();
-        let path_for_ctx = entry.path.clone();
-        let row = Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(Expanded::new(1.0, label).finish())
-            .with_child(
-                Container::new(action_button)
-                    .with_padding_left(4.0)
-                    .finish(),
-            )
-            .finish();
-
-        EventHandler::new(row)
-            .on_right_mouse_down(move |ctx, _app, position| {
-                ctx.dispatch_typed_action(TerminalGridAction::GitPanelShowContextMenu {
-                    tab_id: tab_id_for_ctx.clone(),
-                    path: path_for_ctx.clone(),
-                    kind: diff_kind,
-                    discard_enabled,
-                    position,
-                });
-                DispatchEventResult::StopPropagation
-            })
-            .finish()
     }
 }

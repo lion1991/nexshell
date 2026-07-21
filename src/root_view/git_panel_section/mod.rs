@@ -16,12 +16,16 @@ mod footer;
 mod history_section;
 mod status_section;
 
+use std::sync::Arc;
+
 use super::super::{
     RootView, TerminalSessionKind, TerminalSessionTab, GIT_PANEL_DIVIDER_WIDTH,
     GIT_PANEL_WIDTH_MAX, GIT_PANEL_WIDTH_MIN, ICON_PATH_REFRESH,
 };
 use crate::file_panel_view_helpers::{file_panel_message, render_file_panel_icon_button};
-use crate::git_panel_view_helpers::{git_ssh_host_key_prompt_info, git_ssh_host_key_prompt_title};
+use crate::git_panel_view_helpers::{
+    git_panel_stage_all_paths, git_ssh_host_key_prompt_info, git_ssh_host_key_prompt_title,
+};
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use nexshell::git_ops::{GitDiffSelection, SshHostKeyPrompt};
@@ -114,14 +118,15 @@ impl RootView {
         }
     }
 
-    pub(in crate::root_view) fn handle_git_panel_stage_all(&mut self, paths: Vec<String>) {
-        if paths.is_empty() {
-            return;
-        }
+    pub(in crate::root_view) fn handle_git_panel_stage_all(&mut self) {
         if let Some(tab) = self
             .active_git_panel_tab_index()
             .and_then(|index| self.terminal_tabs.get(index))
         {
+            let paths = git_panel_stage_all_paths(&tab.git_panel_state.status.unstaged);
+            if paths.is_empty() {
+                return;
+            }
             if let Some(w) = tab.git_worker.as_ref() {
                 w.send(GitRequest::Stage(paths));
             }
@@ -197,12 +202,14 @@ impl RootView {
                 }
             }
             GitEvent::Snapshot { status, .. } => {
+                // Arc 只 clone 一次，多个 diff tab 共享同一份快照（引用计数，非深拷贝）。
+                let status = Arc::new(status.clone());
                 for tab in self.terminal_tabs.iter_mut().filter(|tab| {
                     matches!(tab.kind, TerminalSessionKind::GitDiff)
                         && tab.host_id.as_deref() == Some(owner)
                         && tab.git_panel_state.repo_root.as_ref() == Some(&source_repo)
                 }) {
-                    tab.git_panel_state.status = status.clone();
+                    tab.git_panel_state.status = Arc::clone(&status);
                     // 文件被删除/改动消失后清掉陈旧 diff，避免标签停留显示已不存在文件的旧内容。
                     let had_diff = tab.git_panel_state.selected_diff.is_some();
                     clear_stale_diff_selection(&mut tab.git_panel_state);
@@ -521,6 +528,7 @@ mod tests {
     use nexshell::git_ops::GitStatusSnapshot;
     use nexshell::git_panel::GitPanelState;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[test]
     fn git_panel_stage_all_paths_use_current_section_entries() {
@@ -550,12 +558,12 @@ mod tests {
     fn git_panel_footer_switches_to_push_only_when_clean_and_ahead() {
         let clean_ahead = GitPanelState {
             repo_root: Some(PathBuf::from("/repo")),
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 branch: Some("main".into()),
                 upstream: Some("origin/main".into()),
                 ahead: 1,
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         assert_eq!(
@@ -580,11 +588,11 @@ mod tests {
 
         let clean_synced = GitPanelState {
             repo_root: Some(PathBuf::from("/repo")),
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 branch: Some("main".into()),
                 upstream: Some("origin/main".into()),
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         assert_eq!(
@@ -600,11 +608,11 @@ mod tests {
     fn git_panel_footer_keeps_push_surface_for_clean_branch_without_upstream() {
         let clean_no_upstream = GitPanelState {
             repo_root: Some(PathBuf::from("/repo")),
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 branch: Some("main".into()),
                 upstream: None,
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
 
@@ -621,7 +629,7 @@ mod tests {
     fn git_panel_footer_keeps_commit_mode_while_changes_exist() {
         let with_staged_changes = GitPanelState {
             repo_root: Some(PathBuf::from("/repo")),
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 branch: Some("main".into()),
                 upstream: Some("origin/main".into()),
                 ahead: 1,
@@ -633,7 +641,7 @@ mod tests {
                     stage: nexshell::git_ops::GitFileStage::Staged,
                 }],
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
         assert_eq!(

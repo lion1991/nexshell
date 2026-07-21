@@ -520,17 +520,16 @@ impl RootView {
         let mouse_in_tab_id = tab.id.clone();
         let mouse_in_sha = commit.sha.clone();
         let selected = tab.git_panel_selected_commit.as_deref() == Some(commit.sha.as_str());
+        let selected_bg = self.ui_colors().selection_bg;
 
         let row = Hoverable::new(state, move |mouse| {
             let row = render_git_panel_commit_row_content(
                 &commit,
                 colors,
+                selected_bg,
                 ui_font,
-                selected
-                    || git_commit_row_visual_hovered(
-                        mouse.is_hovered(),
-                        mouse.is_mouse_over_element(),
-                    ),
+                selected,
+                git_commit_row_visual_hovered(mouse.is_hovered(), mouse.is_mouse_over_element()),
             );
             SavePosition::new(row, &row_position_id).finish()
         })

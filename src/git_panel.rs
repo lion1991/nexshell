@@ -45,8 +45,8 @@ pub struct GitPanelState {
     pub repo_root: Option<PathBuf>,
     /// 主分支名（origin/main 之类）。
     pub main_branch: Option<String>,
-    /// 最近一次 `git status` 结果。
-    pub status: GitStatusSnapshot,
+    /// 最近一次 `git status` 结果。Arc：worker 快照 UI 只读，render 闭包廉价持有（虚拟列表用）。
+    pub status: Arc<GitStatusSnapshot>,
     /// 最近 N 条 commit。
     pub recent_commits: Vec<CommitRow>,
     /// 最近 commit 是否还有下一页可加载。
@@ -62,8 +62,8 @@ pub struct GitPanelState {
     pub diff_preview: Option<GitFileDiff>,
     pub diff_loading: bool,
     pub diff_error: Option<String>,
-    /// 当前 Git 文件列表多选集合。用 GitDiffSelection 区分同一路径的 staged/worktree 行。
-    pub selected_entries: BTreeSet<GitDiffSelection>,
+    /// 当前 Git 文件列表多选集合。用 GitDiffSelection 区分同一路径的 staged/worktree 行。Arc + make_mut：只在真改动时深拷贝。
+    pub selected_entries: Arc<BTreeSet<GitDiffSelection>>,
     /// shift 范围选择锚点。
     pub selection_anchor: Option<GitDiffSelection>,
     /// worker 上次刷新时的 cwd。用于 UI 决定是否需要再发 SetCwd。
@@ -183,7 +183,7 @@ pub fn apply_git_event(state: &mut GitPanelState, event: GitEvent) {
             state.last_cwd = Some(repo_root.clone());
             state.repo_root = Some(repo_root);
             state.main_branch = main_branch;
-            state.status = status;
+            state.status = Arc::new(status);
             state.recent_commits = commits;
             state.history_has_more = history_has_more;
             state.history_loading_more = false;
@@ -211,7 +211,7 @@ pub fn apply_git_event(state: &mut GitPanelState, event: GitEvent) {
             state.last_cwd = Some(cwd);
             state.repo_root = None;
             state.main_branch = None;
-            state.status = GitStatusSnapshot::default();
+            state.status = Arc::new(GitStatusSnapshot::default());
             state.recent_commits.clear();
             state.history_has_more = false;
             state.history_loading_more = false;
@@ -268,7 +268,7 @@ fn clear_diff_preview(state: &mut GitPanelState) {
 }
 
 fn clear_git_panel_selection(state: &mut GitPanelState) {
-    state.selected_entries.clear();
+    Arc::make_mut(&mut state.selected_entries).clear();
     state.selection_anchor = None;
 }
 
@@ -310,13 +310,15 @@ pub fn apply_git_panel_selection(
 ) {
     match mode {
         GitPanelSelectMode::Replace => {
-            state.selected_entries.clear();
-            state.selected_entries.insert(target.clone());
+            let entries = Arc::make_mut(&mut state.selected_entries);
+            entries.clear();
+            entries.insert(target.clone());
             state.selection_anchor = Some(target);
         }
         GitPanelSelectMode::Toggle => {
-            if !state.selected_entries.remove(&target) {
-                state.selected_entries.insert(target.clone());
+            let entries = Arc::make_mut(&mut state.selected_entries);
+            if !entries.remove(&target) {
+                entries.insert(target.clone());
             }
             state.selection_anchor = Some(target);
         }
@@ -337,22 +339,24 @@ pub fn apply_git_panel_selection(
                 return;
             };
             let (lo, hi) = if ai <= ti { (ai, ti) } else { (ti, ai) };
-            state.selected_entries.clear();
+            let entries = Arc::make_mut(&mut state.selected_entries);
+            entries.clear();
             for selection in &ordered[lo..=hi] {
-                state.selected_entries.insert(selection.clone());
+                entries.insert(selection.clone());
             }
         }
     }
 }
 
 fn prune_stale_git_panel_selection(state: &mut GitPanelState) {
-    state
-        .selected_entries
-        .retain(|selection| diff_selection_exists(&state.status, selection));
+    // 先 clone 一份 Arc（引用计数，不深拷贝），避免 status 只读借用与 selected_entries 可变借用冲突。
+    let status = Arc::clone(&state.status);
+    Arc::make_mut(&mut state.selected_entries)
+        .retain(|selection| diff_selection_exists(&status, selection));
     if state
         .selection_anchor
         .as_ref()
-        .is_some_and(|selection| !diff_selection_exists(&state.status, selection))
+        .is_some_and(|selection| !diff_selection_exists(&status, selection))
     {
         state.selection_anchor = None;
     }
@@ -843,10 +847,10 @@ mod tests {
         let mut s = GitPanelState {
             repo_root: Some(PathBuf::from("/tmp/r")),
             main_branch: Some("main".into()),
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 branch: Some("feat".into()),
                 ..Default::default()
-            },
+            }),
             recent_commits: vec![CommitRow {
                 sha: "abc".into(),
                 full_sha: "abc".into(),
@@ -1000,7 +1004,7 @@ mod tests {
     #[test]
     fn git_panel_selection_supports_replace_toggle_and_section_range() {
         let mut s = GitPanelState {
-            status: GitStatusSnapshot {
+            status: Arc::new(GitStatusSnapshot {
                 staged: vec![
                     git_file_entry("staged-a.rs", 'M', '.'),
                     git_file_entry("staged-b.rs", 'M', '.'),
@@ -1011,7 +1015,7 @@ mod tests {
                     git_file_entry("work-c.rs", '.', 'M'),
                 ],
                 ..Default::default()
-            },
+            }),
             ..Default::default()
         };
 
@@ -1059,18 +1063,20 @@ mod tests {
     fn snapshot_prunes_stale_git_panel_selection() {
         let mut s = GitPanelState {
             repo_root: Some(PathBuf::from("/tmp/r")),
-            selected_entries: [
-                GitDiffSelection {
-                    path: "kept.rs".into(),
-                    kind: git_ops::GitDiffKind::Unstaged,
-                },
-                GitDiffSelection {
-                    path: "gone.rs".into(),
-                    kind: git_ops::GitDiffKind::Unstaged,
-                },
-            ]
-            .into_iter()
-            .collect(),
+            selected_entries: Arc::new(
+                [
+                    GitDiffSelection {
+                        path: "kept.rs".into(),
+                        kind: git_ops::GitDiffKind::Unstaged,
+                    },
+                    GitDiffSelection {
+                        path: "gone.rs".into(),
+                        kind: git_ops::GitDiffKind::Unstaged,
+                    },
+                ]
+                .into_iter()
+                .collect(),
+            ),
             selection_anchor: Some(GitDiffSelection {
                 path: "gone.rs".into(),
                 kind: git_ops::GitDiffKind::Unstaged,

@@ -21,6 +21,7 @@ mod terminal_section;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,8 +38,8 @@ use warpui::{
         Border, CacheOption, ChildAnchor, ClippedScrollStateHandle, Container, CrossAxisAlignment,
         DispatchEventResult, DraggableState, EventHandler, Expanded, Flex, Image as ImageElement,
         MainAxisSize, MouseState, MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement,
-        ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds, Shrinkable,
-        Stack,
+        ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds,
+        ScrollStateHandle, Shrinkable, Stack, UniformListState,
     },
     fonts,
     r#async::Timer,
@@ -2169,9 +2170,7 @@ impl TypedActionView for RootView {
                 self.handle_git_panel_select_entry(path.clone(), *kind, *mode, ctx)
             }
             TerminalGridAction::GitPanelStage(path) => self.handle_git_panel_stage(path.clone()),
-            TerminalGridAction::GitPanelStageAll(paths) => {
-                self.handle_git_panel_stage_all(paths.clone())
-            }
+            TerminalGridAction::GitPanelStageAll => self.handle_git_panel_stage_all(),
             TerminalGridAction::GitPanelStagePaths { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
@@ -2828,7 +2827,9 @@ impl RootView {
                 git_commit_editor_shell_state: Arc::new(Mutex::new(MouseState::default())),
                 git_panel_push_state: Arc::new(Mutex::new(MouseState::default())),
                 git_panel_stage_all_state: Arc::new(Mutex::new(MouseState::default())),
-                git_panel_scroll_state: ClippedScrollStateHandle::default(),
+                git_panel_list_state: UniformListState::default(),
+                git_panel_scrollbar_state: ScrollStateHandle::default(),
+                git_panel_pruned_status: RefCell::new(None),
                 git_panel_diff_scroll_state: ClippedScrollStateHandle::default(),
                 git_panel_history_scroll_state: ClippedScrollStateHandle::default(),
                 git_panel_history_last_scroll_start: 0.0,
@@ -2839,8 +2840,8 @@ impl RootView {
                     s
                 },
                 git_panel_history_height: self.git_history_height,
-                git_panel_entry_states: RefCell::new(HashMap::new()),
-                git_panel_entry_action_states: RefCell::new(HashMap::new()),
+                git_panel_entry_states: Rc::new(RefCell::new(HashMap::new())),
+                git_panel_entry_action_states: Rc::new(RefCell::new(HashMap::new())),
                 git_panel_commit_states: RefCell::new(HashMap::new()),
                 git_panel_commit_detail_states: RefCell::new(HashMap::new()),
                 git_panel_commit_copy_states: RefCell::new(HashMap::new()),

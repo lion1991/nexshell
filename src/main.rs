@@ -9,6 +9,7 @@ mod file_panel_view_helpers;
 mod font_enumeration;
 mod font_fallback;
 mod git_commit_detail_helpers;
+mod git_panel_row_helpers;
 mod git_panel_view_helpers;
 mod group_tag_manage_window;
 mod host_edit_window;
@@ -40,6 +41,7 @@ use anyhow::Result;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Mutex;
 
 use nexshell::text_editor::EditorView;
@@ -50,7 +52,10 @@ use warpui::platform::app::ApproveTerminateResult;
 use warpui::platform::menu::{CustomMenuItem, Menu, MenuBar, MenuItem, MenuItemPropertyChanges};
 use warpui::platform::TerminationMode;
 use warpui::{
-    elements::{ClippedScrollStateHandle, DraggableState, DropTargetData, MouseStateHandle},
+    elements::{
+        ClippedScrollStateHandle, DraggableState, DropTargetData, MouseStateHandle,
+        ScrollStateHandle, UniformListState,
+    },
     fonts,
     keymap::{macros::id, FixedBinding},
     platform,
@@ -64,6 +69,7 @@ use warpui::platform::current::AppExt;
 
 use nexshell::file_panel::{FilePanelState, FilePanelWorkerHandle};
 use nexshell::generation::{accepts_generation, Generation, GenerationAllocator};
+use nexshell::git_ops::GitStatusSnapshot;
 use nexshell::git_panel::{GitPanelState, GitWorkerHandle};
 use nexshell::host_overview::{HostOverviewMonitorHandle, HostOverviewUiState};
 use nexshell::pane_state::NexPaneId;
@@ -558,17 +564,21 @@ struct TerminalSessionTab {
     git_commit_editor_shell_state: MouseStateHandle,
     git_panel_push_state: MouseStateHandle,
     git_panel_stage_all_state: MouseStateHandle,
-    git_panel_scroll_state: ClippedScrollStateHandle,
+    /// 文件列表虚拟化：UniformList 只按可见 range 构建行；scrollbar 状态单独持有。
+    git_panel_list_state: UniformListState,
+    git_panel_scrollbar_state: ScrollStateHandle,
+    /// 上一帧渲染用过的快照（Arc::ptr_eq 比较）：快照没变就跳过 hover map retain。
+    git_panel_pruned_status: RefCell<Option<Arc<GitStatusSnapshot>>>,
     git_panel_diff_scroll_state: ClippedScrollStateHandle,
     git_panel_history_scroll_state: ClippedScrollStateHandle,
     git_panel_history_last_scroll_start: f32,
     git_panel_history_divider_state: MouseStateHandle,
     git_panel_history_divider_drag_state: DraggableState,
     git_panel_history_height: f32,
-    /// 文件行 hover 状态，按 staged/worktree 分组 + 路径索引。
-    git_panel_entry_states: RefCell<HashMap<String, MouseStateHandle>>,
+    /// 文件行 hover 状态，按 staged/worktree 分组 + 路径索引。Rc：UniformList build_items 闭包需 'static 持有。
+    git_panel_entry_states: Rc<RefCell<HashMap<String, MouseStateHandle>>>,
     /// 文件行 stage/unstage 按钮 hover 状态。
-    git_panel_entry_action_states: RefCell<HashMap<String, MouseStateHandle>>,
+    git_panel_entry_action_states: Rc<RefCell<HashMap<String, MouseStateHandle>>>,
     /// commit 行 hover 状态，按短 SHA 索引。
     git_panel_commit_states: RefCell<HashMap<String, MouseStateHandle>>,
     /// commit 详情卡 hover 状态，按短 SHA 索引；用于从行移动到卡片时保持显示。
