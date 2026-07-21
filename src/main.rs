@@ -48,7 +48,7 @@ use nexshell::text_editor::EditorView;
 use pathfinder_geometry::vector::vec2f;
 use warpui::actions::StandardAction;
 use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
-use warpui::platform::app::ApproveTerminateResult;
+use warpui::platform::app::{ApproveTerminateResult, TerminationRequestSource};
 use warpui::platform::menu::{CustomMenuItem, Menu, MenuBar, MenuItem, MenuItemPropertyChanges};
 use warpui::platform::TerminationMode;
 use warpui::{
@@ -1065,7 +1065,13 @@ fn main() -> Result<()> {
     }));
 
     // Cmd+Q / 菜单 Quit → 真正退出，有进程则弹确认
-    callbacks.on_should_terminate_app = Some(Box::new(move |ctx| {
+    callbacks.on_should_terminate_app = Some(Box::new(move |source, ctx| {
+        // 系统发起的退出（注销/重启/关机/系统更新）不可阻塞：下面任一 Cancel 分支
+        // 都会被系统解读为拒绝退出，可能中止关机流程或卡在没有可见窗口的确认弹窗上。
+        if source == TerminationRequestSource::System {
+            return ApproveTerminateResult::Terminate;
+        }
+
         let running_count = flags_for_quit
             .lock()
             .map(|flags| flags.iter().filter(|f| !f.load(Ordering::Relaxed)).count())

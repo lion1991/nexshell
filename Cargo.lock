@@ -381,6 +381,7 @@ dependencies = [
  "arborium-json",
  "arborium-kotlin",
  "arborium-lua",
+ "arborium-markdown",
  "arborium-nix",
  "arborium-objc",
  "arborium-php",
@@ -589,6 +590,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbe5948a7e0fb3e9401e5384e2e05099d2b79891fb9c32b8eef4c48b488fab83"
 dependencies = [
  "arborium-sysroot",
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "arborium-markdown"
+version = "2.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bc5fe5bc91e51a7ce97c48a30bdc84df64d0949c79b9cf2e22da553307a8378"
+dependencies = [
+ "arborium-html",
+ "arborium-sysroot",
+ "arborium-toml",
+ "arborium-yaml",
  "cc",
  "tree-sitter-language",
 ]
@@ -11488,6 +11503,7 @@ dependencies = [
  "font-kit",
  "fontconfig",
  "fontdb",
+ "foreign-types",
  "futures",
  "futures-lite 1.13.0",
  "futures-util",
