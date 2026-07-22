@@ -99,7 +99,8 @@ impl RootView {
         let total_rows = git_panel_total_rows(&sections);
 
         let changes: Box<dyn Element> = if total_rows == 0 {
-            // 无变更：干净文案，不构建 UniformList。
+            // 无变更：干净文案。Text 忽略 min 约束，须包 Max 列占满 Expanded 的紧约束，
+            // 否则 changes 区坍缩、历史区被顶到面板上部（分隔条随之视觉冻结）。
             let clean = Text::new_inline(
                 rust_i18n::t!("git_panel_clean").to_string(),
                 self.ui_font,
@@ -107,7 +108,11 @@ impl RootView {
             )
             .with_color(colors.text_muted)
             .finish();
-            Container::new(clean).with_padding_top(6.0).finish()
+            Flex::column()
+                .with_main_axis_size(MainAxisSize::Max)
+                .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+                .with_child(Container::new(clean).with_padding_top(6.0).finish())
+                .finish()
         } else {
             self.build_git_panel_changes_list(tab, &status, sections, total_rows, colors)
         };
