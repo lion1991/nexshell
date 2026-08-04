@@ -29,7 +29,7 @@ bash scripts/cargo-run.sh check   # 透传任意 cargo 子命令
 
 ## Warp 参考策略
 
-Warp 源码是终端工程与 UI 打磨的首要参考——目标是把稳定的终端基础设施适配进 NexShell 的产品形态，而非嵌入整个 Warp app。每个 Rust 终端功能的实现都参考 Warp 对应代码，不自造轮子。warp 是 fork（master = 上游 + nexshell 私有补丁），升级靠 rebase 补丁 + cargo check 验证漂移。
+Warp 源码是终端工程与 UI 打磨的首要参考——目标是把稳定的终端基础设施适配进 NexShell 的产品形态，而非嵌入整个 Warp app。每个 Rust 终端功能的实现都参考 Warp 对应代码，不自造轮子。warp 是供 NexShell 消费的集成镜像（官方上游 + NexShell 保护补丁）；上游追平采用保留历史的完整 merge，并以保护清单、跨仓库兼容基线和运行门禁验证特性保全，见 [ADR 0010](./docs/adr/0010-warp-upstream-catch-up-preserves-nexshell-features.md)。
 
 ## 从 Tauri 迁移的已知功能差异
 
