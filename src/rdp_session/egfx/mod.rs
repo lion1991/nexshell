@@ -1,4 +1,4 @@
-//! EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第②步）：合成层 + VideoToolbox H.264 硬解。
+//! EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第②步）：合成层 + macOS VideoToolbox H.264 硬解。
 //! 挂 EGFX DVC 通道，广告 V10.7+V8.1+V8（接上 decoder 后服务端自动选 AVC420）；
 //! AVC420/Uncompressed/ClearCodec 均由库解好经 on_bitmap_updated（RGBA）落 surface（ClearCodec
 //! 连接级单例解码器，上游 #1175）；Progressive(WireToSurface2) 由本层调库解码器写 tile。
@@ -6,7 +6,9 @@
 //!
 //! 与 legacy fastpath 路径写同一个 framebuffer：同一会话只走其中一条管线（EGFX 激活后
 //! legacy 图形流停），靠此保证不打架。
+//! 非 macOS 目标不广告 H.264 解码器，但仍保留 Uncompressed/ClearCodec/Progressive 路径。
 
+#[cfg(target_os = "macos")]
 mod decoder_vt;
 mod diag;
 mod surfaces;
@@ -19,6 +21,7 @@ use ironrdp_dvc::DrdynvcClient;
 use ironrdp_egfx::client::{
     BitmapUpdate, GraphicsPipelineClient, GraphicsPipelineHandler, Surface as EgfxSurface,
 };
+use ironrdp_egfx::decode::H264Decoder;
 use ironrdp_egfx::pdu::{
     CacheToSurfacePdu, CapabilitiesV107Flags, CapabilitiesV81Flags, CapabilitiesV8Flags,
     CapabilitySet, DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu,
@@ -27,11 +30,25 @@ use ironrdp_egfx::pdu::{
 };
 use parking_lot::Mutex;
 
+#[cfg(target_os = "macos")]
 use self::decoder_vt::VtH264Decoder;
 
 /// 离线回放入口（examples/vt_replay 用）：读 dump 目录逐帧喂 VT 解码器。
 #[doc(hidden)]
+#[cfg(target_os = "macos")]
 pub use self::decoder_vt::vt_replay_dir;
+
+#[doc(hidden)]
+#[cfg(not(target_os = "macos"))]
+pub fn vt_replay_dir(
+    _dir: &std::path::Path,
+    _ppm: Option<&std::path::Path>,
+) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "VideoToolbox replay is only available on macOS",
+    ))
+}
 use self::diag::EgfxDiag;
 use self::surfaces::{Compositor, SurfaceRect};
 #[doc(hidden)]
@@ -54,8 +71,7 @@ pub fn build_dvc_client(
     desktop_height: u16,
 ) -> DrdynvcClient {
     let handler = EgfxHandler::new(framebuffer, event_tx, stats, desktop_width, desktop_height);
-    let client =
-        GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
+    let client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder());
     // 同挂 Display Control（MS-RDPEDISP）：caps 回调只标记 ready、不主动回消息，
     // 动态分辨率由主循环经 encode_resize 发 MonitorLayout。
     let client = DrdynvcClient::new()
@@ -63,6 +79,16 @@ pub fn build_dvc_client(
         .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
 
     super::audio_diag::attach_audio_dvc_probes(client)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_h264_decoder() -> Option<Box<dyn H264Decoder>> {
+    Some(Box::new(VtH264Decoder::new()))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn platform_h264_decoder() -> Option<Box<dyn H264Decoder>> {
+    None
 }
 
 /// EGFX 合成 handler：拥有 surface 合成器 + 共享 framebuffer/事件；帧内累积输出脏区，

@@ -19,7 +19,8 @@ pub use egfx::{
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 
 use std::net::SocketAddr;
-use std::os::unix::io::AsRawFd;
+#[cfg(target_os = "macos")]
+use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -586,6 +587,7 @@ async fn connect_and_run(
         .local_addr()
         .map_err(|e| format!("local_addr failed: {e}"))?;
     // TLS 升级前 dup 一份底层 fd 供 RTT 探测（原 stream 随后被 TLS 吃掉）。
+    #[cfg(target_os = "macos")]
     stats.capture_fd(tcp.as_raw_fd());
 
     // cliprdr：注册文本剪贴板静态通道。backend 经 clip_tx 回递要发的 PDU，

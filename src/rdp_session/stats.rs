@@ -1,8 +1,12 @@
 //! RDP 会话运行时统计：协议线程累加，UI 侧只读差分算率。全原子无锁。
-//! 速率不在此算（协议层不知刷新节奏），UI 每秒读一次做差分。macOS 专有。
+//! 速率不在此算（协议层不知刷新节奏），UI 每秒读一次做差分。
+//! TCP RTT 通过 macOS 原生 fd 采样；其他平台保留通用统计并返回无 RTT 样本。
 
-use std::os::unix::io::RawFd;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, Ordering};
+#[cfg(target_os = "macos")]
+use std::os::fd::RawFd;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicI32;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 /// Arc 共享给 UI 的统计集。
@@ -18,6 +22,7 @@ pub struct RdpStats {
     /// 连接建立时刻，算会话时长。
     connected_at: Instant,
     /// TLS 升级前对 TcpStream dup 的 fd，仅供 getsockopt 读 srtt；Drop 时 close。-1=无。
+    #[cfg(target_os = "macos")]
     raw_fd: AtomicI32,
 }
 
@@ -29,6 +34,7 @@ impl RdpStats {
             marker_mode: AtomicBool::new(false),
             pipeline: AtomicU8::new(0),
             connected_at: Instant::now(),
+            #[cfg(target_os = "macos")]
             raw_fd: AtomicI32::new(-1),
         }
     }
@@ -69,6 +75,7 @@ impl RdpStats {
     }
 
     /// TLS 升级前 dup 一份底层 TCP fd 存入（原 stream 照常被 TLS 吃掉）。失败存 -1。
+    #[cfg(target_os = "macos")]
     pub fn capture_fd(&self, stream_fd: RawFd) {
         // SAFETY: dup 一个当前有效的 socket fd；失败返回 -1，由 rtt_ms 忽略。
         let dup = unsafe { libc::dup(stream_fd) };
@@ -76,6 +83,7 @@ impl RdpStats {
     }
 
     /// 读 TCP 平滑 RTT（macOS `TCP_CONNECTION_INFO.tcpi_srtt`，单位 ms）。失败/无 fd 返回 None。
+    #[cfg(target_os = "macos")]
     pub fn rtt_ms(&self) -> Option<f64> {
         let fd = self.raw_fd.load(Ordering::Relaxed);
         if fd < 0 {
@@ -100,8 +108,14 @@ impl RdpStats {
         };
         Some(info.tcpi_srtt as f64)
     }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn rtt_ms(&self) -> Option<f64> {
+        None
+    }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for RdpStats {
     fn drop(&mut self) {
         let fd = self.raw_fd.load(Ordering::Relaxed);

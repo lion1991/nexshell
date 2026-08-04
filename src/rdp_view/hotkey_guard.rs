@@ -1,11 +1,15 @@
 // rdp_view::hotkey_guard — RDP 前台时接管 macOS 符号热键（Spotlight/输入法切换等），
 // 使 ⌘Space、⌃Space 等不被系统层吞掉，能透传到远端 Windows。
 // Carbon HIToolbox 未文档化导出，无需 TCC 权限；模式仅本 App 前台生效，切走/崩溃系统自动恢复。
-// 参考 RoyalVNC：view 成 firstResponder 时 Push、resign 时 Pop（成对）。crate 仅 mac，不做跨平台分支。
+// 参考 RoyalVNC：view 成 firstResponder 时 Push、resign 时 Pop（成对）。
+// 非 macOS 目标保留同一状态机接口，但宿主热键接管为 no-op。
 
+#[cfg(target_os = "macos")]
 use std::os::raw::c_void;
+#[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 
+#[cfg(target_os = "macos")]
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
     /// 接管符号热键，返回不透明 token（须原样传回 Pop）。重复 Push 会叠 token。
@@ -15,30 +19,44 @@ extern "C" {
 }
 
 /// 禁用全部符号热键但保留辅助功能（VoiceOver 等），故用 2 而非 1(AllDisabled)。
+#[cfg(target_os = "macos")]
 const MODE_ALL_DISABLED_EXCEPT_UNIVERSAL_ACCESS: u32 = 2;
 
 /// 链路追踪开关（NEXSHELL_RDP_HOTKEY_TRACE=1），对齐 rdp_session 的 ptr_trace 风格。
+#[cfg(target_os = "macos")]
 fn hotkey_trace() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_HOTKEY_TRACE").is_ok_and(|v| v == "1"))
 }
 
 /// 持 Push 返回的 token，Drop 时 Pop（RAII 成对）。非 Clone/Copy，move 语义保证 token 唯一。
+#[cfg(target_os = "macos")]
 pub struct HotkeyGuard {
     token: *mut c_void,
 }
 
+#[cfg(not(target_os = "macos"))]
+pub struct HotkeyGuard;
+
 impl HotkeyGuard {
     /// 接管符号热键。调用方须保证同时只持一个 guard（叠 Push 会泄 token）——用 HotkeyGuardSlot 兜底。
     pub fn acquire() -> Self {
-        let token = unsafe { PushSymbolicHotKeyMode(MODE_ALL_DISABLED_EXCEPT_UNIVERSAL_ACCESS) };
-        if hotkey_trace() {
-            eprintln!("[rdp-hotkey] Push mode=2 token={token:?}");
+        #[cfg(target_os = "macos")]
+        {
+            let token =
+                unsafe { PushSymbolicHotKeyMode(MODE_ALL_DISABLED_EXCEPT_UNIVERSAL_ACCESS) };
+            if hotkey_trace() {
+                eprintln!("[rdp-hotkey] Push mode=2 token={token:?}");
+            }
+            Self { token }
         }
-        Self { token }
+
+        #[cfg(not(target_os = "macos"))]
+        Self
     }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for HotkeyGuard {
     fn drop(&mut self) {
         unsafe { PopSymbolicHotKeyMode(self.token) };

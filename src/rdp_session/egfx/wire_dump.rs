@@ -18,7 +18,7 @@ use ironrdp_pdu::decode_cursor;
 use ironrdp_pdu::{geometry::ExclusiveRectangle, PduResult};
 use parking_lot::Mutex;
 
-use super::decoder_vt::VtH264Decoder;
+use super::platform_h264_decoder;
 use super::surfaces::fnv_hash;
 use super::surfaces::{Compositor, SurfaceRect};
 use super::EgfxHandler;
@@ -299,8 +299,7 @@ where
     let (event_tx, event_rx) = async_channel::unbounded();
     let stats = Arc::new(RdpStats::new());
     let handler = EgfxHandler::new(framebuffer.clone(), event_tx, stats, 1, 1);
-    let mut client =
-        GraphicsPipelineClient::new(Box::new(handler), Some(Box::new(VtH264Decoder::new())));
+    let mut client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder());
     let mut summary = WireReplaySummary::default();
     let frame_every = options.frame_every.max(1);
     let watch_points = options.watch_points.clone();

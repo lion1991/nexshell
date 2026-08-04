@@ -1,6 +1,7 @@
 //! RDPDR 设备重定向：驱动器共享（文件互拷）+ 满足 rdpsnd 的通道依赖。
-//! 抄 mstsc/FreeRDP：Mac 固定目录 `~/NexShell RDP` 在远端表现为 \\tsclient\NexShell 网盘。
-//! 后端用 fork 内建的 NixRdpdrBackend（macOS 完整读写文件系统），见 docs/adr/0007。
+//! 抄 mstsc/FreeRDP：macOS/Linux 固定目录 `~/NexShell RDP` 在远端表现为
+//! \\tsclient\NexShell 网盘。后端用 fork 内建的 NixRdpdrBackend，见 docs/adr/0007。
+//! 其他平台仍提供 RDPDR 通道，但不广告当地共享盘。
 
 use std::path::{Path, PathBuf};
 
@@ -8,8 +9,10 @@ use ironrdp_rdpdr::Rdpdr;
 
 const TRACE_ENV: &str = "NEXSHELL_RDP_RDPDR_TRACE";
 /// 共享盘 device_id，固定值；避开 smartcard 常用的 1。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const DRIVE_DEVICE_ID: u32 = 4;
 /// 远端可见盘名（\\tsclient\NexShell）。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const DRIVE_NAME: &str = "NexShell";
 /// Mac 本地共享目录名（挂在 home 下）。
 const SHARED_DIR_NAME: &str = "NexShell RDP";
@@ -92,26 +95,43 @@ pub(super) fn build_channel(enable_drive: bool, enable_audio: bool) -> Option<Rd
     match plan(enable_drive, dir.is_some(), enable_audio) {
         RdpdrPlan::Drive => {
             let base = dir.expect("plan Drive implies shared dir ready");
-            if enabled() {
-                eprintln!("[rdp-rdpdr] drive redirection on: {DRIVE_NAME} -> {base}");
-            }
-            let backend = ironrdp_rdpdr_native::backend::NixRdpdrBackend::new(base);
-            Some(
-                Rdpdr::new(Box::new(backend), "nexshell".to_string())
-                    .with_drives(Some(vec![(DRIVE_DEVICE_ID, DRIVE_NAME.to_string())])),
-            )
+            build_drive_channel(base).or_else(|| enable_audio.then(build_noop_channel))
         }
         RdpdrPlan::Noop => {
             if enabled() {
                 eprintln!("[rdp-rdpdr] no-op backend (rdpsnd dependency only)");
             }
-            Some(Rdpdr::new(
-                Box::new(ironrdp_rdpdr::NoopRdpdrBackend),
-                "nexshell".to_string(),
-            ))
+            Some(build_noop_channel())
         }
         RdpdrPlan::None => None,
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn build_drive_channel(base: String) -> Option<Rdpdr> {
+    if enabled() {
+        eprintln!("[rdp-rdpdr] drive redirection on: {DRIVE_NAME} -> {base}");
+    }
+    let backend = ironrdp_rdpdr_native::backend::NixRdpdrBackend::new(base);
+    Some(
+        Rdpdr::new(Box::new(backend), "nexshell".to_string())
+            .with_drives(Some(vec![(DRIVE_DEVICE_ID, DRIVE_NAME.to_string())])),
+    )
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn build_drive_channel(_base: String) -> Option<Rdpdr> {
+    if enabled() {
+        eprintln!("[rdp-rdpdr] drive redirection unavailable on this platform");
+    }
+    None
+}
+
+fn build_noop_channel() -> Rdpdr {
+    Rdpdr::new(
+        Box::new(ironrdp_rdpdr::NoopRdpdrBackend),
+        "nexshell".to_string(),
+    )
 }
 
 #[cfg(test)]
