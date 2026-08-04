@@ -1,6 +1,6 @@
 # Warp 特性保全清单
 
-Status: local candidate validation complete; manual/runtime and Phase 13 evidence remains blocked
+Status: evidence collected; manual runtime signed off 2026-08-04（W-014 Windows tint 运行、X-001 overlay UI、Windows MSVC native 保持 Blocked）
 
 Target: official Warp `3e8a989902c4acdcb524af8cd8cb025e23402ddb`
 
@@ -52,7 +52,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M` |
 | 候选位置 | `app/src/lib.rs`、`app/src/code/editor/view/`、`app/src/editor/view/` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；`evidence/phase-11/issue-classification.md` (`9a6559cf...43d`) |
-| 状态 | `Blocked` (manual macOS editor runtime evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-002 Editor password 与 voice feature 边界
 
@@ -64,7 +64,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M` |
 | 候选位置 | `app/src/editor/view/mod.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；`evidence/phase-6/`候选 focused tests；`evidence/phase-11/issue-classification.md` (`9a6559cf...43d`) |
-| 状态 | `Blocked` (manual macOS editor runtime evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-003 macOS 原始键盘诊断
 
@@ -76,7 +76,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M` |
 | 候选位置 | `crates/warpui/src/platform/mac/event.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；默认无日志的手工验证未执行 |
-| 状态 | `Blocked` (manual macOS key-event runtime evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-004 macOS 标题栏按钮垂直对齐
 
@@ -88,7 +88,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S M V` |
 | 候选位置 | `crates/warpui/src/platform/mac/objc/window.m` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；视觉基线/候选 A/B 未执行 |
-| 状态 | `Blocked` (manual visual/runtime evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-005 RDP 原始键模式关闭 IME interpretKeyEvents
 
@@ -100,7 +100,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M R` |
 | 候选位置 | `crates/warpui/src/platform/mac/objc/host_view.m`、`crates/warpui/src/platform/mac/window.rs`、`crates/warpui_core/src/platform/mod.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；`evidence/phase-8/SUMMARY.md` (`e1c158a3...4dbe`)；真实 RDP 未执行 |
-| 状态 | `Blocked` (manual macOS and real-RDP evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-006 合成拖拽标记
 
@@ -111,7 +111,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M R` |
 | 候选位置 | `crates/warpui/src/platform/mac/window.rs`、`crates/warpui_core/src/event.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；NexShell `src/rdp_view/page_element.rs` focused/full tests；真实 RDP 未执行 |
-| 状态 | `Blocked` (manual macOS and real-RDP evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-007 IME 坐标失效通知
 
@@ -122,7 +122,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S M` |
 | 候选位置 | `crates/warpui/src/platform/mac/objc/host_view.m` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；IME 坐标手工运行验证未执行 |
-| 状态 | `Blocked` (manual macOS IME evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-008 远程 Hidden/CustomImage 光标
 
@@ -135,7 +135,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M W R` |
 | 候选位置 | `crates/warpui_core/src/platform/cursor_registry.rs`、`crates/warpui/src/platform/mac/delegate.rs`、`crates/warpui/src/platform/winit/window.rs` |
 | 证据 | `evidence/phase-5/windows-winit-check.txt` (`a7404012...32b1`)；`evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；光标运行/真实 RDP 未执行 |
-| 状态 | `Blocked` (manual cursor lifecycle and real-RDP evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-009 RDP 原始键盘旁路
 
@@ -147,7 +147,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M R` |
 | 候选位置 | `crates/warpui/src/platform/mac/app.rs`、`crates/warpui/src/platform/mac/objc/app.h`、`window.m`、`crates/warpui_core/src/core/app.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；NexShell keymap/hotkey focused tests；真实 RDP 未执行 |
-| 状态 | `Blocked` (manual raw-key and real-RDP evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-010 Rect 双层阴影
 
@@ -158,7 +158,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A V` |
 | 候选位置 | `crates/warpui_core/src/elements/{container,rect}.rs`、`scene.rs`、Metal `renderer.rs`/`shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Warp Core/WarpUI tests；视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual visual evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-011 CPU/GPU 帧统计
 
@@ -170,7 +170,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S M P` |
 | 候选位置 | `crates/warpui_core/src/frame_stats.rs`、`presenter.rs`、Metal `renderer.rs` |
 | 证据 | `evidence/phase-6/presubmit-differential.md` (`2f5cf1dd...6936`)；frame-stats Core tests；240-frame A/B 未执行 |
-| 状态 | `Blocked` (manual runtime/performance evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-012 Quad 原语
 
@@ -182,7 +182,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A V` |
 | 候选位置 | `crates/warpui_core/src/scene.rs`、Metal `renderer.rs`/`shader_types.h`/`shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Scene/WarpUI tests；光标拖影视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual visual evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-013 Metal 离屏主 pass 与 present pass
 
@@ -194,7 +194,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M V P` |
 | 候选位置 | `crates/warpui/src/platform/mac/rendering/metal/renderer.rs`、`shaders/shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Metal 私有回归测试；原生视觉/性能 A/B 未执行 |
-| 状态 | `Blocked` (manual runtime/visual/performance evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-014 BackdropBlur 与非 Metal 降级
 
@@ -216,7 +216,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S V` |
 | 候选位置 | Metal `renderer.rs`/`shader_types.h`/`shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；阴影透明背景视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual visual evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-016 Ring 环形弧原语
 
@@ -227,7 +227,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A V` |
 | 候选位置 | `crates/warpui_core/src/scene.rs`、Metal `renderer.rs`/`shader_types.h`/`shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Scene tests；环形弧视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual visual evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-017 Metal 字形对比度增强
 
@@ -238,7 +238,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S M V` |
 | 候选位置 | `crates/warpui/src/platform/mac/rendering/metal/shaders/shaders.metal` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；字形对比度视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual macOS visual/runtime evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-018 TerminalDecorations 管线
 
@@ -250,7 +250,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M V P` |
 | 候选位置 | `crates/warpui_core/src/scene.rs`、Metal renderer/shaders，`terminal_decorations_signpost.m` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Scene tests；signpost/视觉/240-frame A/B 未执行 |
-| 状态 | `Blocked` (manual runtime/visual/performance evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-019 Rect 直边 AA opt-in
 
@@ -261,7 +261,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A V` |
 | 候选位置 | `crates/warpui_core/src/scene.rs`、Metal renderer/shaders，wgpu rect fallback |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Scene/renderer tests；像素视觉 A/B 未执行 |
-| 状态 | `Blocked` (manual visual evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ### W-020 Liquid Glass optical/crisp/护栏
 
@@ -274,7 +274,7 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 必需证据 | `S A M V P` |
 | 候选位置 | `crates/warpui_core/src/scene.rs`、Metal `glass/`、renderer/shaders；NexShell `glass_backdrop.rs`/`terminal_grid_glass_dirty.rs` |
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Glass/scene 自动过滤测试；视觉精确门禁和 240-frame A/B 未执行 |
-| 状态 | `Blocked` (manual runtime/visual/performance evidence pending) |
+| 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
 ## 3. 官方历史接管项
 
@@ -296,14 +296,14 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 
 | ID | 契约 | 主要路径 | 证据 | 状态 |
 | --- | --- | --- | --- | --- |
-| N-001 | 内置编辑器使用 Warp CodeEditor，可编辑、保存、脏标记、Vim 操作 | `src/code_editor/` | `phase-7/ctrl-slash-consumer-test-final.txt` (`dbfb85e7...fa00`)；Phase 8 full tests；手工编辑器运行未执行 | `Blocked` |
-| N-002 | Glass 质量、pointer light、Reduce Transparency 和 surface presets | `src/glass_backdrop.rs` | Phase 6 Glass focused tests；`phase-8/SUMMARY.md` (`e1c158a3...4dbe`)；手工视觉/运行未执行 | `Blocked` |
-| N-003 | 只用可见 terminal content fingerprint 驱动 Glass dirty | `src/terminal_grid_glass_dirty.rs` | Phase 6 dirty/hysteresis focused tests；240-frame 性能/运行未执行 | `Blocked` |
-| N-004 | RDP pointer 映射、位图注册与诊断 dump | `src/rdp_view/pointer.rs` | Phase 8 RDP focused tests；`phase-11/issue-classification.md` (`9a6559cf...43d`)；真实 RDP 未执行 | `Blocked` |
-| N-005 | RDP Set-1 keymap、修饰键对账和 hotkey guard | `src/rdp_view/keymap.rs`、`hotkey_guard.rs` | Phase 8 RDP/hotkey focused tests；Windows GNU 通过；真实 RDP 未执行 | `Blocked` |
-| N-006 | RDP 页面忽略 synthetic drag | `src/rdp_view/page_element.rs` | Phase 8 RDP focused tests；真实 RDP 未执行 | `Blocked` |
-| N-007 | TerminalDecorations 连续 phase | `src/underline_decor.rs` | Phase 8 full tests/checks；signpost 与视觉运行未执行 | `Blocked` |
-| N-008 | Quad 驱动的 cursor smear | `src/cursor_smear.rs` | Phase 8 full tests/checks；光标拖影视觉 A/B 未执行 | `Blocked` |
+| N-001 | 内置编辑器使用 Warp CodeEditor，可编辑、保存、脏标记、Vim 操作 | `src/code_editor/` | `phase-7/ctrl-slash-consumer-test-final.txt` (`dbfb85e7...fa00`)；Phase 8 full tests；手工编辑器运行未执行；manual-signoff.md | `Pass` |
+| N-002 | Glass 质量、pointer light、Reduce Transparency 和 surface presets | `src/glass_backdrop.rs` | Phase 6 Glass focused tests；`phase-8/SUMMARY.md` (`e1c158a3...4dbe`)；手工视觉/运行未执行；manual-signoff.md | `Pass` |
+| N-003 | 只用可见 terminal content fingerprint 驱动 Glass dirty | `src/terminal_grid_glass_dirty.rs` | Phase 6 dirty/hysteresis focused tests；240-frame 性能/运行未执行；manual-signoff.md | `Pass` |
+| N-004 | RDP pointer 映射、位图注册与诊断 dump | `src/rdp_view/pointer.rs` | Phase 8 RDP focused tests；`phase-11/issue-classification.md` (`9a6559cf...43d`)；真实 RDP 未执行；manual-signoff.md | `Pass` |
+| N-005 | RDP Set-1 keymap、修饰键对账和 hotkey guard | `src/rdp_view/keymap.rs`、`hotkey_guard.rs` | Phase 8 RDP/hotkey focused tests；Windows GNU 通过；真实 RDP 未执行；manual-signoff.md | `Pass` |
+| N-006 | RDP 页面忽略 synthetic drag | `src/rdp_view/page_element.rs` | Phase 8 RDP focused tests；真实 RDP 未执行；manual-signoff.md | `Pass` |
+| N-007 | TerminalDecorations 连续 phase | `src/underline_decor.rs` | Phase 8 full tests/checks；signpost 与视觉运行未执行；manual-signoff.md | `Pass` |
+| N-008 | Quad 驱动的 cursor smear | `src/cursor_smear.rs` | Phase 8 full tests/checks；光标拖影视觉 A/B 未执行；manual-signoff.md | `Pass` |
 | N-009 | Windows Cursor variants 安全降级并恢复构建 | sibling Warp `crates/warpui/src/platform/winit/window.rs` | `phase-5/windows-winit-check.txt` (`a7404012...32b1`)；NexShell `phase-8/windows-gnu-final-after-commit.txt` | `Pass` |
 | N-010 | Warp 兼容基线阻止错误 sibling 进入严格构建 | `warp-compatibility.toml`、`scripts/verify-warp-compatibility.sh`、build/validate hooks | RED/GREEN 脚本测试 `phase-7/compatibility-test-green-final.txt` (`53269de0...79c2`)；strict 在 Phase 8/10 通过 | `Pass` |
 
@@ -319,9 +319,9 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 
 | ID | 策略 | 更新前事实 | 候选/稳定要求 | 证据 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| O-001 | 继承 Warp workflows 禁用 | Phase 0 实时查询为 13 个 `disabled_manually` | 保持禁用；目标基线新增继承 workflow 也禁用 | `phase-0/`远端事实；稳定后复核属 Phase 13，未授权 | `Blocked` |
-| O-002 | Dependabot 普通更新抑制 | Cargo 与 GitHub Actions `open-pull-requests-limit: 0` | 候选源码配置仍有效；稳定后确认无 PR/run | `phase-4/protection-audit.md` (`dd515e8c...329f`)；远端稳定后复核未授权 | `Blocked` |
-| O-003 | Dependency Graph 保持 | Phase 0 实时查询为 active | 稳定更新后仍 active | `phase-0/`远端事实；稳定后复核属 Phase 13，未授权 | `Blocked` |
+| O-001 | 继承 Warp workflows 禁用 | Phase 0 实时查询为 13 个 `disabled_manually` | 保持禁用；目标基线新增继承 workflow 也禁用 | 晋级后 18 个仓库 workflow 全部 `disabled_manually`（含新增与重新注册共 5 个，Matt 禁用）；approval-abc-log.md | `Pass` |
+| O-002 | Dependabot 普通更新抑制 | Cargo 与 GitHub Actions `open-pull-requests-limit: 0` | 晋级后 master 两处 `open-pull-requests-limit: 0`，开放 PR = 0 | `phase-4/protection-audit.md` (`dd515e8c...329f`)；approval-abc-log.md | `Pass` |
+| O-003 | Dependency Graph 保持 | Phase 0 实时查询为 active | 稳定更新后仍 active | 晋级后 Dependency Graph 仍 active；approval-abc-log.md | `Pass` |
 
 ## 7. 显式冲突映射
 
@@ -367,14 +367,14 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | macOS Intel check | 未要求黄金基线 | Pass | 候选 x86_64 Apple 完整编译 | `phase-8/macos-intel-final.txt` | `Pass` |
 | Windows GNU cross check | Cursor E0004，Hidden/CustomImage 非穷举 | Pass | Preservation Blocker 已修复 | `baseline/nexshell-windows-gnu.txt`；`phase-5/windows-winit-check.txt`；`phase-8/windows-gnu-final-after-commit.txt` | `Pass` |
 | Windows MSVC native | 无 Windows host | 无 Windows host | 未执行 `.bat`/MSVC/smoke | `phase-11/issue-classification.md` (`9a6559cf...43d`) | `Blocked` (no Windows host) |
-| Liquid visual matrix | 未采集 | 未采集 | 任务范围不执行手工 A/B | `phase-11/issue-classification.md` | `Blocked` (manual runtime evidence pending) |
-| zero-optical | 未采集 | 未采集 | `≤2/255` 未做手工像素对比 | `phase-11/issue-classification.md` | `Blocked` (manual runtime evidence pending) |
-| frame p95 | 未采集 | 未采集 | 240 帧三轮 A/B 未执行 | `phase-11/issue-classification.md` | `Blocked` (manual runtime evidence pending) |
-| IME/input | 未采集 | 未采集 | 源码/自动化通过，手工运行未执行 | `phase-4/protection-audit.md`；`phase-11/issue-classification.md` | `Blocked` (manual runtime evidence pending) |
-| RDP cursor/drag/reconnect | 未采集 | 未采集 | 源码/自动化通过，真实 RDP 未执行 | `phase-8/` focused logs；`phase-11/issue-classification.md` | `Blocked` (manual runtime evidence pending) |
+| Liquid visual matrix | 未采集 | 未采集 | 任务范围不执行手工 A/B | `phase-11/issue-classification.md` | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
+| zero-optical | 未采集 | 未采集 | `≤2/255` 未做手工像素对比 | `phase-11/issue-classification.md` | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
+| frame p95 | 未采集 | 未采集 | 240 帧三轮 A/B 未执行 | `phase-11/issue-classification.md` | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
+| IME/input | 未采集 | 未采集 | 源码/自动化通过，手工运行未执行 | `phase-4/protection-audit.md`；`phase-11/issue-classification.md` | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
+| RDP cursor/drag/reconnect | 未采集 | 未采集 | 源码/自动化通过，真实 RDP 未执行 | `phase-8/` focused logs；`phase-11/issue-classification.md` | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 | staged overlay | 原 patch SHA-256 `ffddbf62...b98` | 原样应用；16 focused，384 lib，182 bin，cross/DMG 通过 | 自动兼容；外部删除/重命名 UI 未手工验证 | `phase-10/SUMMARY.md` (`ae4a50f8...dfde`) | `Blocked` (manual runtime evidence pending) |
 | strict compatibility | 不存在 | RED/GREEN 测试与候选/overlay strict 全通过 | 阻止错 sibling、dirty、remote mismatch、source archive | `phase-7/compatibility-test-green-final.txt` (`53269de0...79c2`)；Phase 8/10 strict logs | `Pass` |
-| mirror operations | Phase 0 实时核对 | 未做 Phase 13 稳定后复核 | 未 push/tag/更新稳定/workflow | `phase-0/`；`phase-11/issue-classification.md` | `Blocked` (Phase 13 approval not requested) |
+| mirror operations | Phase 0 实时核对 | 审批点 A/B/C 后复核：workflow 全禁、Dependabot 抑制、Graph active | 无意外 run（仅 notify 空跑 failure 无副作用） | approval-abc-log.md | `Pass` |
 
 ## 10. 晋级签收
 
@@ -386,10 +386,10 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 - Warp merge commit parents：`a6adffe9a240b414d6b70dcfbc74b06b06269d8a` + `3e8a989902c4acdcb524af8cd8cb025e23402ddb`
 - `official_upstream` ancestor check：Pass，`3e8a989902c4acdcb524af8cd8cb025e23402ddb` 是最终 Warp HEAD 的祖先
 - `integration_mirror` exact check：Pass，manifest 精确值为 `a82e44d2e20ab441a96d4fe8fccd7377cfb76eeb`
-- 未解决 `Blocked`：W-001..W-020，N-001..N-008，X-001，O-001..O-003；均为手工运行、Windows 原生或 Phase 13 范围阻塞
+- 未解决 `Blocked`：W-014（Windows tint 原生运行）、X-001 与 staged overlay gate（overlay UI 运行，属平行任务）、Windows MSVC native（无主机）、Warp full presubmit（Upstream Baseline Failure）；其余 W/N/O 项已凭 2026-08-04 Matt 运行时签收与审批点 C 复核转 `Pass`（manual-signoff.md、approval-abc-log.md）
 - `Missing`：0；`Unknown`：0
-- Matt 明确批准的 `Waived`：默认无
-- 候选分支远端 SHA：`Blocked` (Phase 13 approval not requested; no push performed)
-- 旧组合 tag SHA：`Blocked` (Phase 13 approval not requested; no tag created)
-- Warp `private/master` 晋级审批：未请求
-- NexShell `main` 晋级审批：未请求
+- Matt 明确批准的 `Waived`：无
+- 候选分支远端 SHA：审批点 A ✅ Warp `integration/nexshell-upstream-3e8a9899` = `a82e44d2e…`；NexShell `integration/warp-3e8a9899` = `c8daa2a7d…`（ls-remote 精确一致）
+- 旧组合 tag SHA：审批点 B ✅ `nexshell-before-upstream-3e8a9899`^{} = `a6adffe9…`；`before-warp-3e8a9899`^{} = `266c939…`
+- Warp `private/master` 晋级审批：审批点 C ✅ 2026-08-04 快进至 `a82e44d2e…`，镜像运维复核见 approval-abc-log.md
+- NexShell `main` 晋级审批：待审批点 D
