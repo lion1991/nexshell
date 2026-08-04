@@ -8,7 +8,13 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
+use notify_debouncer_full::{
+    new_debouncer_opt,
+    notify::{Config, EventKind, PollWatcher, RecursiveMode, Watcher},
+    DebounceEventResult, Debouncer, NoCache,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -17,6 +23,11 @@ use crate::ssh_session::SshHandle;
 
 /// worker / UI 共享的"取消令牌表"。UI 拿 Arc 即可在 worker 跑传输时随时翻牌。
 type CancelMap = Arc<Mutex<HashMap<u64, Arc<AtomicBool>>>>;
+
+type LocalFileWatcher = Debouncer<PollWatcher, NoCache>;
+
+const LOCAL_FILE_WATCHER_DEBOUNCE: Duration = Duration::from_millis(250);
+const LOCAL_FILE_WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// 单个 tab 的文件面板状态。
 #[derive(Debug, Default)]
@@ -362,8 +373,10 @@ pub fn apply_local_file_panel_event(state: &mut FilePanelState, event: SftpEvent
             }
         }
         SftpEvent::DirListed { path, entries } => {
-            let child_load = state.tree_loading_dirs.remove(&path)
-                && state.tree_root.as_deref().is_some_and(|root| root != path);
+            let is_child = state.tree_root.as_deref().is_some_and(|root| root != path);
+            let child_load = is_child
+                && (state.tree_loading_dirs.remove(&path)
+                    || state.tree_children.contains_key(&path));
             if child_load {
                 state.tree_child_errors.remove(&path);
                 state.tree_children.insert(path, entries);
@@ -384,9 +397,13 @@ pub fn apply_local_file_panel_event(state: &mut FilePanelState, event: SftpEvent
             state.tree_expanded_dirs.insert(path);
         }
         SftpEvent::ListFailed { path, message } => {
-            let child_load = state.tree_loading_dirs.contains(&path);
+            let is_child = state.tree_root.as_deref().is_some_and(|root| root != path);
+            let child_load = is_child
+                && (state.tree_loading_dirs.contains(&path)
+                    || state.tree_children.contains_key(&path));
             state.tree_loading_dirs.remove(&path);
             if child_load {
+                state.tree_children.remove(&path);
                 state.tree_child_errors.insert(path, message);
                 state.loading = false;
                 state.error = None;
@@ -777,6 +794,7 @@ pub fn spawn_local_file_worker(
     initial_cwd: PathBuf,
 ) -> Result<(LocalFileWorkerHandle, async_channel::Receiver<SftpEvent>), String> {
     let (req_tx, req_rx) = mpsc::unbounded_channel::<SftpRequest>();
+    let req_tx_for_watcher = req_tx.clone();
     let (evt_tx, evt_rx) = async_channel::bounded::<SftpEvent>(32);
     let shutdown = Arc::new(AtomicBool::new(false));
     let thread_shutdown = Arc::clone(&shutdown);
@@ -804,6 +822,7 @@ pub fn spawn_local_file_worker(
             runtime.block_on(run_local_file_worker(
                 initial_cwd,
                 req_rx,
+                req_tx_for_watcher,
                 evt_tx,
                 thread_shutdown,
                 thread_cancels,
@@ -959,11 +978,14 @@ async fn run_sftp_worker(
 async fn run_local_file_worker(
     initial_cwd: PathBuf,
     mut req_rx: mpsc::UnboundedReceiver<SftpRequest>,
+    req_tx_self: mpsc::UnboundedSender<SftpRequest>,
     evt_tx: async_channel::Sender<SftpEvent>,
     shutdown: Arc<AtomicBool>,
     cancels: CancelMap,
 ) {
     let mut last_path = normalize_local_initial_path(initial_cwd);
+    let mut listed_paths = BTreeSet::new();
+    let mut watcher: Option<LocalFileWatcher> = None;
     let mut next_transfer_id: u64 = 1;
     while let Some(req) = req_rx.recv().await {
         if shutdown.load(Ordering::Relaxed) {
@@ -973,14 +995,28 @@ async fn run_local_file_worker(
             SftpRequest::Shutdown => break,
             SftpRequest::List(path) => {
                 last_path = local_path_from_panel_string(&path);
+                listed_paths.clear();
+                listed_paths.insert(last_path.clone());
+                watcher = build_local_file_watcher(&last_path, req_tx_self.clone());
                 run_local_list(&last_path, &evt_tx).await;
             }
             SftpRequest::ListTreeChild(path) => {
                 let path = local_path_from_panel_string(&path);
+                if listed_paths.insert(path.clone()) {
+                    watch_local_file_directory(watcher.as_mut(), &path);
+                }
                 run_local_list(&path, &evt_tx).await;
             }
             SftpRequest::Refresh => {
                 run_local_list(&last_path, &evt_tx).await;
+                let child_paths: Vec<PathBuf> = listed_paths
+                    .iter()
+                    .filter(|path| *path != &last_path)
+                    .cloned()
+                    .collect();
+                for path in child_paths {
+                    run_local_list_without_loading(&path, &evt_tx).await;
+                }
             }
             SftpRequest::Upload { locals, remote_dir } => {
                 let target_dir = local_path_from_panel_string(&remote_dir);
@@ -1093,6 +1129,55 @@ async fn run_local_file_worker(
     }
 }
 
+fn build_local_file_watcher(
+    path: &Path,
+    tx: mpsc::UnboundedSender<SftpRequest>,
+) -> Option<LocalFileWatcher> {
+    let mut debouncer = match new_debouncer_opt::<_, PollWatcher, NoCache>(
+        LOCAL_FILE_WATCHER_DEBOUNCE,
+        None,
+        move |result: DebounceEventResult| match result {
+            Ok(events) => {
+                if events
+                    .iter()
+                    .any(|event| !matches!(event.kind, EventKind::Access(_)))
+                {
+                    let _ = tx.send(SftpRequest::Refresh);
+                }
+            }
+            Err(errors) => log::warn!("local file watcher error: {errors:?}"),
+        },
+        NoCache,
+        Config::default().with_poll_interval(LOCAL_FILE_WATCHER_POLL_INTERVAL),
+    ) {
+        Ok(debouncer) => debouncer,
+        Err(error) => {
+            log::warn!("failed to create local file watcher: {error}");
+            return None;
+        }
+    };
+    if let Err(error) = debouncer.watcher().watch(path, RecursiveMode::NonRecursive) {
+        log::warn!(
+            "failed to watch local directory {}: {error}",
+            path.display()
+        );
+        return None;
+    }
+    Some(debouncer)
+}
+
+fn watch_local_file_directory(watcher: Option<&mut LocalFileWatcher>, path: &Path) {
+    let Some(watcher) = watcher else {
+        return;
+    };
+    if let Err(error) = watcher.watcher().watch(path, RecursiveMode::NonRecursive) {
+        log::warn!(
+            "failed to watch local directory {}: {error}",
+            path.display()
+        );
+    }
+}
+
 fn register_cancel(cancels: &CancelMap, id: u64) -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     if let Ok(mut map) = cancels.lock() {
@@ -1138,6 +1223,10 @@ async fn run_local_list(path: &Path, evt_tx: &async_channel::Sender<SftpEvent>) 
             path: local_panel_path_string(path),
         })
         .await;
+    run_local_list_without_loading(path, evt_tx).await;
+}
+
+async fn run_local_list_without_loading(path: &Path, evt_tx: &async_channel::Sender<SftpEvent>) {
     // 不 canonicalize：直接列请求的逻辑路径，保持与 OSC 7 上报的 local_cwd 一致。
     // canonicalize 会把符号链接 / firmlink / File Provider（如 Synology Drive）目录解析成
     // 物理路径，使 file_panel cwd ≠ local_cwd（逻辑），导致 follow_cwd 反复同步、甚至物理
@@ -2128,6 +2217,54 @@ mod tests {
     }
 
     #[test]
+    fn local_tree_background_child_refresh_keeps_root_cwd() {
+        let mut state = FilePanelState::new();
+        apply_local_file_panel_event(
+            &mut state,
+            SftpEvent::DirListed {
+                path: "/Users/example".to_string(),
+                entries: vec![test_entry("project", crate::sftp_ops::EntryKind::Dir)],
+            },
+        );
+        assert_eq!(
+            toggle_file_panel_tree_dir(&mut state, "/Users/example/project"),
+            FilePanelTreeToggle::ExpandedNeedsLoad
+        );
+        apply_local_file_panel_event(
+            &mut state,
+            SftpEvent::DirListed {
+                path: "/Users/example/project".to_string(),
+                entries: vec![test_entry("old.txt", crate::sftp_ops::EntryKind::File)],
+            },
+        );
+
+        apply_local_file_panel_event(
+            &mut state,
+            SftpEvent::DirListed {
+                path: "/Users/example/project".to_string(),
+                entries: vec![
+                    test_entry("new.txt", crate::sftp_ops::EntryKind::File),
+                    test_entry("old.txt", crate::sftp_ops::EntryKind::File),
+                ],
+            },
+        );
+
+        assert_eq!(state.cwd, "/Users/example");
+        assert_eq!(state.tree_root.as_deref(), Some("/Users/example"));
+        assert_eq!(
+            flatten_file_panel_tree(&state)
+                .iter()
+                .map(|row| row.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "/Users/example/project",
+                "/Users/example/project/new.txt",
+                "/Users/example/project/old.txt"
+            ]
+        );
+    }
+
+    #[test]
     fn local_cwd_follow_into_subdir_switches_root_not_tree_child() {
         // 回归：cd 进当前显示目录的子目录时，跟随的 List 不经过 toggle，
         // tree_loading_dirs 不含该路径，必须整体切换根目录——而非误当树节点展开
@@ -2273,7 +2410,7 @@ mod tests {
             panic!("expected DirListed event");
         };
 
-        assert_eq!(PathBuf::from(path), tmp.path().canonicalize().unwrap());
+        assert_eq!(PathBuf::from(path), tmp.path());
         assert_eq!(
             entries
                 .iter()
@@ -2283,6 +2420,87 @@ mod tests {
         );
         assert!(matches!(entries[0].kind, crate::sftp_ops::EntryKind::Dir));
         assert!(matches!(entries[1].kind, crate::sftp_ops::EntryKind::File));
+    }
+
+    #[test]
+    fn local_file_worker_refreshes_when_file_is_created_externally() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (worker, rx) =
+            spawn_local_file_worker("unit-local-watch", tmp.path().to_path_buf()).unwrap();
+        assert!(worker.send(SftpRequest::List(tmp.path().to_string_lossy().into_owned())));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = recv_event(&runtime, &rx);
+        let initial = recv_event(&runtime, &rx);
+        assert!(matches!(initial, SftpEvent::DirListed { .. }));
+
+        std::fs::write(tmp.path().join("created.txt"), "new").unwrap();
+
+        let refreshed = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let SftpEvent::DirListed { entries, .. } = rx.recv().await.unwrap() {
+                        if entries.iter().any(|entry| entry.name == "created.txt") {
+                            return true;
+                        }
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        });
+        assert!(
+            refreshed,
+            "external create should trigger an automatic refresh"
+        );
+    }
+
+    #[test]
+    fn local_file_worker_refreshes_loaded_tree_child_automatically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let child = tmp.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        let (worker, rx) =
+            spawn_local_file_worker("unit-local-child-watch", tmp.path().to_path_buf()).unwrap();
+        assert!(worker.send(SftpRequest::List(tmp.path().to_string_lossy().into_owned())));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = recv_event(&runtime, &rx);
+        let _ = recv_event(&runtime, &rx);
+        assert!(worker.send(SftpRequest::ListTreeChild(
+            child.to_string_lossy().into_owned()
+        )));
+        let _ = recv_event(&runtime, &rx);
+        let _ = recv_event(&runtime, &rx);
+
+        std::fs::write(child.join("created.txt"), "new").unwrap();
+
+        let refreshed_child = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let SftpEvent::DirListed { path, entries } = rx.recv().await.unwrap() else {
+                        continue;
+                    };
+                    if PathBuf::from(path) == child
+                        && entries.iter().any(|entry| entry.name == "created.txt")
+                    {
+                        return true;
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        });
+        assert!(
+            refreshed_child,
+            "external create should refresh an already loaded tree child"
+        );
     }
 
     #[test]
@@ -2315,15 +2533,62 @@ mod tests {
         else {
             panic!("expected child DirListed event");
         };
-        assert_eq!(PathBuf::from(child_path), child.canonicalize().unwrap());
+        assert_eq!(PathBuf::from(child_path), child);
 
         assert!(worker.send(SftpRequest::Refresh));
         let _ = recv_event(&runtime, &rx);
         let SftpEvent::DirListed { path, entries } = recv_event(&runtime, &rx) else {
             panic!("expected refreshed root DirListed event");
         };
-        assert_eq!(PathBuf::from(path), tmp.path().canonicalize().unwrap());
+        assert_eq!(PathBuf::from(path), tmp.path());
         assert!(entries.iter().any(|entry| entry.name == "root.txt"));
+    }
+
+    #[test]
+    fn local_file_worker_refresh_updates_loaded_tree_children() {
+        let tmp = tempfile::tempdir().unwrap();
+        let child = tmp.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+
+        let (worker, rx) =
+            spawn_local_file_worker("unit-local-tree-refresh", tmp.path().to_path_buf()).unwrap();
+        assert!(worker.send(SftpRequest::List(tmp.path().to_string_lossy().into_owned())));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = recv_event(&runtime, &rx);
+        let _ = recv_event(&runtime, &rx);
+
+        assert!(worker.send(SftpRequest::ListTreeChild(
+            child.to_string_lossy().into_owned()
+        )));
+        let _ = recv_event(&runtime, &rx);
+        let _ = recv_event(&runtime, &rx);
+
+        std::fs::write(child.join("created.txt"), "new").unwrap();
+        assert!(worker.send(SftpRequest::Refresh));
+
+        let refreshed_child = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    let SftpEvent::DirListed { path, entries } = rx.recv().await.unwrap() else {
+                        continue;
+                    };
+                    if PathBuf::from(path) == child
+                        && entries.iter().any(|entry| entry.name == "created.txt")
+                    {
+                        return true;
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        });
+        assert!(
+            refreshed_child,
+            "manual refresh should update loaded tree children"
+        );
     }
 
     #[test]

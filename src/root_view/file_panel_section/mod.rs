@@ -295,11 +295,13 @@ impl RootView {
         if matches!(self.terminal_tabs[index].kind, TerminalSessionKind::Local) {
             let request_path = self.local_file_panel_request_path(index);
             if let Some(worker) = self.terminal_tabs[index].sftp_worker.as_ref() {
+                let current_path =
+                    std::path::Path::new(&self.terminal_tabs[index].file_panel_state.cwd);
                 let sent = match request_path.as_ref() {
-                    Some(path) => {
+                    Some(path) if path != current_path => {
                         worker.send(SftpRequest::List(path.to_string_lossy().into_owned()))
                     }
-                    None => worker.send(SftpRequest::Refresh),
+                    _ => worker.send(SftpRequest::Refresh),
                 };
                 if sent {
                     return;
