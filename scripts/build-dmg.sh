@@ -8,6 +8,7 @@ BIN_NAME="nexshell"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+"$SCRIPT_DIR/verify-warp-compatibility.sh" --strict
 # 版本号从 Cargo.toml 读，避免和 crate 版本漂移
 VERSION="$(grep -m1 '^version' "$PROJECT_DIR/Cargo.toml" | sed -E 's/.*"(.*)".*/\1/')"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
