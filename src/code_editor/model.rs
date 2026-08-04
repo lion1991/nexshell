@@ -46,7 +46,7 @@ use warp_editor::editor::TextDecoration;
 use warp_editor::model::{CoreEditorModel, PlainTextEditorModel};
 use warp_editor::multiline::{AnyMultilineString, MultilineString, LF};
 use warp_editor::render::model::{
-    AutoScrollMode, BlockItem, Decoration, LineCount, LineDecoration, RenderEvent,
+    AutoScrollMode, BlockItem, ColumnUnit, Decoration, LineCount, LineDecoration, RenderEvent,
     RenderLineLocation, RenderState, RichTextStyles, StyleUpdateAction,
     UpdateDecorationAfterLayout, WidthSetting,
 };
@@ -2200,6 +2200,53 @@ impl CodeEditorModel {
         }
     }
 
+    /// Replace text from each cursor through the current line, inserting any
+    /// remainder once the cursor reaches EOL. The resulting cursors sit after
+    /// the replacement text, matching the live cursor position in Vim's `R` mode.
+    pub fn vim_replace_text(&mut self, text: &str, ctx: &mut ModelContext<Self>) {
+        let text_len = CharOffset::from(text.chars().count());
+        if text_len == CharOffset::zero() {
+            return;
+        }
+
+        let buffer = self.content().as_ref(ctx);
+        let selections = self.selection_model.as_ref(ctx).selection_offsets();
+        let mut edits = Vec::with_capacity(selections.len());
+        let mut new_selections = Vec::with_capacity(selections.len());
+        for selection in selections.iter() {
+            let start = selection.head;
+            let line_content_end = buffer
+                .containing_line_end(start)
+                .saturating_sub(&CharOffset::from(1));
+            let replace_len = (line_content_end - start).min(text_len);
+            edits.push((text.to_owned(), start..start + replace_len));
+            let new_pos = start + text_len;
+            new_selections.push(SelectionOffsets {
+                head: new_pos,
+                tail: new_pos,
+            });
+        }
+
+        let Ok(edits) = Vec1::try_from_vec(edits) else {
+            return;
+        };
+        let selection_model = self.selection_model.clone();
+        self.update_content(
+            |mut content, ctx| {
+                content.apply_edit(
+                    BufferEditAction::InsertAtCharOffsetRanges { edits: &edits },
+                    EditOrigin::UserInitiated,
+                    selection_model,
+                    ctx,
+                );
+            },
+            ctx,
+        );
+        if let Ok(new_selections) = Vec1::try_from_vec(new_selections) {
+            self.vim_set_selections(new_selections, AutoScrollBehavior::Selection, ctx);
+        }
+    }
+
     fn set_color_map(&self, ctx: &mut ModelContext<Self>) {
         let color_map = Self::syntax_highlighting_color_map(ctx);
 
@@ -2427,7 +2474,7 @@ impl CodeEditorModel {
             if let Some(existing) = self.selection().as_ref(ctx).goal_xs.as_ref() {
                 existing
                     .iter()
-                    .map(|px| px.as_f32().round() as u32)
+                    .map(|col| col.as_pixels().as_f32().round() as u32)
                     .collect()
             } else {
                 current_selections
@@ -2468,10 +2515,11 @@ impl CodeEditorModel {
         if let Ok(new_selections) = Vec1::try_from_vec(new_selections_vec) {
             self.vim_set_selections(new_selections, AutoScrollBehavior::Selection, ctx);
 
-            // Update goal_xs to the desired columns (stored as pixels for consistency with SelectionModel)
+            // Update goal_xs to the desired columns (stored as ColumnUnit::Pixels for
+            // consistency with the GUI SelectionModel pixel path)
             let goal_pixels: Vec<_> = goal_cols
                 .into_iter()
-                .map(|c| (c as usize).into_pixels())
+                .map(|c| ColumnUnit::Pixels((c as usize).into_pixels()))
                 .collect();
             self.selection().update(ctx, |selection, _| {
                 selection.goal_xs = Vec1::try_from_vec(goal_pixels).ok();

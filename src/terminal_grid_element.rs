@@ -4841,6 +4841,10 @@ mod tests {
             Some(vec![0x0c])
         );
         assert_eq!(
+            encode_terminal_key_event_with_modes("/", None, None, true, false, false, false, modes),
+            Some(vec![0x1f])
+        );
+        assert_eq!(
             encode_terminal_key_event_with_modes(
                 "enter", None, None, false, false, false, true, modes
             ),

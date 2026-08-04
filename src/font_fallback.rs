@@ -38,6 +38,7 @@ pub fn fallback_font_fn(ch: char) -> Option<ExternalFontFamily> {
 pub fn fallback_source(_id: &str) -> AssetSource {
     AssetSource::LocalFile {
         path: system_cjk_font_path().to_string(),
+        content_version: None,
     }
 }
 

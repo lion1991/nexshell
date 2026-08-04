@@ -427,15 +427,52 @@ impl VimHandler for CodeEditorView {
                     }
                 });
             }
+            VimOperator::Indent | VimOperator::Dedent => {
+                self.model.update(ctx, |model, ctx| {
+                    selection_change(model, ctx);
+                    let shift = *operator == VimOperator::Dedent;
+                    model.indent(shift, ctx);
+                    model.vim_move_to_first_nonwhitespace(false, ctx);
+                });
+            }
         }
     }
 
-    fn replace_char(&mut self, c: char, char_count: u32, ctx: &mut ViewContext<Self>) {
+    fn replace_char(
+        &mut self,
+        c: char,
+        char_count: u32,
+        advance: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.model.update(ctx, |model, ctx| {
-            model.replace_char(c, char_count, ctx);
+            if advance {
+                model.vim_replace_text(&c.to_string(), ctx);
+            } else {
+                model.replace_char(c, char_count, ctx);
+            }
         });
 
         // Explicit call to ctx.notify() in the case that we don't make any updates to the model
+        ctx.notify();
+    }
+
+    fn replace_text(
+        &mut self,
+        text: &str,
+        count: u32,
+        already_applied: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let repeat_count = count.saturating_sub(u32::from(already_applied));
+        self.model.update(ctx, |model, ctx| {
+            if repeat_count > 0 {
+                model.vim_replace_text(&text.repeat(repeat_count as usize), ctx);
+            }
+            if !text.is_empty() {
+                model.vim_move_horizontal_by_offset(1, &Direction::Backward, false, true, ctx);
+            }
+        });
         ctx.notify();
     }
 
@@ -572,6 +609,11 @@ impl VimHandler for CodeEditorView {
                     } else {
                         model.vim_clear_selections(ctx);
                     }
+                }
+                VimOperator::Indent | VimOperator::Dedent => {
+                    let shift = *operator == VimOperator::Dedent;
+                    model.indent(shift, ctx);
+                    model.vim_move_to_first_nonwhitespace(false, ctx);
                 }
             }
         });
