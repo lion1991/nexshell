@@ -1310,9 +1310,14 @@ mod tests {
             super::warp_text_input_custom_tag_to_keystroke(CustomAction::Copy.into()),
             Keystroke::parse(copy_keystroke).ok()
         );
+        let paste_keystroke = if super::platform::OperatingSystem::get().is_mac() {
+            "cmd-v"
+        } else {
+            "ctrl-shift-V"
+        };
         assert_eq!(
             super::warp_text_input_custom_tag_to_keystroke(CustomAction::Paste.into()),
-            Keystroke::parse("cmdorctrl-v").ok()
+            Keystroke::parse(paste_keystroke).ok()
         );
         assert_eq!(
             super::warp_text_input_custom_tag_to_keystroke(CustomAction::SelectAll.into()),
