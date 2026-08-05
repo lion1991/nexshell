@@ -19,7 +19,7 @@ anyhow = "1.0"
 # 原 =2.9.4 死钉；ironrdp-pdu 需要 ^2.11，放宽到 2.11+（bitflags 2.x 语义稳定、纯增量）。
 bitflags = "2.11"
 portable-pty = "0.8"
-rusqlite = "0.35"
+rusqlite = { version = "0.35", features = ["bundled-windows"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 encoding_rs = "0.8"
