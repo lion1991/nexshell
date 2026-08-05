@@ -11,6 +11,7 @@ use warpui::elements::{
     Align, ConstrainedBox, Container, CornerRadius, Empty, EventDispatchMode, Hoverable, Icon,
     MouseStateHandle, ParentOffsetBounds, Radius, SavePosition,
 };
+use warpui::keymap::Keystroke;
 use warpui::{platform, Element};
 
 use crate::terminal_grid_element::TerminalGridAction;
@@ -361,12 +362,140 @@ fn truncate_path_display(path: &str, max_len: usize) -> String {
     format!("…{suffix}")
 }
 
-pub(crate) fn terminal_clear_key_binding() -> &'static str {
-    if platform::OperatingSystem::get().is_mac() {
-        "cmd-k"
-    } else {
-        "ctrl-shift-K"
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TerminalShortcut {
+    ClearScreen,
+    Find,
+    Copy,
+    Paste,
+    NewTab,
+    CloseTab,
+    PreviousTab,
+    NextTab,
+    SplitRight,
+    SplitDown,
+    ClosePane,
+    NavigatePaneLeft,
+    NavigatePaneRight,
+    NavigatePaneUp,
+    NavigatePaneDown,
+    ToggleMaximizePane,
+    IncreaseFontSize,
+    DecreaseFontSize,
+    ResetFontSize,
+}
+
+pub(crate) fn terminal_shortcut_binding_for_os(
+    shortcut: TerminalShortcut,
+    operating_system: platform::OperatingSystem,
+) -> &'static str {
+    let is_mac = operating_system.is_mac();
+    match shortcut {
+        TerminalShortcut::ClearScreen => {
+            if is_mac { "cmd-k" } else { "ctrl-shift-K" }
+        }
+        TerminalShortcut::Find => {
+            if is_mac { "cmd-f" } else { "ctrl-shift-F" }
+        }
+        TerminalShortcut::Copy => {
+            if is_mac { "cmd-c" } else { "ctrl-shift-C" }
+        }
+        TerminalShortcut::Paste => {
+            if is_mac { "cmd-v" } else { "ctrl-shift-V" }
+        }
+        TerminalShortcut::NewTab => {
+            if is_mac { "cmd-t" } else { "ctrl-shift-T" }
+        }
+        TerminalShortcut::CloseTab => {
+            if is_mac { "cmd-w" } else { "ctrl-shift-W" }
+        }
+        TerminalShortcut::PreviousTab => "ctrl-shift-tab",
+        TerminalShortcut::NextTab => "ctrl-tab",
+        TerminalShortcut::SplitRight => {
+            if is_mac { "cmd-d" } else { "ctrl-shift-D" }
+        }
+        TerminalShortcut::SplitDown => {
+            if is_mac { "cmd-shift-D" } else { "ctrl-shift-E" }
+        }
+        TerminalShortcut::ClosePane => {
+            if is_mac { "cmd-shift-W" } else { "ctrl-alt-w" }
+        }
+        TerminalShortcut::NavigatePaneLeft => {
+            if is_mac { "cmd-alt-left" } else { "ctrl-alt-left" }
+        }
+        TerminalShortcut::NavigatePaneRight => {
+            if is_mac { "cmd-alt-right" } else { "ctrl-alt-right" }
+        }
+        TerminalShortcut::NavigatePaneUp => {
+            if is_mac { "cmd-alt-up" } else { "ctrl-alt-up" }
+        }
+        TerminalShortcut::NavigatePaneDown => {
+            if is_mac { "cmd-alt-down" } else { "ctrl-alt-down" }
+        }
+        TerminalShortcut::ToggleMaximizePane => {
+            if is_mac { "cmd-shift-enter" } else { "ctrl-shift-enter" }
+        }
+        TerminalShortcut::IncreaseFontSize => {
+            if is_mac { "cmd-+" } else { "ctrl-+" }
+        }
+        TerminalShortcut::DecreaseFontSize => {
+            if is_mac { "cmd--" } else { "ctrl--" }
+        }
+        TerminalShortcut::ResetFontSize => {
+            if is_mac { "cmd-0" } else { "ctrl-0" }
+        }
     }
+}
+
+pub(crate) fn terminal_shortcut_binding(shortcut: TerminalShortcut) -> &'static str {
+    terminal_shortcut_binding_for_os(shortcut, platform::OperatingSystem::get())
+}
+
+pub(crate) fn terminal_shortcut_label(shortcut: TerminalShortcut) -> String {
+    let keystroke = Keystroke::parse(terminal_shortcut_binding(shortcut))
+        .expect("terminal shortcut binding must be valid");
+    if platform::OperatingSystem::get().is_mac() {
+        return keystroke.displayed();
+    }
+
+    let mut parts = Vec::new();
+    if keystroke.ctrl {
+        parts.push("Ctrl".to_string());
+    }
+    if keystroke.alt {
+        parts.push("Alt".to_string());
+    }
+    if keystroke.shift {
+        parts.push("Shift".to_string());
+    }
+    if keystroke.cmd {
+        parts.push("Logo".to_string());
+    }
+    if keystroke.meta {
+        parts.push("Meta".to_string());
+    }
+    parts.push(match keystroke.key.as_str() {
+        "up" => "Up".to_string(),
+        "down" => "Down".to_string(),
+        "left" => "Left".to_string(),
+        "right" => "Right".to_string(),
+        "enter" => "Enter".to_string(),
+        "backspace" => "Backspace".to_string(),
+        key => {
+            let mut chars = key.chars();
+            chars
+                .next()
+                .map(|first| first.to_ascii_uppercase())
+                .into_iter()
+                .chain(chars)
+                .collect()
+        }
+    });
+    parts.join(" ")
+}
+
+pub(crate) fn terminal_clear_key_binding() -> &'static str {
+    terminal_shortcut_binding(TerminalShortcut::ClearScreen)
 }
 
 #[cfg(test)]
@@ -598,6 +727,87 @@ mod tests {
             assert_eq!(super::terminal_clear_key_binding(), "cmd-k");
         } else {
             assert_eq!(super::terminal_clear_key_binding(), "ctrl-shift-K");
+        }
+    }
+
+    #[test]
+    fn terminal_shortcuts_have_distinct_mac_and_windows_bindings() {
+        use super::{terminal_shortcut_binding_for_os, TerminalShortcut};
+        use warpui::platform::OperatingSystem;
+
+        assert_eq!(
+            terminal_shortcut_binding_for_os(TerminalShortcut::Paste, OperatingSystem::Mac),
+            "cmd-v"
+        );
+        assert_eq!(
+            terminal_shortcut_binding_for_os(TerminalShortcut::Paste, OperatingSystem::Windows),
+            "ctrl-shift-V"
+        );
+        assert_eq!(
+            terminal_shortcut_binding_for_os(
+                TerminalShortcut::SplitRight,
+                OperatingSystem::Windows
+            ),
+            "ctrl-shift-D"
+        );
+        assert_eq!(
+            terminal_shortcut_binding_for_os(
+                TerminalShortcut::SplitDown,
+                OperatingSystem::Windows
+            ),
+            "ctrl-shift-E"
+        );
+    }
+
+    #[test]
+    fn terminal_shortcut_labels_do_not_use_mac_glyphs_off_macos() {
+        use super::{terminal_shortcut_label, TerminalShortcut};
+
+        let label = terminal_shortcut_label(TerminalShortcut::Paste);
+        if super::platform::OperatingSystem::get().is_mac() {
+            assert_eq!(label, "⌘V");
+        } else {
+            assert_eq!(label, "Ctrl Shift V");
+            assert!(!label.contains(['⌘', '⇧', '⌥', '⌃']));
+        }
+    }
+
+    #[test]
+    fn every_terminal_shortcut_binding_parses_on_mac_and_windows() {
+        use super::{terminal_shortcut_binding_for_os, TerminalShortcut};
+        use warpui::keymap::Keystroke;
+        use warpui::platform::OperatingSystem;
+
+        let shortcuts = [
+            TerminalShortcut::ClearScreen,
+            TerminalShortcut::Find,
+            TerminalShortcut::Copy,
+            TerminalShortcut::Paste,
+            TerminalShortcut::NewTab,
+            TerminalShortcut::CloseTab,
+            TerminalShortcut::PreviousTab,
+            TerminalShortcut::NextTab,
+            TerminalShortcut::SplitRight,
+            TerminalShortcut::SplitDown,
+            TerminalShortcut::ClosePane,
+            TerminalShortcut::NavigatePaneLeft,
+            TerminalShortcut::NavigatePaneRight,
+            TerminalShortcut::NavigatePaneUp,
+            TerminalShortcut::NavigatePaneDown,
+            TerminalShortcut::ToggleMaximizePane,
+            TerminalShortcut::IncreaseFontSize,
+            TerminalShortcut::DecreaseFontSize,
+            TerminalShortcut::ResetFontSize,
+        ];
+
+        for operating_system in [OperatingSystem::Mac, OperatingSystem::Windows] {
+            for shortcut in shortcuts {
+                let binding = terminal_shortcut_binding_for_os(shortcut, operating_system);
+                assert!(
+                    Keystroke::parse(binding).is_ok(),
+                    "invalid {operating_system:?} binding for {shortcut:?}: {binding}"
+                );
+            }
         }
     }
 }

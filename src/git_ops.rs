@@ -11,6 +11,8 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crate::platform::background_command;
+
 /// 通用 git 调用：成功 = stdout trim 后的字符串；失败 = stderr + stdout 合并的错误。
 /// `git diff` 单独有一类"退出码 1 = 有差异"，调用方按需放宽（本模块仅对 diff 命令做）。
 pub fn run_git(repo: &Path, args: &[&str]) -> Result<String, String> {
@@ -25,7 +27,7 @@ where
 }
 
 fn run_git_diff(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("git");
+    let mut command = background_command("git");
     command
         .arg("-c")
         .arg("diff.autoRefreshIndex=false")
@@ -60,7 +62,7 @@ where
     P: AsRef<OsStr>,
     F: FnOnce(&mut Command),
 {
-    let mut command = Command::new(program);
+    let mut command = background_command(program);
     command
         .arg("-c")
         .arg("diff.autoRefreshIndex=false")
@@ -269,7 +271,7 @@ fn nonempty_host(host: &str, port: Option<u16>) -> Option<SshEndpoint> {
 }
 
 fn ssh_known_host_exists(endpoint: &SshEndpoint) -> bool {
-    Command::new("ssh-keygen")
+    background_command("ssh-keygen")
         .args(["-F", &endpoint.known_hosts_target()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -280,7 +282,7 @@ fn ssh_known_host_exists(endpoint: &SshEndpoint) -> bool {
 }
 
 fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
-    let mut keyscan = Command::new("ssh-keyscan");
+    let mut keyscan = background_command("ssh-keyscan");
     keyscan
         .args(["-T", "5", "-t", "ed25519,ecdsa,rsa"])
         .stdin(Stdio::null())
@@ -294,7 +296,7 @@ fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
         return None;
     }
 
-    let mut keygen = Command::new("ssh-keygen")
+    let mut keygen = background_command("ssh-keygen")
         .args(["-lf", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

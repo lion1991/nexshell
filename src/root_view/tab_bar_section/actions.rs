@@ -10,6 +10,7 @@ use pathfinder_geometry::vector::vec2f;
 
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::terminal_view_helpers::serial_port_from_host_config;
+use crate::terminal_view_helpers::{terminal_shortcut_label, TerminalShortcut};
 use crate::{
     AppPage, RootView, TabMoveDirection, DEFAULT_COLS, DEFAULT_ROWS, NEW_TAB_BUTTON_POSITION_ID,
 };
@@ -72,7 +73,9 @@ impl RootView {
             let items = vec![MenuItemFields::new(rust_i18n::t!("menu_terminal"))
                 .with_on_select_action(TerminalGridAction::NewTab)
                 .with_icon(warp_core::ui::icons::Icon::Terminal)
-                .with_key_shortcut_label(Some("⌘T"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(
+                    TerminalShortcut::NewTab,
+                )))
                 .into_item()];
             let origin = ctx
                 .element_position_by_id(NEW_TAB_BUTTON_POSITION_ID)

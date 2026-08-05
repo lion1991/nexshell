@@ -16,6 +16,7 @@ use crate::git_panel_view_helpers::{
     git_panel_context_menu_items, git_panel_context_paths, GitPanelContextPaths,
 };
 use crate::terminal_grid_element::TerminalGridAction;
+use crate::terminal_view_helpers::{terminal_shortcut_label, TerminalShortcut};
 use crate::{RootView, TerminalSessionKind};
 use nexshell::file_panel::{
     apply_file_panel_selection, apply_file_panel_tree_selection, FilePanelSelectMode,
@@ -205,7 +206,7 @@ impl RootView {
         if has_selection {
             items.push(
                 MenuItemFields::new(rust_i18n::t!("menu_copy"))
-                    .with_key_shortcut_label(Some("⌘C"))
+                    .with_key_shortcut_label(Some(terminal_shortcut_label(TerminalShortcut::Copy)))
                     .with_on_select_action(TerminalGridAction::CopySelection)
                     .into_item(),
             );
@@ -213,7 +214,7 @@ impl RootView {
 
         items.push(
             MenuItemFields::new(rust_i18n::t!("menu_paste"))
-                .with_key_shortcut_label(Some("⌘V"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(TerminalShortcut::Paste)))
                 .with_on_select_action(TerminalGridAction::PasteClipboard)
                 .into_item(),
         );
@@ -222,14 +223,16 @@ impl RootView {
 
         items.push(
             MenuItemFields::new(rust_i18n::t!("menu_find"))
-                .with_key_shortcut_label(Some("⌘F"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(TerminalShortcut::Find)))
                 .with_on_select_action(TerminalGridAction::OpenFindBar)
                 .into_item(),
         );
 
         items.push(
             MenuItemFields::new(rust_i18n::t!("menu_clear_screen"))
-                .with_key_shortcut_label(Some("⌘K"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(
+                    TerminalShortcut::ClearScreen,
+                )))
                 .with_on_select_action(TerminalGridAction::ClearVisibleScreen)
                 .into_item(),
         );
@@ -238,7 +241,9 @@ impl RootView {
 
         items.push(
             MenuItemFields::new(rust_i18n::t!("ctx_split_right"))
-                .with_key_shortcut_label(Some("⌘D"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(
+                    TerminalShortcut::SplitRight,
+                )))
                 .with_on_select_action(TerminalGridAction::SplitRight)
                 .into_item(),
         );
@@ -249,7 +254,9 @@ impl RootView {
         );
         items.push(
             MenuItemFields::new(rust_i18n::t!("ctx_split_down"))
-                .with_key_shortcut_label(Some("⇧⌘D"))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(
+                    TerminalShortcut::SplitDown,
+                )))
                 .with_on_select_action(TerminalGridAction::SplitDown)
                 .into_item(),
         );
@@ -276,13 +283,17 @@ impl RootView {
             };
             items.push(
                 MenuItemFields::new(maximize_label)
-                    .with_key_shortcut_label(Some("⇧⌘↩"))
+                    .with_key_shortcut_label(Some(terminal_shortcut_label(
+                        TerminalShortcut::ToggleMaximizePane,
+                    )))
                     .with_on_select_action(TerminalGridAction::ToggleMaximizePane)
                     .into_item(),
             );
             items.push(
                 MenuItemFields::new(rust_i18n::t!("ctx_close_pane"))
-                    .with_key_shortcut_label(Some("⇧⌘W"))
+                    .with_key_shortcut_label(Some(terminal_shortcut_label(
+                        TerminalShortcut::ClosePane,
+                    )))
                     .with_on_select_action(TerminalGridAction::ClosePane)
                     .into_item(),
             );

@@ -89,7 +89,10 @@ use font_enumeration::{
     default_monospace_font_family_name, load_nexshell_monospace_font, load_nexshell_ui_font,
 };
 use terminal_grid_element::TerminalGridAction;
-use terminal_view_helpers::{terminal_clear_key_binding, terminal_tab_original_label};
+use terminal_view_helpers::{
+    terminal_clear_key_binding, terminal_shortcut_binding, terminal_tab_original_label,
+    TerminalShortcut,
+};
 use ui_settings::load_ui_settings;
 
 const TERMINAL_CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
@@ -708,40 +711,64 @@ fn register_terminal_key_bindings(ctx: &mut AppContext) {
             TerminalGridAction::ClearVisibleScreen,
             view_id.clone(),
         ),
-        FixedBinding::new("cmd-d", TerminalGridAction::SplitRight, view_id.clone()),
         FixedBinding::new(
-            "cmd-shift-D",
+            terminal_shortcut_binding(TerminalShortcut::Find),
+            TerminalGridAction::OpenFindBar,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::SplitRight),
+            TerminalGridAction::SplitRight,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::SplitDown),
             TerminalGridAction::SplitDown,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-shift-W",
+            terminal_shortcut_binding(TerminalShortcut::ClosePane),
             TerminalGridAction::ClosePane,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-alt-left",
+            terminal_shortcut_binding(TerminalShortcut::NavigatePaneLeft),
             TerminalGridAction::NavigatePaneLeft,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-alt-right",
+            terminal_shortcut_binding(TerminalShortcut::NavigatePaneRight),
             TerminalGridAction::NavigatePaneRight,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-alt-up",
+            terminal_shortcut_binding(TerminalShortcut::NavigatePaneUp),
             TerminalGridAction::NavigatePaneUp,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-alt-down",
+            terminal_shortcut_binding(TerminalShortcut::NavigatePaneDown),
             TerminalGridAction::NavigatePaneDown,
             view_id.clone(),
         ),
         FixedBinding::new(
-            "cmd-shift-enter",
+            terminal_shortcut_binding(TerminalShortcut::ToggleMaximizePane),
             TerminalGridAction::ToggleMaximizePane,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::IncreaseFontSize),
+            TerminalGridAction::IncreaseFontSize,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::DecreaseFontSize),
+            TerminalGridAction::DecreaseFontSize,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::ResetFontSize),
+            TerminalGridAction::ResetFontSize,
             view_id.clone(),
         ),
         // 代码编辑器保存（ADR 0003）：全局绑定，handler 内仅 active 为 CodeViewer 时落盘。

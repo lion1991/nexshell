@@ -4,7 +4,8 @@
 //! - 「编辑」：EditorChoice 指定的编辑器；SystemDefault 时回退系统文本编辑器。
 
 use std::path::Path;
-use std::process::Command;
+
+use nexshell::platform::background_command;
 
 /// 设置里选的"编辑器"。SystemDefault = 用系统默认文本编辑器。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,7 +215,7 @@ fn command_in_path(cmd: &str) -> bool {
     let finder = "where";
     #[cfg(not(target_os = "windows"))]
     let finder = "which";
-    Command::new(finder)
+    background_command(finder)
         .arg(cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -224,7 +225,7 @@ fn command_in_path(cmd: &str) -> bool {
 }
 
 fn spawn(program: &str, args: &[&str]) -> Result<(), String> {
-    Command::new(program)
+    background_command(program)
         .args(args)
         .spawn()
         .map(|_| ())
@@ -234,6 +235,7 @@ fn spawn(program: &str, args: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::safe_arg;
+    use nexshell::platform::background_process_creation_flags;
 
     #[test]
     fn safe_arg_keeps_absolute_and_non_dash_paths() {
@@ -250,5 +252,14 @@ mod tests {
         // 相对且以 - 开头 → 前缀 ./，避免被子进程当成 flag
         assert_eq!(safe_arg("-rf"), "./-rf");
         assert_eq!(safe_arg("--goto"), "./--goto");
+    }
+
+    #[test]
+    fn background_processes_use_the_windows_no_window_flag() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(background_process_creation_flags(), 0x0800_0000);
+
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(background_process_creation_flags(), 0);
     }
 }

@@ -7,30 +7,32 @@ use warpui::{
     fonts::FamilyId,
 };
 
+use crate::terminal_view_helpers::{terminal_shortcut_label, TerminalShortcut};
+
 use super::render_helpers::{
     render_page_title, CONTENT_FONT_SIZE, HEADER_PADDING, MAX_PAGE_WIDTH, PAGE_PADDING,
 };
 
-const KEYBINDING_KEYS: &[(&str, &str)] = &[
-    ("key_clear_screen", "⌘K"),
-    ("key_find", "⌘F"),
-    ("key_copy", "⌘C"),
-    ("key_paste", "⌘V"),
-    ("key_new_tab", "⌘T"),
-    ("key_close_tab", "⌘W"),
-    ("key_prev_tab", "⌃⇧Tab"),
-    ("key_next_tab", "⌃Tab"),
-    ("key_split_right", "⌘D"),
-    ("key_split_down", "⇧⌘D"),
-    ("key_close_pane", "⇧⌘W"),
-    ("key_nav_left", "⌥⌘←"),
-    ("key_nav_right", "⌥⌘→"),
-    ("key_nav_up", "⌥⌘↑"),
-    ("key_nav_down", "⌥⌘↓"),
-    ("key_maximize_pane", "⇧⌘Enter"),
-    ("key_increase_font", "⌘+"),
-    ("key_decrease_font", "⌘−"),
-    ("key_reset_font", "⌘0"),
+const KEYBINDING_KEYS: &[(&str, TerminalShortcut)] = &[
+    ("key_clear_screen", TerminalShortcut::ClearScreen),
+    ("key_find", TerminalShortcut::Find),
+    ("key_copy", TerminalShortcut::Copy),
+    ("key_paste", TerminalShortcut::Paste),
+    ("key_new_tab", TerminalShortcut::NewTab),
+    ("key_close_tab", TerminalShortcut::CloseTab),
+    ("key_prev_tab", TerminalShortcut::PreviousTab),
+    ("key_next_tab", TerminalShortcut::NextTab),
+    ("key_split_right", TerminalShortcut::SplitRight),
+    ("key_split_down", TerminalShortcut::SplitDown),
+    ("key_close_pane", TerminalShortcut::ClosePane),
+    ("key_nav_left", TerminalShortcut::NavigatePaneLeft),
+    ("key_nav_right", TerminalShortcut::NavigatePaneRight),
+    ("key_nav_up", TerminalShortcut::NavigatePaneUp),
+    ("key_nav_down", TerminalShortcut::NavigatePaneDown),
+    ("key_maximize_pane", TerminalShortcut::ToggleMaximizePane),
+    ("key_increase_font", TerminalShortcut::IncreaseFontSize),
+    ("key_decrease_font", TerminalShortcut::DecreaseFontSize),
+    ("key_reset_font", TerminalShortcut::ResetFontSize),
 ];
 
 pub fn render_keybindings_page(
@@ -49,14 +51,15 @@ pub fn render_keybindings_page(
         appearance,
     ));
 
-    for &(i18n_key, keys) in KEYBINDING_KEYS {
+    for &(i18n_key, shortcut) in KEYBINDING_KEYS {
+        let keys = terminal_shortcut_label(shortcut);
         let label = Text::new_inline(rust_i18n::t!(i18n_key), ui_font, CONTENT_FONT_SIZE)
             .with_color(theme.active_ui_text_color().into())
             .finish();
 
         let pill = Container::new(
             Container::new(
-                Text::new_inline(keys.to_string(), monospace_font, CONTENT_FONT_SIZE)
+                Text::new_inline(keys, monospace_font, CONTENT_FONT_SIZE)
                     .with_color(theme.active_ui_text_color().into())
                     .finish(),
             )
