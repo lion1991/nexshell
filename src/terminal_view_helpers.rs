@@ -451,12 +451,40 @@ pub(crate) fn terminal_shortcut_binding(shortcut: TerminalShortcut) -> &'static 
     terminal_shortcut_binding_for_os(shortcut, platform::OperatingSystem::get())
 }
 
-pub(crate) fn terminal_shortcut_label(shortcut: TerminalShortcut) -> String {
-    let keystroke = Keystroke::parse(terminal_shortcut_binding(shortcut))
-        .expect("terminal shortcut binding must be valid");
-    if platform::OperatingSystem::get().is_mac() {
-        return keystroke.displayed();
+fn terminal_shortcut_label_for_os(
+    shortcut: TerminalShortcut,
+    operating_system: platform::OperatingSystem,
+) -> String {
+    if operating_system.is_mac() {
+        return match shortcut {
+            TerminalShortcut::ClearScreen => "⌘K",
+            TerminalShortcut::Find => "⌘F",
+            TerminalShortcut::Copy => "⌘C",
+            TerminalShortcut::Paste => "⌘V",
+            TerminalShortcut::NewTab => "⌘T",
+            TerminalShortcut::CloseTab => "⌘W",
+            TerminalShortcut::PreviousTab => "⌃⇧Tab",
+            TerminalShortcut::NextTab => "⌃Tab",
+            TerminalShortcut::SplitRight => "⌘D",
+            TerminalShortcut::SplitDown => "⇧⌘D",
+            TerminalShortcut::ClosePane => "⇧⌘W",
+            TerminalShortcut::NavigatePaneLeft => "⌥⌘←",
+            TerminalShortcut::NavigatePaneRight => "⌥⌘→",
+            TerminalShortcut::NavigatePaneUp => "⌥⌘↑",
+            TerminalShortcut::NavigatePaneDown => "⌥⌘↓",
+            TerminalShortcut::ToggleMaximizePane => "⇧⌘Enter",
+            TerminalShortcut::IncreaseFontSize => "⌘+",
+            TerminalShortcut::DecreaseFontSize => "⌘−",
+            TerminalShortcut::ResetFontSize => "⌘0",
+        }
+        .to_string();
     }
+
+    let keystroke = Keystroke::parse(terminal_shortcut_binding_for_os(
+        shortcut,
+        operating_system,
+    ))
+        .expect("terminal shortcut binding must be valid");
 
     let mut parts = Vec::new();
     if keystroke.ctrl {
@@ -492,6 +520,20 @@ pub(crate) fn terminal_shortcut_label(shortcut: TerminalShortcut) -> String {
         }
     });
     parts.join(" ")
+}
+
+pub(crate) fn terminal_shortcut_label(shortcut: TerminalShortcut) -> String {
+    terminal_shortcut_label_for_os(shortcut, platform::OperatingSystem::get())
+}
+
+pub(crate) fn terminal_shortcut_menu_label(shortcut: TerminalShortcut) -> String {
+    if platform::OperatingSystem::get().is_mac()
+        && shortcut == TerminalShortcut::ToggleMaximizePane
+    {
+        "⇧⌘↩".to_string()
+    } else {
+        terminal_shortcut_label(shortcut)
+    }
 }
 
 pub(crate) fn terminal_clear_key_binding() -> &'static str {
@@ -769,6 +811,69 @@ mod tests {
         } else {
             assert_eq!(label, "Ctrl Shift V");
             assert!(!label.contains(['⌘', '⇧', '⌥', '⌃']));
+        }
+    }
+
+    #[test]
+    fn mac_terminal_shortcut_labels_preserve_the_existing_ui_text() {
+        use super::{
+            terminal_shortcut_binding_for_os, terminal_shortcut_label_for_os,
+            terminal_shortcut_menu_label, TerminalShortcut,
+        };
+        use warpui::platform::OperatingSystem;
+
+        let expected = [
+            (TerminalShortcut::ClearScreen, "⌘K"),
+            (TerminalShortcut::Find, "⌘F"),
+            (TerminalShortcut::Copy, "⌘C"),
+            (TerminalShortcut::Paste, "⌘V"),
+            (TerminalShortcut::NewTab, "⌘T"),
+            (TerminalShortcut::CloseTab, "⌘W"),
+            (TerminalShortcut::PreviousTab, "⌃⇧Tab"),
+            (TerminalShortcut::NextTab, "⌃Tab"),
+            (TerminalShortcut::SplitRight, "⌘D"),
+            (TerminalShortcut::SplitDown, "⇧⌘D"),
+            (TerminalShortcut::ClosePane, "⇧⌘W"),
+            (TerminalShortcut::NavigatePaneLeft, "⌥⌘←"),
+            (TerminalShortcut::NavigatePaneRight, "⌥⌘→"),
+            (TerminalShortcut::NavigatePaneUp, "⌥⌘↑"),
+            (TerminalShortcut::NavigatePaneDown, "⌥⌘↓"),
+            (TerminalShortcut::ToggleMaximizePane, "⇧⌘Enter"),
+            (TerminalShortcut::IncreaseFontSize, "⌘+"),
+            (TerminalShortcut::DecreaseFontSize, "⌘−"),
+            (TerminalShortcut::ResetFontSize, "⌘0"),
+        ];
+
+        for (shortcut, label) in expected {
+            assert_eq!(
+                terminal_shortcut_label_for_os(shortcut, OperatingSystem::Mac),
+                label
+            );
+        }
+
+        let registered_bindings = [
+            (TerminalShortcut::ClearScreen, "cmd-k"),
+            (TerminalShortcut::SplitRight, "cmd-d"),
+            (TerminalShortcut::SplitDown, "cmd-shift-D"),
+            (TerminalShortcut::ClosePane, "cmd-shift-W"),
+            (TerminalShortcut::NavigatePaneLeft, "cmd-alt-left"),
+            (TerminalShortcut::NavigatePaneRight, "cmd-alt-right"),
+            (TerminalShortcut::NavigatePaneUp, "cmd-alt-up"),
+            (TerminalShortcut::NavigatePaneDown, "cmd-alt-down"),
+            (TerminalShortcut::ToggleMaximizePane, "cmd-shift-enter"),
+        ];
+        for (shortcut, binding) in registered_bindings {
+            assert_eq!(
+                terminal_shortcut_binding_for_os(shortcut, OperatingSystem::Mac),
+                binding
+            );
+        }
+
+        if OperatingSystem::get().is_mac() {
+            assert_eq!(
+                terminal_shortcut_menu_label(TerminalShortcut::ToggleMaximizePane),
+                "⇧⌘↩"
+            );
         }
     }
 

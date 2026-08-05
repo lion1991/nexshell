@@ -16,7 +16,9 @@ use crate::git_panel_view_helpers::{
     git_panel_context_menu_items, git_panel_context_paths, GitPanelContextPaths,
 };
 use crate::terminal_grid_element::TerminalGridAction;
-use crate::terminal_view_helpers::{terminal_shortcut_label, TerminalShortcut};
+use crate::terminal_view_helpers::{
+    terminal_shortcut_label, terminal_shortcut_menu_label, TerminalShortcut,
+};
 use crate::{RootView, TerminalSessionKind};
 use nexshell::file_panel::{
     apply_file_panel_selection, apply_file_panel_tree_selection, FilePanelSelectMode,
@@ -283,7 +285,7 @@ impl RootView {
             };
             items.push(
                 MenuItemFields::new(maximize_label)
-                    .with_key_shortcut_label(Some(terminal_shortcut_label(
+                    .with_key_shortcut_label(Some(terminal_shortcut_menu_label(
                         TerminalShortcut::ToggleMaximizePane,
                     )))
                     .with_on_select_action(TerminalGridAction::ToggleMaximizePane)

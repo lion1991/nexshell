@@ -705,15 +705,35 @@ enum TabMoveDirection {
 
 fn register_terminal_key_bindings(ctx: &mut AppContext) {
     let view_id = id!(RootView::ui_name());
+
+    #[cfg(target_os = "windows")]
+    ctx.register_fixed_bindings([
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::Find),
+            TerminalGridAction::OpenFindBar,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::IncreaseFontSize),
+            TerminalGridAction::IncreaseFontSize,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::DecreaseFontSize),
+            TerminalGridAction::DecreaseFontSize,
+            view_id.clone(),
+        ),
+        FixedBinding::new(
+            terminal_shortcut_binding(TerminalShortcut::ResetFontSize),
+            TerminalGridAction::ResetFontSize,
+            view_id.clone(),
+        ),
+    ]);
+
     ctx.register_fixed_bindings([
         FixedBinding::new(
             terminal_clear_key_binding(),
             TerminalGridAction::ClearVisibleScreen,
-            view_id.clone(),
-        ),
-        FixedBinding::new(
-            terminal_shortcut_binding(TerminalShortcut::Find),
-            TerminalGridAction::OpenFindBar,
             view_id.clone(),
         ),
         FixedBinding::new(
@@ -754,21 +774,6 @@ fn register_terminal_key_bindings(ctx: &mut AppContext) {
         FixedBinding::new(
             terminal_shortcut_binding(TerminalShortcut::ToggleMaximizePane),
             TerminalGridAction::ToggleMaximizePane,
-            view_id.clone(),
-        ),
-        FixedBinding::new(
-            terminal_shortcut_binding(TerminalShortcut::IncreaseFontSize),
-            TerminalGridAction::IncreaseFontSize,
-            view_id.clone(),
-        ),
-        FixedBinding::new(
-            terminal_shortcut_binding(TerminalShortcut::DecreaseFontSize),
-            TerminalGridAction::DecreaseFontSize,
-            view_id.clone(),
-        ),
-        FixedBinding::new(
-            terminal_shortcut_binding(TerminalShortcut::ResetFontSize),
-            TerminalGridAction::ResetFontSize,
             view_id.clone(),
         ),
         // 代码编辑器保存（ADR 0003）：全局绑定，handler 内仅 active 为 CodeViewer 时落盘。
