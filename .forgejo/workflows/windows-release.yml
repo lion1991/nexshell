@@ -80,11 +80,12 @@ jobs:
           protoc --version
           if ($LASTEXITCODE -ne 0) { throw "protoc not found; check runner service PATH" }
 
+      # 不用 shell: cmd——act_runner host 模式解析 cmd 会得到 .\cmd.exe 相对路径而失败，
+      # 统一 powershell 包 cmd.exe /c 调 bat
       - name: 构建 Windows 可执行文件
-        shell: cmd
         run: |
-          call nexshell\scripts\build-windows-exe.bat
-          if errorlevel 1 exit /b 1
+          & cmd.exe /c "call nexshell\scripts\build-windows-exe.bat"
+          if ($LASTEXITCODE -ne 0) { throw "build failed with exit code $LASTEXITCODE" }
 
       - name: 打包 zip
         id: package

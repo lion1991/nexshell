@@ -150,6 +150,9 @@ git push forgejo v1.2.3
   `crates/input_classifier/models/**`，但这些文件不参与 nexshell 构建（input_classifier
   不在依赖图里），且本地 macOS 无 LFS、一直以指针文件构建成功。workflow 已在 checkout warp
   步骤设 `GIT_LFS_SKIP_SMUDGE=1` 跳过下载，不要往 Forgejo 补推 LFS 对象。
+- **`shell: cmd` 步骤报 `fork/exec .\cmd.exe` 找不到文件**：act_runner host 模式对 cmd
+  shell 的解析不可靠（powershell 步骤不受影响）。规矩：workflow 里不用 `shell: cmd`，
+  需要跑 bat 时用默认 powershell 包 `& cmd.exe /c "call xxx.bat"` 并检查 `$LASTEXITCODE`。
 - **run 日志里中文乱码**：act 写出的 .ps1 无 BOM，Windows PowerShell 5.1 按 ANSI 读取。
   规矩：run 脚本内的输出/报错一律英文；step 名和 YAML 注释不受影响可用中文。
 - **checkout warp 时 `git fetch --depth 1 origin <sha>` 失败**：workflow 已自动回退到
