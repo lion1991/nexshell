@@ -74,12 +74,22 @@ git push forgejo v1.2.3
 
 ### 工具链
 
-- **VS Build Tools 2022**：安装时勾选"使用 C++ 的桌面开发"工作负载（MSVC 工具链）。
+- **VS Build Tools / Community 2022**：必须完整包含三件——MSVC 编译器、**VC 库**
+  （组件 `VC.Tools.x86.x64`，缺了报 LNK1104 msvcrt.lib）、**Windows SDK**（缺了报
+  LNK1104 kernel32.lib）。勾"使用 C++ 的桌面开发"工作负载即全含；半残安装用
+  `setup.exe modify --add <组件> --quiet --norestart` 补。
 - **rustup**：安装后 `rustup default stable-x86_64-pc-windows-msvc`。
-- **protoc**：`winget install Google.Protobuf`，或手动下载二进制放进 PATH。
+- **protoc**：GitHub protobuf release 的 win64 zip 解压到 `C:\tools\protoc`，bin 加 PATH
+  （winget 在 SSH 会话里会因 msstore 源协议问题失败，别依赖它）。
+- **CMake**：Kitware release zip 解压到 `C:\tools\cmake`，bin 加 PATH（`libopus_sys` 编
+  Opus 需要，走 VS 生成器 + MSBuild）。
+- **NASM**：官方 win64 zip 解压到 `C:\tools\nasm` 加 PATH（`aws-lc-sys` 编汇编需要）。
 - **Git for Windows**：workflow 里的 checkout warp 步骤直接调用 `git`，必须在 PATH 里。
 - **Node.js LTS**：`actions/checkout`、`actions/upload-artifact` 等官方 action 是 JS action，
   跑在 runner 内置的 Node 运行时上，需要预先装好。
+
+以上 PATH 变更都写**用户级** PATH（runner 以哪个用户跑就写谁的），改完必须重启 runner
+进程才生效——daemon 只在启动时读一次环境。
 
 ### 安装 forgejo-runner
 
@@ -99,24 +109,20 @@ git push forgejo v1.2.3
    宿主机进程里，不走 docker）。workflow 里 `runs-on:` 引用的是标签名本身，即 `windows`，
    不是带冒号的完整字符串。
 
-3. 常驻运行，二选一：
+3. 常驻运行（当前部署即此方案）：任务计划程序建任务 `\forgejo-runner`，Action 指向
+   wrapper 批处理 `C:\forgejo-runner\daemon.cmd`（内容：调 `forgejo-runner.exe daemon`
+   并把 stdout/stderr 追加到 `C:\forgejo-runner\daemon.log`——直接指 exe 的话日志全丢）。
+   注意：任务存了用户凭据，`schtasks /change` 改动作时会要求重输密码。
 
-   **方案 A：NSSM 包装成 Windows 服务**（推荐，可设开机自启 + 崩溃自动重启）
+### host 模式的实际行为（实测勘误）
 
-   ```powershell
-   nssm install forgejo-runner "C:\path\to\forgejo-runner.exe" daemon
-   nssm set forgejo-runner AppDirectory "C:\path\to\runner目录"
-   nssm start forgejo-runner
-   ```
-
-   **方案 B：任务计划程序**，建一个"登录时启动"或"开机启动"的任务，
-   Action 指向 `forgejo-runner.exe daemon`，工作目录设为 runner 所在目录。
-
-### host 模式的两个特性
-
-- workspace 在 host 模式下是持久化的（不像 docker 模式每次用完就清），
-  所以 `warp/` 目录会在多次构建之间保留，cargo 增量编译天然生效，第二次构建起会明显变快
-  ——这也是 workflow 里 checkout warp 那步要做幂等处理（先判断 `warp/.git` 是否已存在）的原因。
+- **workspace 并不持久化**：每个 run 用独立的 `work\<runid>\hostexecutor` 目录，跑完即删。
+  所以每次构建都是全量冷编译（warp 也每次重新 fetch，好在按 sha 浅拉取很快）；
+  workflow 里 checkout warp 的幂等分支实际走不到"复用"路径，留着无害。
+  实测冷构建全程约 11 分钟。持久化 `CARGO_TARGET_DIR` 提速是 v2 候选，但 path 依赖的
+  指纹含绝对路径、而 workspace 路径每 run 都变，收益只覆盖 crates.io 依赖，未必划算。
+- daemon 的 stdout 只记 task 接取，不含步骤结果与 job 日志——排障看 Forgejo 网页的
+  Actions run 日志，别指望 daemon.log。
 - 单台 runner 默认并发数是 1（同一时间只跑一个 job），不需要额外配置 `concurrency`。
 - checkout warp 用的 PAT 会随 `git remote set-url` 留在持久化的 `warp/.git/config` 里，
   单用户构建机可接受；机器共用时注意。
@@ -156,20 +162,14 @@ git push forgejo v1.2.3
 - **run 日志里中文乱码**：act 写出的 .ps1 无 BOM，Windows PowerShell 5.1 按 ANSI 读取。
   规矩：run 脚本内的输出/报错一律英文；step 名和 YAML 注释不受影响可用中文。
 - **checkout warp 时 `git fetch --depth 1 origin <sha>` 失败**：workflow 已自动回退到
-  全量 `git fetch origin` 重试，不需要人工介入；首次全量 clone warp 仓库耗时较长属正常现象，
-  之后 workspace 持久化，后续构建只需增量 fetch。
+  全量 `git fetch origin` 重试，不需要人工介入（实测 Forgejo 支持按 sha 浅拉取，
+  一般走不到回退分支）。
 - **发布 Release 步骤报 403**：默认用的 `GITHUB_TOKEN`（Forgejo 内置的 job token）权限不足以
   创建 Release 时会出现。解决办法：另建一个有仓库写权限的 Forgejo PAT，配成仓库 secret
   `RELEASE_TOKEN`，workflow 会优先用它（`secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN`）。
 - **产物没有出现在 Artifacts 里**：`actions/upload-artifact` 必须用 `@v3`——Forgejo 对 `v4`
   的支持还不稳定，workflow 里已固定用 v3，不要手滑升级版本号。
-- **cargo / protoc 报"找不到命令"**：环境自检那一步会先失败并报错，多数是 NSSM 服务的
-  运行账户 PATH 和交互登录会话的 PATH 不一致——用 NSSM 把 runner 包装成服务后，
-  服务进程默认继承的是 Local System 或指定账户的系统级环境变量，不会自动带上你在
-  交互式终端里手动加的用户级 PATH 项。必要时在 NSSM 里显式配置：
-
-  ```powershell
-  nssm set forgejo-runner AppEnvironmentExtra PATH=C:\rust\bin;C:\protoc\bin;%PATH%
-  ```
-
-  这是最常见的坑，遇到"本地命令行能跑、CI 里找不到"时优先查这里。
+- **cargo / protoc / cmake 报"找不到命令"**：环境自检那一步会先失败并报错。两个常见原因：
+  ① 工具刚装、PATH 刚改，但 daemon 没重启——daemon 只在启动时读一次环境，
+  `schtasks /end` + `/run` 重启计划任务即可；② 工具装到了别的用户名下（任务 Run As 谁，
+  就得装到谁的用户 PATH 或机器 PATH）。"本地命令行能跑、CI 里找不到"优先查这两条。
