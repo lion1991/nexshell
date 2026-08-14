@@ -938,16 +938,19 @@ impl warpui::TypedActionView for HostEditView {
                 let mut port_change: Option<u16> = None;
                 let host_placeholder = ctx.update_model(&self.model, |m, ctx| {
                     if m.draft.protocol != target {
-                        m.draft.protocol = target.clone();
+                        let old_protocol = std::mem::replace(&mut m.draft.protocol, target.clone());
                         m.draft.system = if target == "Serial" {
                             HostSystemIcon::Serial
                         } else {
                             HostSystemIcon::Terminal
                         };
-                        if target == "Serial" && m.draft.host.trim().is_empty() {
-                            if let Some(device) = available_serial_devices().into_iter().next() {
-                                m.draft.host = device;
-                            }
+                        if let Some(host) = protocol_switch_host(
+                            &old_protocol,
+                            &target,
+                            &m.draft.host,
+                            available_serial_devices().into_iter().next(),
+                        ) {
+                            m.draft.host = host;
                         }
                         if target == "RDP" && m.draft.port == 22 {
                             port_change = Some(RDP_DEFAULT_PORT);
@@ -1227,6 +1230,25 @@ fn is_serial_device_name(device: &str) -> bool {
 
 fn is_windows_com_port_name(name: &str) -> bool {
     name.len() > 3 && name.starts_with("com") && name[3..].chars().all(|ch| ch.is_ascii_digit())
+}
+
+/// 协议切换时主机地址的对称迁移：进入串口时非设备名换成首个可用设备，
+/// 离开串口时清掉设备名，避免 COM1 之类残留成 SSH/RDP 地址。返回 None 表示不动。
+fn protocol_switch_host(
+    old_protocol: &str,
+    new_protocol: &str,
+    current_host: &str,
+    first_device: Option<String>,
+) -> Option<String> {
+    let host = current_host.trim();
+    if new_protocol == "Serial" {
+        if !is_serial_device_name(host) {
+            return Some(first_device.unwrap_or_default());
+        }
+    } else if old_protocol == "Serial" && is_serial_device_name(host) {
+        return Some(String::new());
+    }
+    None
 }
 
 fn number_bounds(field: EditField) -> Option<(u16, u16)> {
@@ -3331,5 +3353,37 @@ mod tests {
                 "COM4".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn protocol_switch_host_migrates_serial_residue() {
+        let dev = || Some("COM3".to_string());
+        // 离开串口：设备名残留清空；空值/非设备名不动
+        assert_eq!(
+            protocol_switch_host("Serial", "SSH", "COM1", None),
+            Some(String::new())
+        );
+        assert_eq!(
+            protocol_switch_host("Serial", "RDP", "/dev/cu.usbserial-X", None),
+            Some(String::new())
+        );
+        assert_eq!(protocol_switch_host("Serial", "SSH", "", None), None);
+        // 进入串口：空值或主机名残留换成首个设备；已是设备名则保留
+        assert_eq!(
+            protocol_switch_host("SSH", "Serial", "", dev()),
+            Some("COM3".to_string())
+        );
+        assert_eq!(
+            protocol_switch_host("SSH", "Serial", "myhost.example", dev()),
+            Some("COM3".to_string())
+        );
+        assert_eq!(protocol_switch_host("SSH", "Serial", "COM4", dev()), None);
+        // 无可用设备时进入串口清空残留主机名
+        assert_eq!(
+            protocol_switch_host("SSH", "Serial", "myhost", None),
+            Some(String::new())
+        );
+        // 非串口协议之间互切：即使主机名形似 COM 口也不动（只有离开串口才清）
+        assert_eq!(protocol_switch_host("SSH", "RDP", "com3", None), None);
     }
 }
