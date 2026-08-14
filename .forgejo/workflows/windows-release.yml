@@ -5,6 +5,8 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# 注意：run 脚本内的输出/报错一律用英文——act 写出的 .ps1 无 BOM，
+# Windows PowerShell 5.1 按 ANSI 读取，非 ASCII 字符串会乱码。
 jobs:
   build:
     runs-on: windows
@@ -25,7 +27,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $content = Get-Content -Raw -Path "nexshell/warp-compatibility.toml"
           if ($content -notmatch 'integration_mirror\s*=\s*"([0-9a-f]{40})"') {
-              Write-Error "无法从 warp-compatibility.toml 解析 integration_mirror（40 位 sha）"
+              Write-Error "failed to parse integration_mirror (40-hex sha) from warp-compatibility.toml"
               exit 1
           }
           $sha = $Matches[1]
@@ -37,6 +39,9 @@ jobs:
           WARP_URL: ${{ github.server_url }}/${{ github.repository_owner }}/warp-nexshell.git
           WARP_TOKEN: ${{ secrets.REPO_READ_TOKEN }}
           WARP_SHA: ${{ steps.warp_rev.outputs.sha }}
+          # LFS 大文件（*.pdb、input_classifier 模型）不参与 nexshell 构建，跳过下载；
+          # 本地 macOS 无 LFS、同样以指针文件构建，两边状态一致
+          GIT_LFS_SKIP_SMUDGE: "1"
         run: |
           $ErrorActionPreference = "Stop"
           $uri = [uri]$env:WARP_URL
@@ -45,34 +50,35 @@ jobs:
           if (Test-Path "warp/.git") {
               Set-Location warp
               git remote set-url origin $authUrl
-              if ($LASTEXITCODE -ne 0) { throw "git remote set-url 失败" }
+              if ($LASTEXITCODE -ne 0) { throw "git remote set-url failed" }
           } else {
               New-Item -ItemType Directory -Force -Path warp | Out-Null
               Set-Location warp
               git init
-              if ($LASTEXITCODE -ne 0) { throw "git init 失败" }
+              if ($LASTEXITCODE -ne 0) { throw "git init failed" }
               git remote add origin $authUrl
-              if ($LASTEXITCODE -ne 0) { throw "git remote add 失败" }
+              if ($LASTEXITCODE -ne 0) { throw "git remote add failed" }
           }
 
-          # 优先按钉住的 sha 浅拉取；仓库历史较浅或首次全量 clone 时会失败，回退全量 fetch
+          # Prefer shallow fetch of the pinned sha; fall back to a full fetch
           git fetch --depth 1 origin $env:WARP_SHA
           if ($LASTEXITCODE -ne 0) {
-              Write-Host "按 sha 浅拉取失败，回退全量 fetch"
+              Write-Host "shallow fetch by sha failed, falling back to full fetch"
               git fetch origin
-              if ($LASTEXITCODE -ne 0) { throw "git fetch（全量）失败" }
+              if ($LASTEXITCODE -ne 0) { throw "git fetch (full) failed" }
           }
 
-          git checkout --detach $env:WARP_SHA
-          if ($LASTEXITCODE -ne 0) { throw "git checkout $($env:WARP_SHA) 失败" }
+          # --force: recover from a previous partially-failed checkout in the persistent workspace
+          git checkout --force --detach $env:WARP_SHA
+          if ($LASTEXITCODE -ne 0) { throw "git checkout $($env:WARP_SHA) failed" }
 
       - name: 环境自检（cargo / protoc）
         run: |
           $ErrorActionPreference = "Stop"
           cargo --version
-          if ($LASTEXITCODE -ne 0) { throw "cargo 不可用，请检查 runner 的 PATH 配置" }
+          if ($LASTEXITCODE -ne 0) { throw "cargo not found; check runner service PATH" }
           protoc --version
-          if ($LASTEXITCODE -ne 0) { throw "protoc 不可用，请检查 runner 的 PATH 配置" }
+          if ($LASTEXITCODE -ne 0) { throw "protoc not found; check runner service PATH" }
 
       - name: 构建 Windows 可执行文件
         shell: cmd
@@ -91,7 +97,7 @@ jobs:
           }
           $zipName = "nexshell-windows-x86_64-$ver.zip"
           $exePath = "nexshell\target\release\nexshell.exe"
-          if (-not (Test-Path $exePath)) { throw "找不到构建产物：$exePath" }
+          if (-not (Test-Path $exePath)) { throw "build artifact not found: $exePath" }
           Compress-Archive -Path $exePath -DestinationPath $zipName -Force
 
           [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "zip_name=$zipName`n")
@@ -108,42 +114,42 @@ jobs:
           $ErrorActionPreference = "Stop"
           $authHeader = "Authorization: token $env:FORGEJO_TOKEN"
 
-          # 查已有 release：200 复用，404 新建，其它状态码视为失败
+          # Query existing release: 200 reuse, 404 create, anything else fails
           $getStatus = curl.exe -s -o release_get.json -w "%{http_code}" -H $authHeader "$env:API_BASE/releases/tags/$env:TAG_NAME"
-          if ($LASTEXITCODE -ne 0) { throw "查询 release 请求失败（网络错误）" }
+          if ($LASTEXITCODE -ne 0) { throw "release query request failed (network error)" }
 
           if ($getStatus -eq "200") {
               $release = Get-Content release_get.json -Raw | ConvertFrom-Json
               $releaseId = $release.id
-              Write-Host "复用已有 release id=$releaseId"
+              Write-Host "reusing existing release id=$releaseId"
           } elseif ($getStatus -eq "404") {
               $body = @{ tag_name = $env:TAG_NAME; name = $env:TAG_NAME } | ConvertTo-Json
-              # PS 5.1 的 Set-Content utf8 带 BOM，Forgejo 的 JSON 解析会拒收；WriteAllText 无 BOM
+              # Set-Content utf8 writes a BOM on PS 5.1 and Forgejo's JSON parser rejects it
               [System.IO.File]::WriteAllText("$PWD\release_body.json", $body)
               $createStatus = curl.exe -s -o release_create.json -w "%{http_code}" -X POST -H $authHeader -H "Content-Type: application/json" --data-binary "@release_body.json" "$env:API_BASE/releases"
-              if ($LASTEXITCODE -ne 0 -or $createStatus -ne "201") { throw "创建 release 失败，HTTP $createStatus" }
+              if ($LASTEXITCODE -ne 0 -or $createStatus -ne "201") { throw "create release failed, HTTP $createStatus" }
               $release = Get-Content release_create.json -Raw | ConvertFrom-Json
               $releaseId = $release.id
-              Write-Host "已创建 release id=$releaseId"
+              Write-Host "created release id=$releaseId"
           } else {
-              throw "查询 release 失败，HTTP $getStatus"
+              throw "query release failed, HTTP $getStatus"
           }
 
-          # 删除同名旧 asset，保证重跑幂等
+          # Delete stale asset with the same name so re-runs stay idempotent
           curl.exe -s -f -o assets.json -H $authHeader "$env:API_BASE/releases/$releaseId/assets"
-          if ($LASTEXITCODE -ne 0) { throw "查询 release assets 失败" }
+          if ($LASTEXITCODE -ne 0) { throw "list release assets failed" }
           $assets = Get-Content assets.json -Raw | ConvertFrom-Json
           foreach ($a in $assets) {
               if ($a.name -eq $env:ZIP_NAME) {
-                  Write-Host "删除同名旧 asset id=$($a.id)"
+                  Write-Host "deleting stale asset id=$($a.id)"
                   curl.exe -s -f -X DELETE -H $authHeader "$env:API_BASE/releases/$releaseId/assets/$($a.id)"
-                  if ($LASTEXITCODE -ne 0) { throw "删除旧 asset 失败" }
+                  if ($LASTEXITCODE -ne 0) { throw "delete stale asset failed" }
               }
           }
 
           curl.exe -s -f -H $authHeader -F "attachment=@$env:ZIP_NAME" "$env:API_BASE/releases/$releaseId/assets?name=$env:ZIP_NAME"
-          if ($LASTEXITCODE -ne 0) { throw "上传 asset 失败" }
-          Write-Host "发布完成：$env:ZIP_NAME"
+          if ($LASTEXITCODE -ne 0) { throw "upload asset failed" }
+          Write-Host "release uploaded: $env:ZIP_NAME"
 
       - name: 上传构建产物（仅手动触发）
         if: github.event_name == 'workflow_dispatch'

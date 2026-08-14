@@ -146,6 +146,12 @@ git push forgejo v1.2.3
 
 ## 6. 故障排查
 
+- **checkout warp 报 LFS smudge 404**：warp 仓用 LFS 追踪 `*.pdb` 和
+  `crates/input_classifier/models/**`，但这些文件不参与 nexshell 构建（input_classifier
+  不在依赖图里），且本地 macOS 无 LFS、一直以指针文件构建成功。workflow 已在 checkout warp
+  步骤设 `GIT_LFS_SKIP_SMUDGE=1` 跳过下载，不要往 Forgejo 补推 LFS 对象。
+- **run 日志里中文乱码**：act 写出的 .ps1 无 BOM，Windows PowerShell 5.1 按 ANSI 读取。
+  规矩：run 脚本内的输出/报错一律英文；step 名和 YAML 注释不受影响可用中文。
 - **checkout warp 时 `git fetch --depth 1 origin <sha>` 失败**：workflow 已自动回退到
   全量 `git fetch origin` 重试，不需要人工介入；首次全量 clone warp 仓库耗时较长属正常现象，
   之后 workspace 持久化，后续构建只需增量 fetch。
