@@ -11,7 +11,7 @@ use ironrdp_egfx::client::GraphicsPipelineClient;
 use ironrdp_egfx::pdu::GfxPdu;
 use ironrdp_graphics::zgfx::Decompressor;
 use ironrdp_pdu::codecs::rfx::progressive::{
-    decode_progressive_stream, ProgressiveBlock, ProgressiveTile,
+    decode_progressive_stream, ProgressiveBlock, ProgressiveTile, TILE_FLAG_DIFFERENCE,
 };
 use ironrdp_pdu::codecs::rfx::RfxRectangle;
 use ironrdp_pdu::decode_cursor;
@@ -299,7 +299,8 @@ where
     let (event_tx, event_rx) = async_channel::unbounded();
     let stats = Arc::new(RdpStats::new());
     let handler = EgfxHandler::new(framebuffer.clone(), event_tx, stats, 1, 1);
-    let mut client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder());
+    let mut client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder())
+        .with_builtin_compositing(false);
     let mut summary = WireReplaySummary::default();
     let frame_every = options.frame_every.max(1);
     let watch_points = options.watch_points.clone();
@@ -726,13 +727,19 @@ fn progressive_tiles_desc(tiles: &[ProgressiveTile<'_>]) -> String {
 
 fn progressive_tile_brief(tile: &ProgressiveTile<'_>) -> (&'static str, u16, u16, u8, bool) {
     match tile {
-        ProgressiveTile::Simple(tile) => ("S", tile.x_idx, tile.y_idx, 0xFF, tile.is_difference()),
+        ProgressiveTile::Simple(tile) => (
+            "S",
+            tile.x_idx,
+            tile.y_idx,
+            0xFF,
+            tile.flags & TILE_FLAG_DIFFERENCE != 0,
+        ),
         ProgressiveTile::First(tile) => (
             "F",
             tile.x_idx,
             tile.y_idx,
             tile.quality,
-            tile.is_difference(),
+            tile.flags & TILE_FLAG_DIFFERENCE != 0,
         ),
         ProgressiveTile::Upgrade(tile) => ("U", tile.x_idx, tile.y_idx, tile.quality, false),
     }

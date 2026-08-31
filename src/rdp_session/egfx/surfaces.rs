@@ -57,6 +57,9 @@ struct CachedBitmap {
 struct ProgressiveFramePaintState {
     frame_id: Option<u32>,
     updated_tiles: Vec<(u16, u16)>,
+    /// 帧内各 tile 最新重建像素（64x64 RGBA）。上游解码器不再暴露 tile 状态，
+    /// 后续 PDU 的 REGION 命中先前 tile 时从这里重绘。
+    tile_pixels: HashMap<(u16, u16), Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -188,6 +191,7 @@ impl Compositor {
         let paint_plan = progressive_paint_plan(&pdu.bitmap_data);
         let tiles = match self.progressive.decode_bitmap(
             pdu.surface_id,
+            pdu.codec_context_id,
             surface.width,
             surface.height,
             &pdu.bitmap_data,
@@ -205,8 +209,6 @@ impl Compositor {
                 return (Vec::new(), true);
             }
         };
-        drop(tiles);
-
         let frame_id = egfx_frame_id.unwrap_or_else(|| {
             self.fallback_progressive_frame_id = self.fallback_progressive_frame_id.wrapping_add(1);
             self.fallback_progressive_frame_id
@@ -215,6 +217,12 @@ impl Compositor {
         if frame.frame_id != Some(frame_id) {
             frame.frame_id = Some(frame_id);
             frame.updated_tiles.clear();
+            frame.tile_pixels.clear();
+        }
+        for tile in tiles {
+            frame
+                .tile_pixels
+                .insert((tile.x_idx, tile.y_idx), tile.pixels);
         }
         let mut pdu_tiles = Vec::new();
         for tile in paint_plan.updated_tiles {
@@ -245,18 +253,12 @@ impl Compositor {
             if !noclip && sub_rects.is_empty() {
                 continue;
             }
-            let Some(tile_state) = self
-                .progressive
-                .surface_tile(pdu.surface_id, tile_x, tile_y)
-                .filter(|tile| tile.pass > 0)
-            else {
+            let Some(pixels) = frame.tile_pixels.get(&(tile_x, tile_y)) else {
                 continue;
             };
             let tx = i32::from(tile_x) * 64;
             let ty = i32::from(tile_y) * 64;
-            let mut pixels = vec![0u8; 64 * 64 * 4];
-            tile_state.reconstruct_to_rgba(&mut pixels);
-            if trace && has_dark_vline(&pixels, 64, 64, 16) {
+            if trace && has_dark_vline(pixels, 64, 64, 16) {
                 eprintln!("[egfx] prog HASLINE tile=({tx},{ty})");
             }
             if noclip {
@@ -266,7 +268,7 @@ impl Compositor {
                     surface.height,
                     tx,
                     ty,
-                    &pixels,
+                    pixels,
                     64,
                     64,
                 ) {
@@ -290,7 +292,7 @@ impl Compositor {
                     surface.height,
                     tx + i32::from(sr.x),
                     ty + i32::from(sr.y),
-                    &pixels,
+                    pixels,
                     64,
                     (sr.x, sr.y, sr.w, sr.h),
                 ) {
