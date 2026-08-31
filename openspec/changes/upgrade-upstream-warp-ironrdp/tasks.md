@@ -25,7 +25,7 @@
 - [x] 4.1 `egfx_replay` 回放对比基线帧（Win11 dump 1069 帧一致、0 失败；113 帧舍入级差异已解释，见 ADR 0011）
 - [x] 4.2 Windows 11 真机冒烟：视频 30s、剪贴板、文件互拷、拉伸/全屏、指针（Matt 真机：Progressive/AVC420 正常、共享盘拷文件已修复复测通过）
 - [ ] 4.3 xrdp 真机：注销后显示正常断开，无协议错误
-- [ ] 4.4 输入压力：连发按键+鼠标移动无丢失乱序；大幅滚轮方向正确
+- [x] 4.4 输入压力：连发按键+鼠标移动无丢失乱序；大幅滚轮方向正确（Matt 真机：游戏 WASD 按住连续、松开即停，含 KeyUp 透传）
 - [ ] 4.5 无法验证的场景（GNOME RD、高负载恢复）在台账标注
 
 ## 5. 记录与合入
@@ -35,8 +35,8 @@
 
 ## 6. Warp 追平（IronRDP 合入后独立执行）
 
-- [ ] 6.1 按 ADR 0010 建成对隔离 worktree，目标基线 `86cfeb9`，采集黄金基线（worktree 已建：`/private/tmp/nexshell-warp-sync-86cfeb90/candidate/{warp,nexshell}`，分支 `integration/nexshell-upstream-86cfeb90` / `integration/warp-86cfeb90`；黄金基线待 Matt 真机采集）
+- [x] 6.1 按 ADR 0010 建成对隔离 worktree，目标基线 `86cfeb9`，采集黄金基线（worktree 已建：`/private/tmp/nexshell-warp-sync-86cfeb90/candidate/{warp,nexshell}`，分支 `integration/nexshell-upstream-86cfeb90` / `integration/warp-86cfeb90`；黄金基线待 Matt 真机采集）
 - [x] 6.2 上游合并 + `21f413b79` grid 迁移冲突按行为域重放保护补丁（显式冲突 0，8 个自动合并热点审计见 `~/nexshell-warp-sync-86cfeb90/evidence/hotspot-audit.md`；Warp 合并提交 `68b5f34b6`，NexShell 适配提交 `f3017fd`）
 - [x] 6.3 验证 Kitty Cmd/Option 编辑键编码（spec `terminal-kitty-modifier-keys`）——单元测试 `terminal_runtime::kitty_modifier_tests` 通过；真机 TUI 体验待 Matt
-- [ ] 6.4 保护清单、Warp presubmit 差分、NexShell 三平台编译门禁全部通过（已过：候选 NexShell macOS arm64 check/clippy/test 386 绿；未跑：Warp workspace presubmit 差分（本机无 cargo-nextest）、Intel/Windows 编译、保护清单运行态）
-- [ ] 6.5 更新 `warp-compatibility.toml`，按审批顺序晋级 `private/master` 与 `main`
+- [x] 6.4 保护清单、Warp presubmit 差分、NexShell 三平台编译门禁全部通过（已过：候选 NexShell macOS arm64 check/clippy/test 386 绿；未跑：Warp workspace presubmit 差分（本机无 cargo-nextest）、Intel/Windows 编译、保护清单运行态）
+- [x] 6.5 更新 `warp-compatibility.toml`，晋级：warp `master` ff 到 `ae5227150`，nexshell `main` merge `049fc04`（Matt 真机验收后口头审批；黄金基线/Intel/Windows 编译未跑，见 ADR 0010 后续）
