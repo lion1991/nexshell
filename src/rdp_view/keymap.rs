@@ -202,12 +202,37 @@ impl ModifierFlags {
 
 /// 修饰键持续对账器：记「已发 down 未发 up」的 8 键；本地 flags 显示某类未按而 tracker 记为按下时，
 /// 补发该键 release。左右无法从 flags 区分，故按类别（该类 flag=false 则左右都补）。
+/// 兼记普通键按下集合（KeyDown 发 press / KeyUp 发 release），失焦全量抬起时一并清空。
 #[derive(Default)]
 pub struct ModifierTracker {
     down: [bool; 8],
+    held: std::collections::HashSet<(u8, bool)>,
 }
 
 impl ModifierTracker {
+    /// 普通键按下记账；已在集合中返回 false（调用方不重复发 press）。
+    pub fn press_key(&mut self, scancode: u8, extended: bool) -> bool {
+        self.held.insert((scancode, extended))
+    }
+
+    /// 普通键抬起记账；返回是否原本在集合中。
+    pub fn release_key(&mut self, scancode: u8, extended: bool) -> bool {
+        self.held.remove(&(scancode, extended))
+    }
+
+    /// 取出全部仍按住的普通键的 release 事件并清空集合（失焦 / 切 tab）。
+    pub fn drain_held_keys(&mut self) -> Vec<RdpInputEvent> {
+        let mut keys: Vec<_> = self.held.drain().collect();
+        keys.sort_unstable();
+        keys.into_iter()
+            .map(|(scancode, extended)| RdpInputEvent::Key {
+                scancode,
+                extended,
+                pressed: false,
+            })
+            .collect()
+    }
+
     /// 记账一次修饰键的 down/up 发送。非修饰 scancode 静默忽略。
     pub fn on_sent(&mut self, scancode: u8, extended: bool, pressed: bool) {
         if let Some(i) = MOD_KEYS
@@ -239,6 +264,7 @@ impl ModifierTracker {
     /// 全量抬起（切 tab / 失焦）后清账，与 RootView 侧全量 release 同步复位。
     pub fn clear(&mut self) {
         self.down = [false; 8];
+        self.held.clear();
     }
 }
 
@@ -311,10 +337,24 @@ mod tests {
     fn clear_resets_all() {
         let mut t = ModifierTracker::default();
         t.on_sent(0x5B, EXT, true);
+        t.press_key(0x11, NORM);
         t.clear();
         assert!(t
             .reconcile(ModifierFlags::full(false, false, false, false))
             .is_empty());
+        assert!(t.drain_held_keys().is_empty());
+    }
+
+    #[test]
+    fn held_keys_press_release_drain() {
+        let mut t = ModifierTracker::default();
+        assert!(t.press_key(0x11, NORM)); // W
+        assert!(!t.press_key(0x11, NORM)); // 重复按下不再记
+        assert!(t.press_key(0x1E, NORM)); // A
+        assert!(t.release_key(0x1E, NORM));
+        assert!(!t.release_key(0x1E, NORM)); // 未按住
+        assert_eq!(t.drain_held_keys(), vec![key_up(0x11, NORM)]);
+        assert!(t.drain_held_keys().is_empty());
     }
 
     #[test]
