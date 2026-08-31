@@ -91,6 +91,20 @@ git push forgejo v1.2.3
 以上 PATH 变更都写**用户级** PATH（runner 以哪个用户跑就写谁的），改完必须重启 runner
 进程才生效——daemon 只在启动时读一次环境。
 
+**当前部署（2026-08-31 起）任务以 SYSTEM 账户跑**，看不到 matt 的用户级 PATH/rustup，
+所以环境统一钉在 `daemon.cmd` 开头（不依赖任何账户的 PATH）：
+
+```bat
+set "CARGO_HOME=C:\Users\matt\.cargo"
+set "RUSTUP_HOME=C:\Users\matt\.rustup"
+set "PATH=C:\Users\matt\.cargo\bin;C:\tools\protoc\bin;C:\tools\cmake\bin;C:\tools\nasm;%PATH%"
+```
+
+新增工具只改这一行，然后 `schtasks /end /tn \forgejo-runner` + `schtasks /run /tn \forgejo-runner`
+（SSH 以 matt 登录即为管理员令牌，不用输密码）。nexshell 的 `rust-toolchain.toml` 钉了
+rustc 版本，rustup 会在首个 cargo 调用时自动装到上面的 `RUSTUP_HOME`；想省 CI 时间可提前
+`rustup toolchain install <版本> --profile minimal -c rustfmt -c clippy`。
+
 ### 安装 forgejo-runner
 
 1. 从 Forgejo 官方 release 下载 `forgejo-runner-*-windows-amd64.exe`。
