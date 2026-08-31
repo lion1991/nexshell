@@ -8,17 +8,17 @@
 ## 2. IronRDP fork 补丁甄别
 
 - [x] 2.1 对 21 个自有提交逐条 patch-id/源码对比上游，形成"保留 / 已等价退役"台账
-- [ ] 2.2 cherry-pick 保留补丁到 `nexshell-2026-08`，冲突按上游新结构改写
-- [ ] 2.3 评估 `patches/*.patch` 两个外置补丁：并入分支或删除
-- [ ] 2.4 fork 分支 `cargo check -p` 涉及 crate + 上游测试套件通过，推送到 `lion1991/IronRDP`
+- [x] 2.2 cherry-pick 保留补丁到 `nexshell-2026-08`，冲突按上游新结构改写
+- [x] 2.3 评估 `patches/*.patch` 两个外置补丁：并入分支或删除
+- [x] 2.4 fork 分支 `cargo check -p` 涉及 crate + 上游测试套件通过，推送到 `lion1991/IronRDP`
 
 ## 3. NexShell 适配
 
 - [x] 3.1 `Cargo.toml` `[patch.crates-io]` 钉新 rev，版本号按上游 workspace 对齐
-- [ ] 3.2 修复编译错误：connector/session 拆分、DVC typed accessor、tls 显式证书校验、bulk 解压、`Sequence::step` 时间戳
+- [x] 3.2 修复编译错误：connector/session 拆分、DVC typed accessor、tls 显式证书校验、bulk 解压、`Sequence::step` 时间戳
 - [x] 3.3 决定 EGFX 合成路径（自有合成 vs 上游 `#1461`），保持 VideoToolbox 硬解
 - [x] 3.4 剪贴板回环：评估用上游 `#1739` 替换 `clipboard.rs` 的 hash 方案
-- [ ] 3.5 `cargo clippy --all-targets` / `cargo test` / `examples` 全部通过
+- [x] 3.5 `cargo clippy --all-targets` / `cargo test` / `examples` 全部通过
 
 ## 4. RDP 验收
 
