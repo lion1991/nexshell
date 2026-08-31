@@ -565,6 +565,8 @@ async fn run_rdp_event_loop(
         Ok(()) => "session ended".to_string(),
         Err(error) => error,
     };
+    // 断开原因同时打到 stderr，便于命令行复现时与 IronRDP tracing 日志对齐时间线。
+    eprintln!("[rdp] disconnected: {reason}");
     let _ = event_tx.try_send(RdpEvent::Disconnected { reason });
 }
 
@@ -1150,6 +1152,7 @@ async fn drain_outputs<W: FramedWrite>(
                 }
             }
             ActiveStageOutput::Terminate(reason) => {
+                eprintln!("[rdp] server terminated session: {reason}");
                 let _ = event_tx.try_send(RdpEvent::Disconnected {
                     reason: format!("terminated: {reason}"),
                 });
