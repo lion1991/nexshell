@@ -1,4 +1,4 @@
-use ironrdp_dvc::{DrdynvcClient, DvcChannelListener, DvcProcessor, DynamicChannelId};
+use ironrdp_dvc::{DrdynvcClient, DvcChannelListener, DvcClientProcessor, DynamicChannelId};
 use ironrdp_rdpsnd::client::Rdpsnd;
 use ironrdp_svc::StaticChannelSet;
 
@@ -81,7 +81,7 @@ impl DvcChannelListener for AudioPlaybackDvcProbe {
         self.name
     }
 
-    fn create(&mut self, channel_id: DynamicChannelId) -> Option<Box<dyn DvcProcessor>> {
+    fn create(&mut self, channel_id: DynamicChannelId) -> Option<Box<dyn DvcClientProcessor>> {
         eprintln!(
             "[rdp-audio] server requested unsupported audio DVC '{}' channel_id={channel_id}; nexshell currently only implements legacy RDPSND",
             self.name

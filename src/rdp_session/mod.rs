@@ -43,7 +43,7 @@ use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::input::fast_path::FastPathInputEvent;
 use ironrdp_pdu::rdp::capability_sets::BitmapCodecs;
 use ironrdp_session::image::DecodedImage;
-use ironrdp_session::{fast_path, ActiveStage, ActiveStageOutput};
+use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use parking_lot::Mutex;
 use tokio::net::TcpStream;
 
@@ -469,7 +469,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         domain,
         enable_tls: true,
         enable_credssp: true,
-        keyboard_type: ironrdp_pdu::gcc::KeyboardType::IbmEnhanced,
+        keyboard_type: ironrdp_pdu::gcc::KeyboardType::IBM_ENHANCED,
         keyboard_subtype: 0,
         keyboard_layout: 0,
         keyboard_functional_keys_count: 12,
@@ -512,6 +512,13 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         // EGFX 早期能力标志（fork patch，docs/adr/0008）：只在门控开时广告，
         // 让服务端可协商 Microsoft::Windows::RDS::Graphics 通道。
         support_dyn_vc_gfx_protocol: config.enable_egfx,
+        // 上游 2026-08 新增字段，全取与旧行为等价的默认：LAN、不开标准 RDP 安全、无音频采集、无 RAIL。
+        connection_type: ironrdp_pdu::gcc::ConnectionType::Lan,
+        enable_standard_rdp_security: false,
+        enable_audio_capture: false,
+        monitor_layout: None,
+        remote_application_mode: false,
+        rail_support_level: ironrdp_pdu::rdp::capability_sets::RailSupportLevel::empty(),
     }
 }
 
@@ -681,7 +688,20 @@ async fn connect_and_run(
         }
     }
     let mut image = DecodedImage::new(PixelFormat::RgbA32, desktop.width, desktop.height);
-    let mut active_stage = ActiveStage::new(connection_result);
+    // 重激活序列工厂（上游 session 已与 connector 解耦，DeactivateAll 后由应用自建序列）。
+    let activation_factory = connection_result.activation_factory;
+    let mut active_stage = ActiveStageBuilder {
+        static_channels: connection_result.static_channels,
+        user_channel_id: connection_result.user_channel_id,
+        io_channel_id: connection_result.io_channel_id,
+        message_channel_id: connection_result.message_channel_id,
+        share_id: connection_result.share_id,
+        compression_type: connection_result.compression_type,
+        enable_server_pointer: connection_result.enable_server_pointer,
+        pointer_software_rendering: connection_result.pointer_software_rendering,
+    }
+    .build();
+    active_stage.set_window_support_level(connection_result.window_support_level);
     let _ = event_tx.try_send(RdpEvent::Connected);
     // Mac 剪贴板轮询挪出帧循环：独立 OS 线程 1s tick 同步读 NSPasteboard，有变化经 channel 回递。
     // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程 ~1s 内自退。
@@ -771,7 +791,7 @@ async fn connect_and_run(
                     .process_fastpath_input(&mut image, &events)
                     .map_err(|e| format!("encode input failed: {e}"))?;
                 // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
-                let mut reactivate = None;
+                let mut reactivate = false;
                 if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key, &mut reactivate).await? {
                     return Ok(());
                 }
@@ -836,7 +856,7 @@ async fn connect_and_run(
         }
 
         // 本轮捕获的 Deactivation-Reactivation 序列（服务端换分辨率的兜底路径，见 drain_outputs）。
-        let mut pending_reactivation: Option<Box<ConnectionActivationSequence>> = None;
+        let mut pending_reactivation = false;
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
@@ -854,7 +874,8 @@ async fn connect_and_run(
         {
             return Ok(());
         }
-        if let Some(seq) = pending_reactivation.take() {
+        if std::mem::take(&mut pending_reactivation) {
+            let seq = activation_factory.create();
             let (nw, nh) =
                 run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image).await?;
             reset_after_resize(framebuffer, nw, nh, event_tx);
@@ -905,7 +926,7 @@ async fn connect_and_run(
                         {
                             return Ok(());
                         }
-                        if pending_reactivation.is_some() {
+                        if pending_reactivation {
                             break; // 收到 DeactivateAll：跳出 drain，下方走重激活。
                         }
                         drained += 1;
@@ -920,7 +941,8 @@ async fn connect_and_run(
                     }
                 }
             }
-            if let Some(seq) = pending_reactivation.take() {
+            if std::mem::take(&mut pending_reactivation) {
+                let seq = activation_factory.create();
                 let (nw, nh) =
                     run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image)
                         .await?;
@@ -944,7 +966,7 @@ async fn connect_and_run(
 async fn run_reactivation<S>(
     framed: &mut ironrdp_tokio::TokioFramed<S>,
     active_stage: &mut ActiveStage,
-    mut sequence: Box<ConnectionActivationSequence>,
+    mut sequence: ConnectionActivationSequence,
     image: &mut DecodedImage,
 ) -> Result<(u16, u16), String>
 where
@@ -952,7 +974,7 @@ where
 {
     let mut buf = WriteBuf::new();
     loop {
-        let written = ironrdp_tokio::single_sequence_step_read(framed, &mut *sequence, &mut buf)
+        let written = ironrdp_tokio::single_sequence_step_read(framed, &mut sequence, &mut buf)
             .await
             .map_err(|e| format!("reactivation step read failed: {e}"))?;
         if written.size().is_some() {
@@ -962,29 +984,29 @@ where
                 .map_err(|e| format!("reactivation step write failed: {e}"))?;
         }
         if let ConnectionActivationState::Finalized {
-            io_channel_id,
-            user_channel_id,
             desktop_size,
             share_id,
             enable_server_pointer,
             pointer_software_rendering,
+            static_channel_chunk_size,
+            window_support_level,
+            ..
         } = sequence.connection_activation_state()
         {
             *image =
                 DecodedImage::new(PixelFormat::RgbA32, desktop_size.width, desktop_size.height);
-            active_stage.set_fastpath_processor(
-                fast_path::ProcessorBuilder {
-                    io_channel_id,
-                    user_channel_id,
-                    share_id,
-                    enable_server_pointer,
-                    pointer_software_rendering,
-                    bulk_decompressor: None,
-                }
-                .build(),
-            );
-            active_stage.set_share_id(share_id);
-            active_stage.set_enable_server_pointer(enable_server_pointer);
+            // 照 ironrdp-client：一次性复位 fastpath processor / share_id / 指针 / 静态通道分块。
+            if !active_stage.reactivate(
+                sequence.io_channel_id(),
+                sequence.user_channel_id(),
+                share_id,
+                enable_server_pointer,
+                pointer_software_rendering,
+                static_channel_chunk_size,
+            ) {
+                return Err("reactivation: invalid static channel chunk size".to_string());
+            }
+            active_stage.set_window_support_level(window_support_level);
             return Ok((desktop_size.width, desktop_size.height));
         }
     }
@@ -1082,7 +1104,7 @@ async fn drain_outputs<W: FramedWrite>(
     desktop_h: u16,
     event_tx: &async_channel::Sender<RdpEvent>,
     last_pointer_key: &mut Option<u64>,
-    reactivation: &mut Option<Box<ConnectionActivationSequence>>,
+    reactivation: &mut bool,
 ) -> Result<bool, String> {
     for out in outputs {
         match out {
@@ -1134,8 +1156,8 @@ async fn drain_outputs<W: FramedWrite>(
                 return Ok(true);
             }
             // 动态分辨率兜底：服务端以重激活换分辨率时回传序列，交主循环 run_reactivation 走完。
-            ActiveStageOutput::DeactivateAll(sequence) => {
-                *reactivation = Some(sequence);
+            ActiveStageOutput::DeactivateAll => {
+                *reactivation = true;
             }
             // PointerPosition（本地光标本就跟手）等忽略。
             _ => {}
