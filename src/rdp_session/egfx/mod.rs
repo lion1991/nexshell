@@ -71,7 +71,9 @@ pub fn build_dvc_client(
     desktop_height: u16,
 ) -> DrdynvcClient {
     let handler = EgfxHandler::new(framebuffer, event_tx, stats, desktop_width, desktop_height);
-    let client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder());
+    // 关闭库内 Progressive 解码与合成器（上游 #1443/#1461）：解码/合成全在本模块，避免双份工作。
+    let client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder())
+        .with_builtin_compositing(false);
     // 同挂 Display Control（MS-RDPEDISP）：caps 回调只标记 ready、不主动回消息，
     // 动态分辨率由主循环经 encode_resize 发 MonitorLayout。
     let client = DrdynvcClient::new()
