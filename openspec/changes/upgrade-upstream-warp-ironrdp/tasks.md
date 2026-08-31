@@ -23,15 +23,15 @@
 ## 4. RDP 验收
 
 - [x] 4.1 `egfx_replay` 回放对比基线帧（Win11 dump 1069 帧一致、0 失败；113 帧舍入级差异已解释，见 ADR 0011）
-- [ ] 4.2 Windows 11 真机冒烟：视频 30s、剪贴板、文件互拷、拉伸/全屏、指针
+- [x] 4.2 Windows 11 真机冒烟：视频 30s、剪贴板、文件互拷、拉伸/全屏、指针（Matt 真机：Progressive/AVC420 正常、共享盘拷文件已修复复测通过）
 - [ ] 4.3 xrdp 真机：注销后显示正常断开，无协议错误
 - [ ] 4.4 输入压力：连发按键+鼠标移动无丢失乱序；大幅滚轮方向正确
 - [ ] 4.5 无法验证的场景（GNOME RD、高负载恢复）在台账标注
 
 ## 5. 记录与合入
 
-- [ ] 5.1 写 `docs/adr/0011-ironrdp-upstream-rebase-2026-08.md`（基线、补丁台账、验收证据）
-- [ ] 5.2 合入 `main`（普通 merge，可 revert），保留 `egfx-fixes` 与旧 rev 作回退
+- [x] 5.1 写 `docs/adr/0011-ironrdp-upstream-rebase-2026-08.md`（基线、补丁台账、验收证据）
+- [x] 5.2 合入 `main`（merge c5e0e01，可 revert），保留 `egfx-fixes` 与旧 rev 作回退
 
 ## 6. Warp 追平（IronRDP 合入后独立执行）
 
