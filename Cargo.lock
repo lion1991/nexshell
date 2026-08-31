@@ -6099,7 +6099,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nexshell"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "alacritty_terminal",
