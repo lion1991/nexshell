@@ -40,7 +40,7 @@ fork `lion1991/IronRDP@egfx-fixes`（`f120928`，合并基 Devolutions `069786c`
 ## 基线
 
 - IronRDP：fork rev `bdeabf2bc9636767b046c28f8a5988a575fcb05a`（分支 `nexshell-2026-08`），上游合并基 `872845c`。
-- 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧）新旧解码器帧数一致、0 次解码失败；113 帧 hash 不同，像素级最大差 3、平均约 1，局限于 Progressive 精化小块，来源为上游 #1499 量化域变更（舍入差异）。
+- 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧）新旧解码器帧数一致、0 次解码失败；113 帧 hash 不同（全部在前 134 帧，之后逐帧一致）：小块精化帧最大差 3、平均约 1；全屏 Progressive 刷新帧 59 万像素差 1–2、>4 的不足 300 个、>10 的仅 1 个边缘像素（最大 22），裁图目视无差别。来源为上游 #1499 量化域变更（舍入差异）。
 - 验收证据：见 openspec change `upgrade-upstream-warp-ironrdp` tasks 第 4 节。
 
 ## 回退
