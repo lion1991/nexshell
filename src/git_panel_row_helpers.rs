@@ -406,7 +406,7 @@ pub(crate) fn build_git_panel_entry_row(
         .finish();
 
     let row = EventHandler::new(row)
-        .on_right_mouse_down(move |ctx, _app, position| {
+        .on_right_mouse_down(move |ctx, _app, position, _modifiers| {
             ctx.dispatch_typed_action(TerminalGridAction::GitPanelShowContextMenu {
                 tab_id: tab_id.clone(),
                 path: path_for_ctx.clone(),

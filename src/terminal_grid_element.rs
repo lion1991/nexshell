@@ -2992,6 +2992,7 @@ impl Element for TerminalGridElement {
                 chars,
                 details,
                 is_composing,
+                ..
             } if !self.is_focused_pane => {
                 terminal_debug_key_log(format_args!(
                     "ignored unfocused pane={:?} key={:?} chars=\"{}\" key_without_modifiers={:?} mods(cmd={}, ctrl={}, alt={}, shift={}) composing={}",
@@ -3020,6 +3021,7 @@ impl Element for TerminalGridElement {
                 chars,
                 details,
                 is_composing,
+                ..
             } => {
                 terminal_debug_key_log(format_args!(
                     "keydown pane={:?} key={:?} chars=\"{}\" key_without_modifiers={:?} mods(cmd={}, ctrl={}, alt={}, shift={}) composing={} modes={:?}",

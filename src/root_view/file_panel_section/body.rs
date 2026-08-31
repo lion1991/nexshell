@@ -185,7 +185,7 @@ impl RootView {
         .with_overlayed_scrollbar()
         .finish();
         let with_blank_ctx = EventHandler::new(scrollable)
-            .on_right_mouse_down(|ctx, _app, position| {
+            .on_right_mouse_down(|ctx, _app, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
                     name: None,
                     is_dir: false,
@@ -382,7 +382,7 @@ impl RootView {
             });
         }
         EventHandler::new(hover.finish())
-            .on_right_mouse_down(move |ctx, _app, position| {
+            .on_right_mouse_down(move |ctx, _app, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
                     name: Some(path_for_ctx.clone()),
                     is_dir,
@@ -445,7 +445,7 @@ impl RootView {
         .finish();
         // 空白区域右键 → 不带 name 的 context menu（entry 自己 StopPropagation，不会冒泡到这里）
         let with_blank_ctx = EventHandler::new(scrollable)
-            .on_right_mouse_down(|ctx, _app, position| {
+            .on_right_mouse_down(|ctx, _app, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
                     name: None,
                     is_dir: false,
@@ -726,7 +726,7 @@ impl RootView {
         }
         let name_for_ctx = entry.name.clone();
         EventHandler::new(hover.finish())
-            .on_right_mouse_down(move |ctx, _app, position| {
+            .on_right_mouse_down(move |ctx, _app, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
                     name: Some(name_for_ctx.clone()),
                     is_dir,

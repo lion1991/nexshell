@@ -336,7 +336,7 @@ impl RootView {
         self.rdp_hotkey_guard.borrow_mut().set_engaged(desired);
     }
 
-    /// 切走/关闭某 tab 前，若它是 RDP tab 则抬起全部远端修饰键，防卡键（尤其 Win 键）。
+    /// 切走/关闭某 tab 前，若它是 RDP tab 则抬起全部远端修饰键与仍按住的普通键，防卡键（尤其 Win 键）。
     /// 非 RDP tab 或已断开静默跳过（try_send 满/断开也丢弃不阻塞）。
     pub(in crate::root_view) fn release_rdp_modifiers(&self, index: usize) {
         let Some(rdp) = self.terminal_tabs.get(index).and_then(|t| t.rdp.as_ref()) else {
@@ -347,6 +347,9 @@ impl RootView {
         }
         // 全量抬起后清账，tracker 与远端复位同步（避免残留状态误判后续对账）。
         if let Ok(mut tracker) = rdp.mod_tracker.lock() {
+            for event in tracker.drain_held_keys() {
+                let _ = rdp.handle.input_tx.try_send(event);
+            }
             tracker.clear();
         }
     }

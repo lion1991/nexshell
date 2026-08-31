@@ -13,8 +13,9 @@ use warpui_core::assets::asset_cache::{AssetCache, AssetSource, AssetState};
 use warpui_core::elements::{
     AfterLayoutContext, CornerRadius, Element, EventContext, LayoutContext, Point, SizeConstraint,
 };
-use warpui_core::event::{DispatchedEvent, Event, KeyState};
+use warpui_core::event::{DispatchedEvent, Event, KeyEventDetails, KeyState};
 use warpui_core::image_cache::{AnimatedImageBehavior, CacheOption, FitType, Image, ImageCache};
+use warpui_core::keymap::Keystroke;
 use warpui_core::{AppContext, PaintContext, SingletonEntity};
 
 use crate::rdp_view::geometry::{letterbox_rect, viewport_device_coords, RdpViewport};
@@ -163,6 +164,97 @@ impl RdpPageElement {
         }
         handled
     }
+
+    /// 普通键 KeyDown：只发 press 并记入按住集合；OS 自动重复（is_repeat）不发，远端自己 typematic。
+    /// 未映射 / 输入法合成中返回 false 让事件冒泡。
+    fn handle_key_down(
+        &self,
+        keystroke: &Keystroke,
+        details: &KeyEventDetails,
+        is_composing: bool,
+        is_repeat: bool,
+    ) -> bool {
+        if is_composing {
+            if key_trace() {
+                eprintln!(
+                    "[nexshell key-debug] page KeyDown key={:?} is_composing=true → 跳过",
+                    keystroke.key
+                );
+            }
+            return false;
+        }
+        // keystroke 自带完整修饰键 flags，借普通键按下对账补发丢失的 keyup。
+        self.reconcile_modifiers(keymap::ModifierFlags::full(
+            keystroke.shift,
+            keystroke.ctrl,
+            keystroke.alt,
+            keystroke.cmd,
+        ));
+        let Some((scancode, extended)) = key_scancode(keystroke, details) else {
+            if key_trace() {
+                eprintln!(
+                    "[nexshell key-debug] page KeyDown key={:?} kwm={:?} scancode=miss → 不消费",
+                    keystroke.key, details.key_without_modifiers
+                );
+            }
+            return false;
+        };
+        if is_repeat {
+            return true;
+        }
+        let first = self
+            .mod_tracker
+            .lock()
+            .map(|mut t| t.press_key(scancode, extended))
+            .unwrap_or(true);
+        let sent = first
+            && self.send(RdpInputEvent::Key {
+                scancode,
+                extended,
+                pressed: true,
+            });
+        if key_trace() {
+            eprintln!(
+                "[nexshell key-debug] page KeyDown key={:?} scancode=0x{:02X} ext={} first={} try_send={}",
+                keystroke.key, scancode, extended, first, sent
+            );
+        }
+        true
+    }
+
+    /// 普通键 KeyUp：发 release 并移出按住集合；不在集合也发一次（保险），不重复。
+    fn handle_key_up(&self, keystroke: &Keystroke, details: &KeyEventDetails) -> bool {
+        let Some((scancode, extended)) = key_scancode(keystroke, details) else {
+            return false;
+        };
+        let tracked = self
+            .mod_tracker
+            .lock()
+            .map(|mut t| t.release_key(scancode, extended))
+            .unwrap_or(false);
+        let sent = self.send(RdpInputEvent::Key {
+            scancode,
+            extended,
+            pressed: false,
+        });
+        if key_trace() {
+            eprintln!(
+                "[nexshell key-debug] page KeyUp key={:?} scancode=0x{:02X} ext={} tracked={} try_send={}",
+                keystroke.key, scancode, extended, tracked, sent
+            );
+        }
+        true
+    }
+}
+
+/// 普通键无硬件 keycode：key_without_modifiers（基础字符）优先查表，退回归一化 key
+/// （覆盖 enter/方向等特殊键名）。KeyDown / KeyUp 共用同一降级路径保证成对。
+fn key_scancode(keystroke: &Keystroke, details: &KeyEventDetails) -> Option<(u8, bool)> {
+    details
+        .key_without_modifiers
+        .as_deref()
+        .and_then(|k| keymap::scancode_for_key(&k.to_lowercase()))
+        .or_else(|| keymap::scancode_for_key(&keystroke.key.to_lowercase()))
 }
 
 /// 诊断（NEXSHELL_RDP_INPUT_LOG=<file>）：把去重后实发的 MouseMove 逐条追加落盘，
@@ -275,62 +367,15 @@ impl Element for RdpPageElement {
         _: &AppContext,
     ) -> bool {
         match event.raw_event() {
-            // 普通键：无硬件 keycode，用 key_without_modifiers（基础字符）优先查表，
-            // 退回归一化 key（覆盖 enter/方向等特殊键名）。warpui 不给 keyup，按下即发 down+up。
+            // 普通键：KeyDown 只发 press（自动重复不发，远端自己 typematic），KeyUp 发 release。
             Event::KeyDown {
                 keystroke,
                 details,
                 is_composing,
+                is_repeat,
                 ..
-            } => {
-                if *is_composing {
-                    if key_trace() {
-                        eprintln!(
-                            "[nexshell key-debug] page KeyDown key={:?} is_composing=true → 跳过",
-                            keystroke.key
-                        );
-                    }
-                    return false;
-                }
-                // keystroke 自带完整修饰键 flags，借普通键按下对账补发丢失的 keyup。
-                self.reconcile_modifiers(keymap::ModifierFlags::full(
-                    keystroke.shift,
-                    keystroke.ctrl,
-                    keystroke.alt,
-                    keystroke.cmd,
-                ));
-                let scancode = details
-                    .key_without_modifiers
-                    .as_deref()
-                    .and_then(|k| keymap::scancode_for_key(&k.to_lowercase()))
-                    .or_else(|| keymap::scancode_for_key(&keystroke.key.to_lowercase()));
-                let Some((scancode, extended)) = scancode else {
-                    if key_trace() {
-                        eprintln!(
-                            "[nexshell key-debug] page KeyDown key={:?} kwm={:?} scancode=miss → 不消费",
-                            keystroke.key, details.key_without_modifiers
-                        );
-                    }
-                    return false;
-                };
-                let sent = self.send(RdpInputEvent::Key {
-                    scancode,
-                    extended,
-                    pressed: true,
-                });
-                self.send(RdpInputEvent::Key {
-                    scancode,
-                    extended,
-                    pressed: false,
-                });
-                if key_trace() {
-                    eprintln!(
-                        "[nexshell key-debug] page KeyDown key={:?} scancode=0x{:02X} ext={} try_send={}",
-                        keystroke.key, scancode, extended, sent
-                    );
-                }
-                true
-            }
+            } => self.handle_key_down(keystroke, details, *is_composing, *is_repeat),
+            Event::KeyUp { keystroke, details } => self.handle_key_up(keystroke, details),
             // 修饰键：携带物理 KeyCode + 按下/抬起，维持远端修饰键状态。
             Event::ModifierKeyChanged { key_code, state } => {
                 let Some((scancode, extended)) = keymap::scancode_for_modifier(*key_code) else {
@@ -464,4 +509,105 @@ fn mods_flags(m: warpui_core::event::ModifiersState) -> keymap::ModifierFlags {
 fn key_trace() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("NEXSHELL_DEBUG_KEYS").is_ok_and(|v| v == "1"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn element() -> (RdpPageElement, async_channel::Receiver<RdpInputEvent>) {
+        let (tx, rx) = async_channel::bounded(16);
+        let el = RdpPageElement::new(
+            "rdp:test".into(),
+            Vector2I::new(800, 600),
+            ColorU::new(0, 0, 0, 255),
+            Arc::new(Mutex::new(None)),
+            tx,
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(keymap::ModifierTracker::default())),
+            warpui_core::platform::Cursor::Arrow,
+        );
+        (el, rx)
+    }
+
+    fn drain(rx: &async_channel::Receiver<RdpInputEvent>) -> Vec<RdpInputEvent> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    fn key(pressed: bool) -> RdpInputEvent {
+        RdpInputEvent::Key {
+            scancode: 0x11, // W
+            extended: false,
+            pressed,
+        }
+    }
+
+    fn w() -> (Keystroke, KeyEventDetails) {
+        let ks = Keystroke {
+            key: "w".into(),
+            ..Default::default()
+        };
+        let details = KeyEventDetails {
+            key_without_modifiers: Some("w".into()),
+            ..Default::default()
+        };
+        (ks, details)
+    }
+
+    #[test]
+    fn key_down_sends_press_only() {
+        let (el, rx) = element();
+        let (ks, d) = w();
+        assert!(el.handle_key_down(&ks, &d, false, false));
+        assert_eq!(drain(&rx), vec![key(true)]);
+    }
+
+    #[test]
+    fn repeat_key_down_sends_nothing() {
+        let (el, rx) = element();
+        let (ks, d) = w();
+        el.handle_key_down(&ks, &d, false, false);
+        drain(&rx);
+        assert!(el.handle_key_down(&ks, &d, false, true));
+        assert!(drain(&rx).is_empty());
+    }
+
+    #[test]
+    fn key_up_sends_release_and_untracks() {
+        let (el, rx) = element();
+        let (ks, d) = w();
+        el.handle_key_down(&ks, &d, false, false);
+        assert!(el.handle_key_up(&ks, &d));
+        assert_eq!(drain(&rx), vec![key(true), key(false)]);
+        // 未按住也发一次 release（保险），集合已空。
+        assert!(el.handle_key_up(&ks, &d));
+        assert_eq!(drain(&rx), vec![key(false)]);
+        assert!(el.mod_tracker.lock().unwrap().drain_held_keys().is_empty());
+    }
+
+    #[test]
+    fn composing_and_unmapped_bubble() {
+        let (el, rx) = element();
+        let (ks, d) = w();
+        assert!(!el.handle_key_down(&ks, &d, true, false));
+        let unknown = Keystroke {
+            key: "f24".into(),
+            ..Default::default()
+        };
+        assert!(!el.handle_key_down(&unknown, &KeyEventDetails::default(), false, false));
+        assert!(!el.handle_key_up(&unknown, &KeyEventDetails::default()));
+        assert!(drain(&rx).is_empty());
+    }
+
+    #[test]
+    fn release_all_drains_held_keys() {
+        let (el, rx) = element();
+        let (ks, d) = w();
+        el.handle_key_down(&ks, &d, false, false);
+        drain(&rx);
+        let mut tracker = el.mod_tracker.lock().unwrap();
+        assert_eq!(tracker.drain_held_keys(), vec![key(false)]);
+        tracker.clear();
+        assert!(tracker.drain_held_keys().is_empty());
+    }
 }

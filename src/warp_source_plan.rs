@@ -7,11 +7,11 @@ pub struct WarpSource {
 pub fn first_pass_sources() -> &'static [WarpSource] {
     &[
         WarpSource {
-            path: "../warp/app/src/terminal/local_tty/event_loop.rs",
+            path: "../warp/crates/warp_terminal/src/local_tty/event_loop.rs",
             use_for: "PTY read/write batching, lock fairness, resize/input channel draining",
         },
         WarpSource {
-            path: "../warp/app/src/terminal/model/ansi/mod.rs",
+            path: "../warp/crates/warp_terminal/src/model/ansi/mod.rs",
             use_for: "parser orchestration and ref-testable byte processing boundaries",
         },
         WarpSource {
@@ -23,7 +23,7 @@ pub fn first_pass_sources() -> &'static [WarpSource] {
             use_for: "compact cell layout, zero-width grapheme limits, attribute flags",
         },
         WarpSource {
-            path: "../warp/app/src/terminal/model/grid/resize.rs",
+            path: "../warp/crates/warp_terminal/src/model/grid/resize.rs",
             use_for: "resize and reflow behavior using flat storage",
         },
         WarpSource {
