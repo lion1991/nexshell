@@ -274,7 +274,7 @@ impl RootView {
         let args_for_menu = process.args.clone();
         let exe_for_menu = process.exe_path.clone().unwrap_or_default();
         EventHandler::new(row)
-            .on_right_mouse_down(move |ctx, _, position| {
+            .on_right_mouse_down(move |ctx, _, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::ProcessListShowContextMenu {
                     pid,
                     command: cmd_for_menu.clone(),
@@ -553,7 +553,7 @@ impl RootView {
         let args_for_menu = process.args.clone();
         let exe_for_menu = process.exe_path.clone().unwrap_or_default();
         let row_with_ctx = EventHandler::new(row)
-            .on_right_mouse_down(move |ctx, _, position| {
+            .on_right_mouse_down(move |ctx, _, position, _modifiers| {
                 ctx.dispatch_typed_action(TerminalGridAction::ProcessListShowContextMenu {
                     pid,
                     command: cmd_for_menu.clone(),

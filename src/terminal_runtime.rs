@@ -5386,3 +5386,47 @@ mod tests {
         assert_eq!(state.local_cwd, Some(PathBuf::from("/var")));
     }
 }
+
+/// Kitty 键盘协议下 Option 修饰的编辑键编码（openspec `terminal-kitty-modifier-keys`，
+/// 上游 warp af2f7c61d）。协议未激活时保持 legacy 序列不变。
+#[cfg(all(test, feature = "warpui-app"))]
+mod kitty_modifier_tests {
+    use super::*;
+
+    fn disambiguate() -> TerminalInputModes {
+        TerminalInputModes {
+            keyboard_disambiguate_escape: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn option_editing_keys_carry_alt_modifier_under_kitty() {
+        for (key, expect) in [
+            ("left", &b"\x1b[1;3D"[..]),
+            ("right", b"\x1b[1;3C"),
+            ("home", b"\x1b[1;3H"),
+            ("end", b"\x1b[1;3F"),
+            ("delete", b"\x1b[3;3~"),
+            ("backspace", b"\x1b[127;3u"),
+        ] {
+            let got =
+                warp_escape_sequence_for_key(key, None, None, false, true, false, disambiguate());
+            assert_eq!(got.as_deref(), Some(expect), "alt-{key}");
+        }
+    }
+
+    #[test]
+    fn option_left_without_kitty_keeps_legacy_sequence() {
+        let got = warp_escape_sequence_for_key(
+            "left",
+            None,
+            None,
+            false,
+            true,
+            false,
+            TerminalInputModes::default(),
+        );
+        assert_eq!(got.as_deref(), Some(&b"\x1b[1;3D"[..]));
+    }
+}
