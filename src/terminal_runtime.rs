@@ -2337,6 +2337,7 @@ struct TerminalRuntimeState {
     /// 维护，提交时清空（`replace_text_in_range` 会调用 `clear`），我们采用
     /// 完全相同的语义。
     marked_text: Option<MarkedText>,
+    /// OSC 52 store 队列：语义上只保留最后一条（见 apply_term_event）。
     clipboard_store_requests: VecDeque<TerminalClipboardStoreRequest>,
     clipboard_load_requests: VecDeque<TerminalClipboardLoadRequest>,
     /// (revision, snapshot) — built once per revision, Arc::clone on subsequent reads.
@@ -2585,17 +2586,30 @@ pub fn terminal_clipboard_load_request_for_event(
     }
 }
 
+/// OSC 52 load 请求队列上限；超出丢最旧。
+const CLIPBOARD_LOAD_QUEUE_MAX: usize = 8;
+
 fn apply_term_event(state: &mut TerminalRuntimeState, event: Event) {
     match event {
         Event::Title(title) => state.title = Some(title),
         Event::ResetTitle => state.title = None,
         Event::Bell => state.bell_pulse = state.bell_pulse.wrapping_add(1),
-        Event::ClipboardStore(_, text) => state
-            .clipboard_store_requests
-            .push_back(TerminalClipboardStoreRequest { text }),
-        Event::ClipboardLoad(_, formatter) => state
-            .clipboard_load_requests
-            .push_back(TerminalClipboardLoadRequest { formatter }),
+        // 后台 tab 的队列要等切回来才 drain：store 只有最后一条有意义，
+        // load 封顶后丢最旧，避免持续刷 OSC 52 的会话把内存撑爆。
+        Event::ClipboardStore(_, text) => {
+            state.clipboard_store_requests.clear();
+            state
+                .clipboard_store_requests
+                .push_back(TerminalClipboardStoreRequest { text });
+        }
+        Event::ClipboardLoad(_, formatter) => {
+            while state.clipboard_load_requests.len() >= CLIPBOARD_LOAD_QUEUE_MAX {
+                state.clipboard_load_requests.pop_front();
+            }
+            state
+                .clipboard_load_requests
+                .push_back(TerminalClipboardLoadRequest { formatter });
+        }
         // MouseCursorDirty / Wakeup / etc. don't surface in this spike yet.
         _ => {}
     }
@@ -5273,6 +5287,33 @@ mod tests {
         assert!(!resize_request_is_duplicate(&mut last, (81, 25, 10, 18)));
         assert!(!resize_request_is_duplicate(&mut last, (81, 25, 10, 19)));
         assert_eq!(last, Some((81, 25, 10, 19)));
+    }
+
+    #[test]
+    fn clipboard_queues_stay_bounded_for_background_tabs() {
+        use alacritty_terminal::term::ClipboardType;
+
+        let mut state = TerminalRuntimeState::new("osc52", true, "running", 80, 24);
+        for i in 0..100 {
+            apply_term_event(
+                &mut state,
+                Event::ClipboardStore(ClipboardType::Clipboard, format!("copy {i}")),
+            );
+            apply_term_event(
+                &mut state,
+                Event::ClipboardLoad(ClipboardType::Clipboard, Arc::new(|text| text.to_string())),
+            );
+        }
+
+        assert_eq!(state.clipboard_store_requests.len(), 1);
+        assert_eq!(
+            state.clipboard_store_requests[0].text, "copy 99",
+            "store 队列只保留最后一条"
+        );
+        assert_eq!(
+            state.clipboard_load_requests.len(),
+            CLIPBOARD_LOAD_QUEUE_MAX
+        );
     }
 
     #[test]

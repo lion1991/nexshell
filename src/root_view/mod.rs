@@ -2210,7 +2210,10 @@ impl TypedActionView for RootView {
             TerminalGridAction::GitPanelStagePaths { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::Stage(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| GitRequest::Stage {
+                        expected_repo,
+                        paths: paths.clone(),
+                    });
                 }
             }
             TerminalGridAction::GitPanelUnstage(path) => {
@@ -2219,13 +2222,23 @@ impl TypedActionView for RootView {
             TerminalGridAction::GitPanelUnstagePaths { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::Unstage(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| {
+                        GitRequest::Unstage {
+                            expected_repo,
+                            paths: paths.clone(),
+                        }
+                    });
                 }
             }
             TerminalGridAction::GitPanelAddToGitignore { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::AddToGitignore(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| {
+                        GitRequest::AddToGitignore {
+                            expected_repo,
+                            paths: paths.clone(),
+                        }
+                    });
                 }
             }
             TerminalGridAction::GitPanelShowContextMenu {
