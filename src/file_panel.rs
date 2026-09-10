@@ -1115,7 +1115,13 @@ async fn run_local_file_worker(
                         .await;
                 } else {
                     let path = local_path_from_panel_string(&parent).join(&name);
-                    if let Err(error) = tokio::fs::File::create(&path).await {
+                    // 排他创建：同名文件已存在时报错，不清空原文件
+                    let created = tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path)
+                        .await;
+                    if let Err(error) = created {
                         let _ = evt_tx
                             .send(SftpEvent::Error {
                                 message: format!("create file {} failed: {error}", path.display()),
@@ -2433,6 +2439,40 @@ mod tests {
         );
         assert!(matches!(entries[0].kind, crate::sftp_ops::EntryKind::Dir));
         assert!(matches!(entries[1].kind, crate::sftp_ops::EntryKind::File));
+    }
+
+    #[test]
+    fn local_touch_refuses_to_truncate_an_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("keep.txt");
+        std::fs::write(&target, "original").unwrap();
+        let (worker, rx) =
+            spawn_local_file_worker("unit-local-touch", tmp.path().to_path_buf()).unwrap();
+        assert!(worker.send(SftpRequest::Touch {
+            parent: tmp.path().to_string_lossy().into_owned(),
+            name: "keep.txt".to_string(),
+        }));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let saw_error = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let SftpEvent::Error { .. } = rx.recv().await.unwrap() {
+                        return true;
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        });
+        assert!(
+            saw_error,
+            "touch on an existing file should report an error"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
     }
 
     #[test]
