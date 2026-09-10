@@ -51,7 +51,7 @@ use nexshell::container_fleet::ContainerFleet;
 use nexshell::file_panel::{
     apply_sftp_event, spawn_sftp_worker, FilePanelState, FilePanelWorkerHandle, SftpRequest,
 };
-use nexshell::generation::GenerationAllocator;
+use nexshell::generation::{accepts_generation, GenerationAllocator};
 use nexshell::git_panel::{apply_git_event, spawn_git_worker, GitEvent, GitPanelState, GitRequest};
 use nexshell::host_management::{
     default_database_path, load_or_initialize_host_management_snapshot_from_db_path,
@@ -278,8 +278,8 @@ pub(crate) struct RootView {
     // === 其它运行时状态（推送动画 / 窗口 / 分屏）===
     git_push_animation_tick: u64,
     last_window_title: String,
-    /// 各 tab 的前台进程 flag，与 on_should_close_window 回调共享
-    foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+    /// 各 tab 一组前台进程 flag（组内每个 pane 一个），与 on_should_close_window 回调共享
+    foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>,
     dragged_border: Option<DraggedBorder>,
 
     // === 设置页（settings_section）===
@@ -352,7 +352,7 @@ impl RootView {
     // 由 main.rs 的 open_main_window 调用，故需对父模块（crate root）可见。
     pub(super) fn new(
         ctx: &mut ViewContext<Self>,
-        foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+        foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>,
     ) -> Self {
         let ui_settings = load_ui_settings();
         rust_i18n::set_locale(resolve_locale(ui_settings.language));
@@ -914,11 +914,14 @@ impl RootView {
             };
             (handle, tab.id.clone(), tab.file_panel_state.cwd.clone())
         };
+        // 每次启动分配代号：重连后旧 worker 的迟到事件不再命中本 tab（P1-8）。
+        let generation = view.async_generations.allocate();
         match spawn_sftp_worker(handle, &label) {
             Ok((worker, evt_rx)) => {
                 worker.send(SftpRequest::List(init_path));
                 if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
                     tab.sftp_worker = Some(FilePanelWorkerHandle::Sftp(worker));
+                    tab.sftp_worker_generation = Some(generation);
                     tab.file_panel_state.loading = true;
                     tab.file_panel_state.error = None;
                 }
@@ -927,6 +930,9 @@ impl RootView {
                     evt_rx,
                     move |view, evt, ctx| {
                         if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == owner) {
+                            if !accepts_generation(tab.sftp_worker_generation, generation) {
+                                return;
+                            }
                             apply_sftp_event(&mut tab.file_panel_state, evt);
                             ctx.notify();
                         }
@@ -2210,7 +2216,10 @@ impl TypedActionView for RootView {
             TerminalGridAction::GitPanelStagePaths { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::Stage(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| GitRequest::Stage {
+                        expected_repo,
+                        paths: paths.clone(),
+                    });
                 }
             }
             TerminalGridAction::GitPanelUnstage(path) => {
@@ -2219,13 +2228,23 @@ impl TypedActionView for RootView {
             TerminalGridAction::GitPanelUnstagePaths { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::Unstage(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| {
+                        GitRequest::Unstage {
+                            expected_repo,
+                            paths: paths.clone(),
+                        }
+                    });
                 }
             }
             TerminalGridAction::GitPanelAddToGitignore { tab_id, paths } => {
                 self.show_git_panel_context_menu_close(ctx);
                 if !paths.is_empty() {
-                    self.send_git_request_to_tab(tab_id, GitRequest::AddToGitignore(paths.clone()));
+                    self.send_git_repo_request_to_tab(tab_id, |expected_repo| {
+                        GitRequest::AddToGitignore {
+                            expected_repo,
+                            paths: paths.clone(),
+                        }
+                    });
                 }
             }
             TerminalGridAction::GitPanelShowContextMenu {
@@ -2776,10 +2795,11 @@ impl RootView {
             NewTabPlacement::default(),
         );
         if let Ok(mut flags) = self.foreground_flags.lock() {
+            let group = vec![Arc::clone(&fg_handle)];
             if insert_index <= flags.len() {
-                flags.insert(insert_index, Arc::clone(&fg_handle));
+                flags.insert(insert_index, group);
             } else {
-                flags.push(Arc::clone(&fg_handle));
+                flags.push(group);
             }
         }
         let pane_id = NexPaneId::new();
@@ -2846,6 +2866,7 @@ impl RootView {
                 file_panel_width: FILE_PANEL_WIDTH_DEFAULT,
                 file_panel_state: FilePanelState::new(),
                 sftp_worker: None,
+                sftp_worker_generation: None,
                 file_panel_entry_states: RefCell::new(HashMap::new()),
                 file_panel_refresh_state: Arc::new(Mutex::new(MouseState::default())),
                 file_panel_up_state: Arc::new(Mutex::new(MouseState::default())),
@@ -3021,6 +3042,15 @@ impl RootView {
     }
 
     fn remove_terminal_tab_at(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        // 关 tab 会丢掉全部 pane 的 runtime，先把录制中的内容落盘。
+        if let Some(tab) = self.terminal_tabs.get(index) {
+            let runtimes: Vec<_> = std::iter::once(&tab.terminal)
+                .chain(tab.pane_terminals.values())
+                .cloned()
+                .collect();
+            let label = tab.window_title();
+            self.flush_recordings(&runtimes, &label);
+        }
         let mut rdp_asset_id = None;
         let mut glass_keys: Vec<String> = Vec::new();
         if let Some(tab) = self.terminal_tabs.get(index) {

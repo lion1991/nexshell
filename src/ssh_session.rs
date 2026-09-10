@@ -1,16 +1,84 @@
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use russh::client;
 use russh::keys::key::PublicKey;
+use russh::keys::known_hosts::{check_known_hosts_path, learn_known_hosts_path};
 use russh::{Channel, ChannelMsg, Disconnect};
 use russh_sftp::client::SftpSession;
 use ssh_key::Certificate;
 use tokio::sync::Mutex;
 
+/// known_hosts 校验结论。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostKeyVerdict {
+    /// 已记录且一致。
+    Known,
+    /// 未记录，已按 accept-new 写入。
+    Learned,
+    /// 已记录但与远端不一致，必须拒绝。
+    Changed,
+}
+
+/// 默认 known_hosts 路径（~/.ssh/known_hosts）。
+pub fn default_known_hosts_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|value| !value.is_empty())?;
+    Some(PathBuf::new().join(home).join(".ssh").join("known_hosts"))
+}
+
+/// 对指定 known_hosts 文件做 TOFU 校验：一致放行，未知写入后放行，变化则拒绝。
+pub fn verify_host_key_at(
+    path: &Path,
+    host: &str,
+    port: u16,
+    key: &PublicKey,
+) -> Result<HostKeyVerdict, String> {
+    match check_known_hosts_path(host, port, key, path) {
+        Ok(true) => Ok(HostKeyVerdict::Known),
+        Ok(false) => {
+            learn_known_hosts_path(host, port, key, path)
+                .map_err(|error| format!("known_hosts write failed: {error}"))?;
+            Ok(HostKeyVerdict::Learned)
+        }
+        Err(russh::keys::Error::KeyChanged { .. }) => Ok(HostKeyVerdict::Changed),
+        Err(error) => Err(format!("known_hosts check failed: {error}")),
+    }
+}
+
+/// 连接期共享的 host key 校验状态；失败原因回传给 connect() 组装可读提示。
 #[derive(Clone)]
-pub struct ClientHandler;
+pub struct ClientHandler {
+    host: String,
+    port: u16,
+    reject_reason: Arc<StdMutex<Option<String>>>,
+}
+
+impl ClientHandler {
+    fn new(host: &str, port: u16) -> Self {
+        Self {
+            host: host.to_string(),
+            port,
+            reject_reason: Arc::new(StdMutex::new(None)),
+        }
+    }
+
+    fn record_reject(&self, reason: String) {
+        if let Ok(mut slot) = self.reject_reason.lock() {
+            *slot = Some(reason);
+        }
+    }
+
+    fn take_reject_reason(&self) -> Option<String> {
+        self.reject_reason
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+    }
+}
 
 /// 暴露给 UI 用的 SSH handle 别名。`client::Handle` 内部持有 unbounded receiver
 /// 和 JoinHandle 所以不能 Clone，这里用 Arc 包一层共享所有权。
@@ -24,11 +92,30 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        // Match the existing Tauri backend: accept host keys here and keep
-        // trust UX out of the connection primitive.
-        Ok(true)
+        let Some(path) = default_known_hosts_path() else {
+            self.record_reject(rust_i18n::t!("ssh_known_hosts_unavailable").to_string());
+            return Ok(false);
+        };
+        match verify_host_key_at(&path, &self.host, self.port, server_public_key) {
+            Ok(HostKeyVerdict::Known) | Ok(HostKeyVerdict::Learned) => Ok(true),
+            Ok(HostKeyVerdict::Changed) => {
+                self.record_reject(
+                    rust_i18n::t!(
+                        "ssh_host_key_changed",
+                        host = self.host,
+                        path = path.display().to_string()
+                    )
+                    .to_string(),
+                );
+                Ok(false)
+            }
+            Err(error) => {
+                self.record_reject(error);
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -81,9 +168,14 @@ impl SshSession {
         }
 
         let addr = format!("{host}:{port}");
-        let handle = client::connect(Arc::new(cfg), &addr, ClientHandler)
+        let handler = ClientHandler::new(host, port);
+        let reason_probe = handler.clone();
+        let handle = client::connect(Arc::new(cfg), &addr, handler)
             .await
-            .map_err(|error| format!("SSH connection failed: {error}"))?;
+            .map_err(|error| match reason_probe.take_reject_reason() {
+                Some(reason) => reason,
+                None => format!("SSH connection failed: {error}"),
+            })?;
 
         Ok(Self {
             handle: Arc::new(handle),
@@ -266,5 +358,70 @@ impl SshSession {
             .handle
             .disconnect(Disconnect::ByApplication, "bye", "en")
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use russh::keys::key::KeyPair;
+
+    fn public_key() -> PublicKey {
+        KeyPair::generate_ed25519().clone_public_key().unwrap()
+    }
+
+    #[test]
+    fn unknown_host_is_learned_then_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let key = public_key();
+
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &key).unwrap(),
+            HostKeyVerdict::Learned
+        );
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &key).unwrap(),
+            HostKeyVerdict::Known
+        );
+    }
+
+    #[test]
+    fn non_default_port_is_recorded_with_brackets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let key = public_key();
+
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 2222, &key).unwrap(),
+            HostKeyVerdict::Learned
+        );
+        let recorded = std::fs::read_to_string(&path).unwrap();
+        assert!(recorded.contains("[example.com]:2222"));
+        // 端口不同视为不同条目，22 端口仍是未知。
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &key).unwrap(),
+            HostKeyVerdict::Learned
+        );
+    }
+
+    #[test]
+    fn changed_host_key_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let first = public_key();
+        let second = public_key();
+
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &first).unwrap(),
+            HostKeyVerdict::Learned
+        );
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &second).unwrap(),
+            HostKeyVerdict::Changed
+        );
+        // 拒绝时不得改写 known_hosts。
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 }

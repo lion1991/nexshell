@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use ironrdp_egfx::client::{BitmapUpdate, Surface as EgfxSurface};
+use ironrdp_egfx::client::BitmapUpdate;
 use ironrdp_egfx::pdu::{
     CacheToSurfacePdu, Color, SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu,
     WireToSurface2Pdu,
@@ -15,6 +15,29 @@ use ironrdp_pdu::codecs::rfx::progressive::{
     decode_progressive_stream, ProgressiveBlock, ProgressiveTile,
 };
 use ironrdp_pdu::codecs::rfx::RfxRectangle;
+
+/// 单 surface 边长上限（8192 → 单块 ≤256 MiB）。远端 u16 宽高可直接索要近 16 GiB。
+const MAX_SURFACE_DIM: u16 = 8192;
+/// 会话像素总预算（surface + cache 合计）：1 GiB。
+const MAX_PIXEL_BUDGET: usize = 1 << 30;
+
+/// 远端请求的像素分配超预算：拒绝分配，调用方据此断开会话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PixelBudgetExceeded {
+    pub what: &'static str,
+    pub requested: usize,
+    pub limit: usize,
+}
+
+impl std::fmt::Display for PixelBudgetExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "EGFX {} 超预算：请求 {} 字节 > 上限 {} 字节",
+            self.what, self.requested, self.limit
+        )
+    }
+}
 
 /// surface 上一块脏区（surface-local 坐标，像素）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +96,8 @@ struct ProgressivePaintPlan {
 pub struct Compositor {
     surfaces: HashMap<u16, Surface>,
     cache: HashMap<u16, CachedBitmap>,
+    /// surface + cache 已占像素字节，用于会话总预算。
+    allocated_bytes: usize,
     progressive: ProgressiveDecoder,
     progressive_frames: HashMap<u16, ProgressiveFramePaintState>,
     fallback_progressive_frame_id: u32,
@@ -87,6 +112,7 @@ impl Compositor {
         Self {
             surfaces: HashMap::new(),
             cache: HashMap::new(),
+            allocated_bytes: 0,
             progressive: ProgressiveDecoder::new(),
             progressive_frames: HashMap::new(),
             fallback_progressive_frame_id: 0,
@@ -119,13 +145,40 @@ impl Compositor {
 
     // ---- 生命周期 ----
 
-    pub fn create_surface(&mut self, surface: &EgfxSurface) {
-        self.surfaces
-            .insert(surface.id, Surface::new(surface.width, surface.height));
+    /// 按远端宽高分配 surface；超单块尺寸或会话总预算则拒绝并报错（调用方断开会话）。
+    pub fn create_surface(
+        &mut self,
+        id: u16,
+        width: u16,
+        height: u16,
+    ) -> Result<(), PixelBudgetExceeded> {
+        let bytes = usize::from(width) * usize::from(height) * 4;
+        if width > MAX_SURFACE_DIM || height > MAX_SURFACE_DIM {
+            return Err(PixelBudgetExceeded {
+                what: "surface 尺寸",
+                requested: bytes,
+                limit: usize::from(MAX_SURFACE_DIM) * usize::from(MAX_SURFACE_DIM) * 4,
+            });
+        }
+        // 同 id 重建先归还旧账。
+        let freed = self.surfaces.get(&id).map_or(0, |s| s.pixels.len());
+        let after = self.allocated_bytes.saturating_sub(freed) + bytes;
+        if after > MAX_PIXEL_BUDGET {
+            return Err(PixelBudgetExceeded {
+                what: "会话像素总量",
+                requested: after,
+                limit: MAX_PIXEL_BUDGET,
+            });
+        }
+        self.allocated_bytes = after;
+        self.surfaces.insert(id, Surface::new(width, height));
+        Ok(())
     }
 
     pub fn delete_surface(&mut self, surface_id: u16) {
-        self.surfaces.remove(&surface_id);
+        if let Some(s) = self.surfaces.remove(&surface_id) {
+            self.allocated_bytes = self.allocated_bytes.saturating_sub(s.pixels.len());
+        }
         // Progressive tile 系数状态随 surface 存亡（对齐 FreeRDP）。
         self.progressive.delete_surface(surface_id);
         self.progressive_frames.remove(&surface_id);
@@ -141,6 +194,9 @@ impl Compositor {
     /// 上下文；**离屏 cache 保留**——MS-RDPEGFX 未规定 ResetGraphics 清 cache，FreeRDP
     /// gdi/gfx.c 亦只清 SurfaceTable 而留 cacheSlots，清了会致跨 reset 的 CacheToSurface 取空出黑块。
     pub fn reset(&mut self) {
+        for s in self.surfaces.values() {
+            self.allocated_bytes = self.allocated_bytes.saturating_sub(s.pixels.len());
+        }
         self.surfaces.clear();
         self.progressive.reset();
         self.progressive_frames.clear();
@@ -403,13 +459,27 @@ impl Compositor {
         dirties
     }
 
-    pub fn surface_to_cache(&mut self, pdu: &SurfaceToCachePdu) {
+    /// 缓存 surface 区域；计入会话总预算，超限拒绝并报错（调用方断开会话）。
+    pub fn surface_to_cache(&mut self, pdu: &SurfaceToCachePdu) -> Result<(), PixelBudgetExceeded> {
         let rect = &pdu.source_rectangle;
         let w = rect.right.saturating_sub(rect.left);
         let h = rect.bottom.saturating_sub(rect.top);
         let Some(src) = self.surfaces.get(&pdu.surface_id) else {
-            return;
+            return Ok(());
         };
+        let freed = self
+            .cache
+            .get(&pdu.cache_slot)
+            .map_or(0, |c| c.pixels.len());
+        let after =
+            self.allocated_bytes.saturating_sub(freed) + usize::from(w) * usize::from(h) * 4;
+        if after > MAX_PIXEL_BUDGET {
+            return Err(PixelBudgetExceeded {
+                what: "会话像素总量",
+                requested: after,
+                limit: MAX_PIXEL_BUDGET,
+            });
+        }
         let pixels = extract_region(
             &src.pixels,
             src.width,
@@ -440,6 +510,7 @@ impl Compositor {
                 fnv_hash(&pixels)
             );
         }
+        self.allocated_bytes = after;
         self.cache.insert(
             pdu.cache_slot,
             CachedBitmap {
@@ -448,6 +519,7 @@ impl Compositor {
                 pixels,
             },
         );
+        Ok(())
     }
 
     pub fn cache_to_surface(&mut self, pdu: &CacheToSurfacePdu) -> Vec<SurfaceRect> {
@@ -513,7 +585,9 @@ impl Compositor {
     }
 
     pub fn evict_cache(&mut self, cache_slot: u16) {
-        self.cache.remove(&cache_slot);
+        if let Some(c) = self.cache.remove(&cache_slot) {
+            self.allocated_bytes = self.allocated_bytes.saturating_sub(c.pixels.len());
+        }
     }
 }
 
@@ -866,7 +940,8 @@ mod tests {
             cache_key: 0,
             cache_slot: 7,
             source_rectangle: excl(0, 0, 1, 1),
-        });
+        })
+        .unwrap();
         c.surfaces.insert(2, Surface::new(4, 4));
         let d = c.cache_to_surface(&CacheToSurfacePdu {
             cache_slot: 7,
@@ -899,7 +974,8 @@ mod tests {
             cache_key: 0,
             cache_slot: 3,
             source_rectangle: excl(0, 0, 1, 1),
-        });
+        })
+        .unwrap();
         c.reset();
         assert!(c.surfaces.is_empty(), "surfaces 应被清");
         assert!(c.cache.contains_key(&3), "cache 应保留");
@@ -970,5 +1046,62 @@ mod tests {
         assert!(dst[at(2, 2)..at(2, 2) + 4].iter().all(|&b| b == 7));
         assert!(dst[at(3, 3)..at(3, 3) + 4].iter().all(|&b| b == 0));
         assert!(dst[at(0, 0)..at(0, 0) + 4].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn create_surface_rejects_oversized_dimensions() {
+        // 远端可给到 u16 上限：单块 65535x65535 ≈16 GiB，必须拒绝且不分配。
+        let mut c = Compositor::new();
+        let err = c.create_surface(1, u16::MAX, u16::MAX).unwrap_err();
+        assert_eq!(err.what, "surface 尺寸");
+        assert!(c.surfaces.is_empty());
+        assert_eq!(c.allocated_bytes, 0);
+    }
+
+    #[test]
+    fn create_surface_within_limits_succeeds() {
+        let mut c = Compositor::new();
+        c.create_surface(1, 1920, 1080).unwrap();
+        assert_eq!(c.allocated_bytes, 1920 * 1080 * 4);
+        // 同 id 重建只记一份；删除后归零。
+        c.create_surface(1, 800, 600).unwrap();
+        assert_eq!(c.allocated_bytes, 800 * 600 * 4);
+        c.delete_surface(1);
+        assert_eq!(c.allocated_bytes, 0);
+    }
+
+    #[test]
+    fn create_surface_rejects_over_session_budget() {
+        // 每块 8192x8192=256 MiB，第 5 块越过 1 GiB 会话预算。
+        let mut c = Compositor::new();
+        for id in 0..4u16 {
+            c.create_surface(id, MAX_SURFACE_DIM, MAX_SURFACE_DIM)
+                .unwrap();
+        }
+        let err = c
+            .create_surface(4, MAX_SURFACE_DIM, MAX_SURFACE_DIM)
+            .unwrap_err();
+        assert_eq!(err.what, "会话像素总量");
+        assert_eq!(c.surfaces.len(), 4);
+    }
+
+    #[test]
+    fn surface_to_cache_rejects_over_session_budget() {
+        // surface 已占满预算时，再缓存一块必须被拒（cache 也计入总预算）。
+        let mut c = Compositor::new();
+        for id in 0..4u16 {
+            c.create_surface(id, MAX_SURFACE_DIM, MAX_SURFACE_DIM)
+                .unwrap();
+        }
+        let err = c
+            .surface_to_cache(&SurfaceToCachePdu {
+                surface_id: 0,
+                cache_key: 1,
+                cache_slot: 1,
+                source_rectangle: excl(0, 0, 64, 64),
+            })
+            .unwrap_err();
+        assert_eq!(err.what, "会话像素总量");
+        assert!(c.cache.is_empty());
     }
 }

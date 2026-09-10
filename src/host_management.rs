@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeSet,
     env,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -101,7 +102,7 @@ pub struct HostCardSnapshot {
     pub sort_order: i64,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct HostConnectionConfig {
     pub host: String,
     pub port: u16,
@@ -136,7 +137,9 @@ pub struct HostConnectionConfig {
 }
 
 // RDP 显示质量二选一：标准=逻辑像素（默认），高清=物理像素（HiDPI）。
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum RdpDisplayQuality {
     #[default]
@@ -161,7 +164,9 @@ impl RdpDisplayQuality {
 }
 
 /// RDP 远端分辨率：跟随窗口（连接/缩放时按内容区推导）或固定宽×高（连接后不随窗口变）。
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase", from = "RdpResolutionRepr")]
 pub enum RdpResolution {
     #[default]
@@ -240,6 +245,13 @@ impl RdpResolution {
             _ => Self::FitWindow,
         }
     }
+}
+
+/// 连接配置指纹：主机改配置后 monitor/fleet 据此判定必须重启而非复用旧连接。
+pub fn connection_fingerprint(config: &HostConnectionConfig) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    config.hash(&mut hasher);
+    hasher.finish()
 }
 
 impl HostConnectionConfig {
@@ -943,6 +955,7 @@ pub fn initialize_host_database(db_path: &Path) -> Result<(), String> {
     migrate_add_rdp_resolution(&conn);
     migrate_seed_tags_table(&conn);
     crate::ssh_key_store::ensure_schema(&conn)?;
+    crate::rdp_cert_store::ensure_schema(&conn)?;
     Ok(())
 }
 

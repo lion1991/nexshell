@@ -9,7 +9,7 @@ use crate::container_overview::{
     ContainerOverviewUiState,
 };
 use crate::generation::{accepts_generation, Generation, GenerationAllocator};
-use crate::host_management::HostConnectionConfig;
+use crate::host_management::{connection_fingerprint, HostConnectionConfig};
 use crate::host_overview::remote_ssh_config_from_host_config;
 
 /// 各主机容器采集刷新周期。
@@ -19,6 +19,7 @@ struct FleetEntry {
     ui: ContainerOverviewUiState,
     _handle: Option<ContainerMonitorHandle>, // Drop 即 stop
     generation: Generation,
+    fingerprint: u64, // 连接配置指纹，变化即重启
 }
 
 /// 一台主机起监控后交回调用方消费的事件流。
@@ -50,11 +51,14 @@ impl ContainerFleet {
 
         let mut streams = Vec::new();
         for (host_id, config) in hosts {
+            let fingerprint = connection_fingerprint(config);
             if let Some(entry) = self.entries.get(host_id) {
-                if entry._handle.is_some() {
+                if entry._handle.is_some() && entry.fingerprint == fingerprint {
                     continue;
                 }
             }
+            // 配置变了：先失效旧 generation、丢 handle、清旧快照，避免旧主机容器串台。
+            self.invalidate_stale_config(host_id, fingerprint, &config.host);
             let display = config.host.clone();
             match spawn_container_monitor(
                 remote_ssh_config_from_host_config(config),
@@ -67,6 +71,7 @@ impl ContainerFleet {
                         Some(entry) => {
                             entry._handle = Some(handle);
                             entry.generation = generation;
+                            entry.fingerprint = fingerprint;
                         }
                         // 新主机：初始 waiting。
                         None => {
@@ -76,6 +81,7 @@ impl ContainerFleet {
                                     ui: ContainerOverviewUiState::waiting(display),
                                     _handle: Some(handle),
                                     generation,
+                                    fingerprint,
                                 },
                             );
                         }
@@ -88,6 +94,7 @@ impl ContainerFleet {
                         Some(entry) => {
                             entry._handle = None;
                             entry.generation = Generation::INVALID;
+                            entry.fingerprint = fingerprint;
                             entry.ui.apply_event(ContainerOverviewEvent::Error(error));
                         }
                         None => {
@@ -99,6 +106,7 @@ impl ContainerFleet {
                                     ui,
                                     _handle: None,
                                     generation: Generation::INVALID,
+                                    fingerprint,
                                 },
                             );
                         }
@@ -107,6 +115,20 @@ impl ContainerFleet {
             }
         }
         streams
+    }
+
+    /// 配置指纹变化时把 entry 打回初始态：旧 handle 停掉、旧 generation 作废、快照清空。
+    fn invalidate_stale_config(&mut self, host_id: &str, fingerprint: u64, display: &str) {
+        let Some(entry) = self.entries.get_mut(host_id) else {
+            return;
+        };
+        if entry.fingerprint == fingerprint {
+            return;
+        }
+        entry._handle = None;
+        entry.generation = Generation::INVALID;
+        entry.fingerprint = fingerprint;
+        entry.ui = ContainerOverviewUiState::waiting(display.to_string());
     }
 
     fn retain_targets(&mut self, desired: &HashSet<&str>) {
@@ -179,6 +201,7 @@ mod tests {
                 ui: ContainerOverviewUiState::waiting("a.example".to_string()),
                 _handle: None,
                 generation: Generation::new(7).unwrap(),
+                fingerprint: 0,
             },
         );
 
@@ -200,6 +223,7 @@ mod tests {
                 ui: ContainerOverviewUiState::waiting("a.example".to_string()),
                 _handle: None,
                 generation: Generation::new(3).unwrap(),
+                fingerprint: 0,
             },
         );
 
@@ -207,6 +231,30 @@ mod tests {
 
         assert!(fleet.state("host-a").is_some());
         assert_eq!(fleet.entries["host-a"].generation, Generation::INVALID);
+    }
+
+    #[test]
+    fn changing_connection_config_forces_restart_and_drops_the_old_snapshot() {
+        let mut fleet = ContainerFleet::new();
+        fleet.entries.insert(
+            "host-a".to_string(),
+            FleetEntry {
+                ui: ContainerOverviewUiState::waiting("old.example".to_string()),
+                _handle: None,
+                generation: Generation::new(5).unwrap(),
+                fingerprint: 1,
+            },
+        );
+
+        fleet.invalidate_stale_config("host-a", 2, "new.example");
+
+        assert_eq!(fleet.entries["host-a"].generation, Generation::INVALID);
+        assert_eq!(fleet.entries["host-a"].fingerprint, 2);
+        assert!(!fleet.apply_event_for_generation(
+            "host-a",
+            Generation::new(5).unwrap(),
+            ContainerOverviewEvent::Error("stale after config change".to_string()),
+        ));
     }
 
     #[test]
@@ -218,6 +266,7 @@ mod tests {
                 ui: ContainerOverviewUiState::waiting("deleted.example".to_string()),
                 _handle: None,
                 generation: Generation::INVALID,
+                fingerprint: 0,
             },
         );
 

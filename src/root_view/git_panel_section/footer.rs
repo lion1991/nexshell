@@ -68,10 +68,14 @@ impl RootView {
         if trimmed.is_empty() {
             return;
         }
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
         let queued = worker.send(GitRequest::Commit {
+            expected_repo,
             message: trimmed,
             amend: false,
         });
@@ -86,19 +90,19 @@ impl RootView {
     pub(super) fn queue_git_push_for_tab(
         &mut self,
         tab_id: &str,
-        accept_new_ssh_host: bool,
+        trusted_host_key: Option<String>,
         ctx: &mut ViewContext<Self>,
     ) {
         let Some(index) = self.terminal_tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        self.queue_git_push_for_index(index, accept_new_ssh_host, ctx);
+        self.queue_git_push_for_index(index, trusted_host_key, ctx);
     }
 
     fn queue_git_push_for_index(
         &mut self,
         index: usize,
-        accept_new_ssh_host: bool,
+        trusted_host_key: Option<String>,
         ctx: &mut ViewContext<Self>,
     ) {
         let Some(tab) = self.terminal_tabs.get(index) else {
@@ -113,11 +117,15 @@ impl RootView {
         ) {
             return;
         }
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
         if !worker.send(GitRequest::Push {
-            accept_new_ssh_host,
+            expected_repo,
+            trusted_host_key,
         }) {
             return;
         }
@@ -131,7 +139,7 @@ impl RootView {
         let Some(panel_index) = self.active_git_panel_tab_index() else {
             return;
         };
-        self.queue_git_push_for_index(panel_index, false, ctx);
+        self.queue_git_push_for_index(panel_index, None, ctx);
     }
 
     pub(super) fn queue_git_discard_worktree_change_for_tab(
@@ -146,10 +154,16 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.iter().find(|tab| tab.id == tab_id) else {
             return;
         };
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
-        if worker.send(GitRequest::DiscardWorktreeChanges(vec![path])) {
+        if worker.send(GitRequest::DiscardWorktreeChanges {
+            expected_repo,
+            paths: vec![path],
+        }) {
             ctx.notify();
         }
     }
@@ -166,10 +180,16 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.iter().find(|tab| tab.id == tab_id) else {
             return;
         };
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
-        if worker.send(GitRequest::DeleteUntracked(vec![path])) {
+        if worker.send(GitRequest::DeleteUntracked {
+            expected_repo,
+            paths: vec![path],
+        }) {
             ctx.notify();
         }
     }

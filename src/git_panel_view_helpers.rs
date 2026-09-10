@@ -709,6 +709,7 @@ mod tests {
             message: "The authenticity of host 'example.com' can't be established.".into(),
             host: Some("example.com".into()),
             fingerprint: Some("SHA256:abc".into()),
+            known_hosts_entries: "example.com ssh-ed25519 AAAA\n".into(),
         };
 
         let info = super::git_ssh_host_key_prompt_info(&prompt);

@@ -88,15 +88,30 @@ pub enum GitRequest {
     /// 手动刷新（按钮 / 操作完成后）。worker 从上次 cwd 重新探测 repo_root。
     Refresh,
     /// `git add -- <paths>`。
-    Stage(Vec<String>),
+    Stage {
+        expected_repo: PathBuf,
+        paths: Vec<String>,
+    },
     /// `git restore --staged -- <paths>`。
-    Unstage(Vec<String>),
+    Unstage {
+        expected_repo: PathBuf,
+        paths: Vec<String>,
+    },
     /// `git restore -- <paths>`，丢弃 tracked 文件的未暂存工作区改动。
-    DiscardWorktreeChanges(Vec<String>),
+    DiscardWorktreeChanges {
+        expected_repo: PathBuf,
+        paths: Vec<String>,
+    },
     /// `git clean -ff -d -- <paths>`，删除 untracked 文件（含内嵌 git 仓库）。
-    DeleteUntracked(Vec<String>),
+    DeleteUntracked {
+        expected_repo: PathBuf,
+        paths: Vec<String>,
+    },
     /// 将路径追加到 `.gitignore`。
-    AddToGitignore(Vec<String>),
+    AddToGitignore {
+        expected_repo: PathBuf,
+        paths: Vec<String>,
+    },
     /// 从当前仓库的历史列表继续加载一页。
     LoadMoreHistory {
         offset: usize,
@@ -105,12 +120,14 @@ pub enum GitRequest {
     LoadDiff(GitDiffSelection),
     /// `git commit -m <message>`（可 amend）。
     Commit {
+        expected_repo: PathBuf,
         message: String,
         amend: bool,
     },
-    /// `git push` 到当前分支 upstream。
+    /// `git push` 到当前分支 upstream。`trusted_host_key` 为用户确认过的 known_hosts 行。
     Push {
-        accept_new_ssh_host: bool,
+        expected_repo: PathBuf,
+        trusted_host_key: Option<String>,
     },
     Shutdown,
 }
@@ -524,38 +541,53 @@ async fn run_worker(
                 let _ = evt_tx.send(GitEvent::Loading).await;
                 emit_snapshot(&evt_tx, &root, history_limit).await;
             }
-            GitRequest::Stage(paths) => {
-                if let Some(root) = current_repo.clone() {
+            GitRequest::Stage {
+                expected_repo,
+                paths,
+            } => {
+                if let Some(root) = matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                     run_modifying(&evt_tx, &root, history_limit, |r| git_ops::stage(r, &paths))
                         .await;
                 }
             }
-            GitRequest::Unstage(paths) => {
-                if let Some(root) = current_repo.clone() {
+            GitRequest::Unstage {
+                expected_repo,
+                paths,
+            } => {
+                if let Some(root) = matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                     run_modifying(&evt_tx, &root, history_limit, |r| {
                         git_ops::unstage(r, &paths)
                     })
                     .await;
                 }
             }
-            GitRequest::DiscardWorktreeChanges(paths) => {
-                if let Some(root) = current_repo.clone() {
+            GitRequest::DiscardWorktreeChanges {
+                expected_repo,
+                paths,
+            } => {
+                if let Some(root) = matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                     run_modifying(&evt_tx, &root, history_limit, |r| {
                         git_ops::discard_worktree_changes(r, &paths)
                     })
                     .await;
                 }
             }
-            GitRequest::DeleteUntracked(paths) => {
-                if let Some(root) = current_repo.clone() {
+            GitRequest::DeleteUntracked {
+                expected_repo,
+                paths,
+            } => {
+                if let Some(root) = matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                     run_modifying(&evt_tx, &root, history_limit, |r| {
                         git_ops::delete_untracked(r, &paths)
                     })
                     .await;
                 }
             }
-            GitRequest::AddToGitignore(paths) => {
-                if let Some(root) = current_repo.clone() {
+            GitRequest::AddToGitignore {
+                expected_repo,
+                paths,
+            } => {
+                if let Some(root) = matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                     run_modifying(&evt_tx, &root, history_limit, |r| {
                         git_ops::add_to_gitignore(r, &paths)
                     })
@@ -607,18 +639,50 @@ async fn run_worker(
                     }
                 }
             }
-            GitRequest::Commit { message, amend } => {
-                if let Some(root) = current_repo.clone() {
-                    run_commit(&evt_tx, &root, history_limit, &message, amend).await;
+            GitRequest::Commit {
+                expected_repo,
+                message,
+                amend,
+            } => match matched_repo(&current_repo, &expected_repo, &evt_tx).await {
+                Some(root) => run_commit(&evt_tx, &root, history_limit, &message, amend).await,
+                // 跳过时也要复位 UI 的提交按钮
+                None => {
+                    let _ = evt_tx
+                        .send(GitEvent::CommitFinished { success: false })
+                        .await;
                 }
-            }
+            },
             GitRequest::Push {
-                accept_new_ssh_host,
-            } => {
-                if let Some(root) = current_repo.clone() {
-                    run_push(&evt_tx, &root, history_limit, accept_new_ssh_host).await;
+                expected_repo,
+                trusted_host_key,
+            } => match matched_repo(&current_repo, &expected_repo, &evt_tx).await {
+                Some(root) => {
+                    run_push(&evt_tx, &root, history_limit, trusted_host_key).await;
                 }
-            }
+                None => {
+                    let _ = evt_tx.send(GitEvent::PushFinished { success: false }).await;
+                }
+            },
+        }
+    }
+}
+
+/// 修改类请求的 repo 校验：终端可能已 cd 到别的仓库，此时旧 UI 发来的请求
+/// 必须丢弃，否则会作用到新仓库。不匹配时回一条 OpFailed 让面板显示提示。
+async fn matched_repo(
+    current_repo: &Option<PathBuf>,
+    expected_repo: &Path,
+    evt_tx: &async_channel::Sender<GitEvent>,
+) -> Option<PathBuf> {
+    match current_repo {
+        Some(root) if root == expected_repo => Some(root.clone()),
+        _ => {
+            let _ = evt_tx
+                .send(GitEvent::OpFailed(
+                    rust_i18n::t!("git_panel_repo_changed").to_string(),
+                ))
+                .await;
+            None
         }
     }
 }
@@ -769,12 +833,11 @@ async fn run_push(
     evt_tx: &async_channel::Sender<GitEvent>,
     root: &std::path::Path,
     history_limit: usize,
-    accept_new_ssh_host: bool,
+    trusted_host_key: Option<String>,
 ) {
-    let policy = if accept_new_ssh_host {
-        git_ops::SshHostKeyPolicy::AcceptNew
-    } else {
-        git_ops::SshHostKeyPolicy::Ask
+    let policy = match trusted_host_key {
+        Some(entries) => git_ops::SshHostKeyPolicy::Trust(entries),
+        None => git_ops::SshHostKeyPolicy::Ask,
     };
     let success = match git_ops::push(root, policy) {
         Ok(()) => {
@@ -935,6 +998,7 @@ mod tests {
                     message: "prompt".into(),
                     host: Some("example.com".into()),
                     fingerprint: Some("SHA256:x".into()),
+                    known_hosts_entries: "example.com ssh-ed25519 AAAA\n".into(),
                 },
             },
         );
@@ -1201,20 +1265,26 @@ mod tests {
                 if let Ok(Ok(ev)) =
                     tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
                 {
-                    if let GitEvent::Snapshot { status, .. } = ev {
-                        snapshot = Some(status);
+                    if let GitEvent::Snapshot {
+                        repo_root, status, ..
+                    } = ev
+                    {
+                        snapshot = Some((repo_root, status));
                         break;
                     }
                 }
             }
             snapshot
         });
-        let snap = snap.expect("应收到至少一次 Snapshot");
+        let (repo_root, snap) = snap.expect("应收到至少一次 Snapshot");
         assert_eq!(snap.branch.as_deref(), Some("main"));
         assert!(snap.untracked.iter().any(|e| e.path == "b.txt"));
 
         // stage b.txt
-        assert!(handle.send(GitRequest::Stage(vec!["b.txt".into()])));
+        assert!(handle.send(GitRequest::Stage {
+            expected_repo: repo_root.clone(),
+            paths: vec!["b.txt".into()],
+        }));
         let snap2 = rt.block_on(async {
             let mut snapshot = None;
             for _ in 0..10 {
@@ -1350,24 +1420,30 @@ mod tests {
                 if let Ok(Ok(ev)) =
                     tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
                 {
-                    if let GitEvent::Snapshot { status, .. } = ev {
-                        snapshot = Some(status);
+                    if let GitEvent::Snapshot {
+                        repo_root, status, ..
+                    } = ev
+                    {
+                        snapshot = Some((repo_root, status));
                         break;
                     }
                 }
             }
             snapshot
         });
+        let (repo_root, first_status) = first.expect("initial snapshot");
         assert!(
-            first
-                .expect("initial snapshot")
+            first_status
                 .unstaged
                 .iter()
                 .any(|entry| entry.path == "a.txt"),
             "a.txt 应先显示为未暂存改动"
         );
 
-        assert!(handle.send(GitRequest::DiscardWorktreeChanges(vec!["a.txt".into()])));
+        assert!(handle.send(GitRequest::DiscardWorktreeChanges {
+            expected_repo: repo_root,
+            paths: vec!["a.txt".into()],
+        }));
         let second = rt.block_on(async {
             let mut snapshot = None;
             for _ in 0..10 {
@@ -1418,13 +1494,16 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let first = rt.block_on(async {
+        let (repo_root, first) = rt.block_on(async {
             for _ in 0..10 {
                 if let Ok(Ok(ev)) =
                     tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
                 {
-                    if let GitEvent::Snapshot { status, .. } = ev {
-                        return status;
+                    if let GitEvent::Snapshot {
+                        repo_root, status, ..
+                    } = ev
+                    {
+                        return (repo_root, status);
                     }
                 }
             }
@@ -1435,7 +1514,10 @@ mod tests {
             .iter()
             .any(|entry| entry.path == "ignored.log"));
 
-        assert!(handle.send(GitRequest::AddToGitignore(vec!["ignored.log".into()])));
+        assert!(handle.send(GitRequest::AddToGitignore {
+            expected_repo: repo_root,
+            paths: vec!["ignored.log".into()],
+        }));
         let second = rt.block_on(async {
             for _ in 0..10 {
                 if let Ok(Ok(ev)) =
@@ -1467,6 +1549,80 @@ mod tests {
             .untracked
             .iter()
             .any(|entry| entry.path == "ignored.log"));
+    }
+
+    #[test]
+    fn worker_skips_modifying_request_for_other_repo() {
+        use std::{fs, process::Command, time::Duration};
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec!["config", "user.email", "t@t"],
+            vec!["config", "user.name", "t"],
+        ] {
+            assert!(Command::new("git")
+                .args(&args)
+                .current_dir(repo)
+                .status()
+                .unwrap()
+                .success());
+        }
+        fs::write(repo.join("a.txt"), "hi\n").unwrap();
+
+        let (handle, evt_rx) = spawn_git_worker("repo-mismatch-test").unwrap();
+        assert!(handle.send(GitRequest::SetCwd(repo.to_path_buf())));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            for _ in 0..10 {
+                if let Ok(Ok(ev)) =
+                    tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
+                {
+                    if matches!(ev, GitEvent::Snapshot { .. }) {
+                        return;
+                    }
+                }
+            }
+            panic!("未收到初始 Snapshot");
+        });
+
+        // expected_repo 指向别的仓库 → worker 必须跳过并回 OpFailed
+        assert!(handle.send(GitRequest::Stage {
+            expected_repo: PathBuf::from("/definitely/not/this/repo"),
+            paths: vec!["a.txt".into()],
+        }));
+        let failed = rt.block_on(async {
+            for _ in 0..10 {
+                if let Ok(Ok(ev)) =
+                    tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
+                {
+                    match ev {
+                        GitEvent::OpFailed(_) => return true,
+                        GitEvent::Snapshot { .. } => return false,
+                        _ => {}
+                    }
+                }
+            }
+            false
+        });
+        assert!(failed, "repo 不匹配应回 OpFailed 而不是执行 stage");
+
+        let staged = String::from_utf8(
+            Command::new("git")
+                .args(["diff", "--cached", "--name-only"])
+                .current_dir(repo)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        assert!(staged.trim().is_empty(), "a.txt 不应被 stage");
     }
 
     #[test]
@@ -1545,22 +1701,26 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let ahead = rt.block_on(async {
+        let (repo_root, ahead) = rt.block_on(async {
             for _ in 0..10 {
                 if let Ok(Ok(ev)) =
                     tokio::time::timeout(Duration::from_secs(3), evt_rx.recv()).await
                 {
-                    if let GitEvent::Snapshot { status, .. } = ev {
-                        return status.ahead;
+                    if let GitEvent::Snapshot {
+                        repo_root, status, ..
+                    } = ev
+                    {
+                        return (Some(repo_root), status.ahead);
                     }
                 }
             }
-            0
+            (None, 0)
         });
         assert_eq!(ahead, 1);
 
         assert!(handle.send(GitRequest::Push {
-            accept_new_ssh_host: false,
+            expected_repo: repo_root.expect("push 前应拿到 repo_root"),
+            trusted_host_key: None,
         }));
         let first_push_event = rt.block_on(async {
             tokio::time::timeout(Duration::from_secs(3), evt_rx.recv())

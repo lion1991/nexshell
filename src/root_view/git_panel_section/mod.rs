@@ -112,8 +112,14 @@ impl RootView {
             .active_git_panel_tab_index()
             .and_then(|index| self.terminal_tabs.get(index))
         {
+            let Some(expected_repo) = tab.git_panel_state.repo_root.clone() else {
+                return;
+            };
             if let Some(w) = tab.git_worker.as_ref() {
-                w.send(GitRequest::Stage(vec![path]));
+                w.send(GitRequest::Stage {
+                    expected_repo,
+                    paths: vec![path],
+                });
             }
         }
     }
@@ -127,8 +133,14 @@ impl RootView {
             if paths.is_empty() {
                 return;
             }
+            let Some(expected_repo) = tab.git_panel_state.repo_root.clone() else {
+                return;
+            };
             if let Some(w) = tab.git_worker.as_ref() {
-                w.send(GitRequest::Stage(paths));
+                w.send(GitRequest::Stage {
+                    expected_repo,
+                    paths,
+                });
             }
         }
     }
@@ -138,8 +150,14 @@ impl RootView {
             .active_git_panel_tab_index()
             .and_then(|index| self.terminal_tabs.get(index))
         {
+            let Some(expected_repo) = tab.git_panel_state.repo_root.clone() else {
+                return;
+            };
             if let Some(w) = tab.git_worker.as_ref() {
-                w.send(GitRequest::Unstage(vec![path]));
+                w.send(GitRequest::Unstage {
+                    expected_repo,
+                    paths: vec![path],
+                });
             }
         }
     }
@@ -201,13 +219,16 @@ impl RootView {
                     changed = true;
                 }
             }
-            GitEvent::Snapshot { status, .. } => {
+            GitEvent::Snapshot {
+                repo_root, status, ..
+            } => {
                 // Arc 只 clone 一次，多个 diff tab 共享同一份快照（引用计数，非深拷贝）。
                 let status = Arc::new(status.clone());
+                // 用事件自带 repo_root 过滤：owner 已切仓库时旧快照不应落到 diff tab。
                 for tab in self.terminal_tabs.iter_mut().filter(|tab| {
                     matches!(tab.kind, TerminalSessionKind::GitDiff)
                         && tab.host_id.as_deref() == Some(owner)
-                        && tab.git_panel_state.repo_root.as_ref() == Some(&source_repo)
+                        && tab.git_panel_state.repo_root.as_ref() == Some(repo_root)
                 }) {
                     tab.git_panel_state.status = Arc::clone(&status);
                     // 文件被删除/改动消失后清掉陈旧 diff，避免标签停留显示已不存在文件的旧内容。
@@ -235,13 +256,22 @@ impl RootView {
         changed
     }
 
-    pub(crate) fn send_git_request_to_tab(&self, tab_id: &str, request: GitRequest) -> bool {
-        self.terminal_tabs
-            .iter()
-            .find(|tab| tab.id == tab_id)
-            .and_then(|tab| tab.git_worker.as_ref())
-            .map(|worker| worker.send(request))
-            .unwrap_or(false)
+    /// 发送需要绑定 repo 的修改类请求：从目标 tab 当前 repo_root 取 expected_repo。
+    pub(crate) fn send_git_repo_request_to_tab(
+        &self,
+        tab_id: &str,
+        build: impl FnOnce(std::path::PathBuf) -> GitRequest,
+    ) -> bool {
+        let Some(tab) = self.terminal_tabs.iter().find(|tab| tab.id == tab_id) else {
+            return false;
+        };
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
+            return false;
+        };
+        worker.send(build(expected_repo))
     }
 
     pub(crate) fn show_git_ssh_host_key_prompt(
@@ -258,8 +288,9 @@ impl RootView {
             vec![
                 ModalButton::for_view(rust_i18n::t!("git_panel_ssh_host_key_confirm"), {
                     let tab_id = tab_id.clone();
+                    let entries = prompt.known_hosts_entries.clone();
                     move |view: &mut Self, ctx: &mut ViewContext<Self>| {
-                        view.queue_git_push_for_tab(&tab_id, true, ctx);
+                        view.queue_git_push_for_tab(&tab_id, Some(entries.clone()), ctx);
                     }
                 }),
                 ModalButton::for_view(

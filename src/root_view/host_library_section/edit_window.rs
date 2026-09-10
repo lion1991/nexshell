@@ -15,10 +15,11 @@ use nexshell::host_management::{
 };
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::vec2f;
+use warpui::platform::TerminationMode;
 use warpui::platform::WindowBounds;
 use warpui::{
     AddWindowOptions, ModelAsRef, ModelHandle, NextNewWindowsHasThisWindowsBoundsUponClose,
-    ViewContext,
+    ViewContext, WindowId,
 };
 
 impl RootView {
@@ -69,6 +70,17 @@ impl RootView {
                 Some(rust_i18n::t!("toast_host_library_unavailable_save").to_string());
             return false;
         };
+
+        // 保存 RDP 主机 = 重新信任该端点：清掉已固定的证书指纹，下次连接按首次信任重新固定。
+        if card.protocol.eq_ignore_ascii_case("rdp") {
+            let _ = nexshell::rdp_cert_store::forget_at(
+                &db_path,
+                &nexshell::rdp_cert_store::endpoint_key(
+                    &card.connection.host,
+                    card.connection.port,
+                ),
+            );
+        }
 
         match upsert_host_card_in_db_path(&db_path, &card) {
             Ok(()) => match self.load_host_snapshot_from_db() {
@@ -186,9 +198,36 @@ impl RootView {
         if let Some(wid) = self.edit_window_id.take() {
             #[cfg(target_os = "macos")]
             macos_window_util::reset_window_level();
-            ctx.windows().hide_window(wid);
+            // 真正销毁：hide 会把窗口留在框架窗口表里，污染按 window id 找 RootView 的分发。
+            ctx.windows()
+                .close_window(wid, TerminationMode::ForceTerminate);
         }
         self.active_edit_model = None;
+    }
+
+    /// 辅助窗口被原生 X 关掉时（不走 close_edit_window / close_manage_window），
+    /// 按 window id 清掉记录，否则 handle_action 的 gate 会永久吞掉主窗口事件。
+    pub(crate) fn handle_auxiliary_window_closed(
+        &mut self,
+        window_id: WindowId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let mut closed = false;
+        if self.edit_window_id == Some(window_id) {
+            self.edit_window_id = None;
+            self.active_edit_model = None;
+            closed = true;
+        }
+        if self.manage_window_id == Some(window_id) {
+            self.manage_window_id = None;
+            self.active_manage_model = None;
+            closed = true;
+        }
+        if closed {
+            #[cfg(target_os = "macos")]
+            macos_window_util::reset_window_level();
+            ctx.notify();
+        }
     }
 
     pub(super) fn open_group_tag_manage_window(&mut self, ctx: &mut ViewContext<Self>) {
@@ -256,7 +295,8 @@ impl RootView {
         if let Some(wid) = self.manage_window_id.take() {
             #[cfg(target_os = "macos")]
             macos_window_util::reset_window_level();
-            ctx.windows().hide_window(wid);
+            ctx.windows()
+                .close_window(wid, TerminationMode::ForceTerminate);
         }
         self.active_manage_model = None;
     }
@@ -289,6 +329,8 @@ impl RootView {
                 let is_new = ctx.model(&_model).is_new;
                 if self.save_host_edit_draft(draft, is_new, ctx) {
                     self.close_edit_window(ctx);
+                    // 连接配置可能已变，同步 fleet 让监控按新配置重启。
+                    self.sync_host_fleets(ctx);
                 }
                 ctx.notify();
             }

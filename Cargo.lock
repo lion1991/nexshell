@@ -6203,6 +6203,7 @@ dependencies = [
  "warpui",
  "warpui_core",
  "warpui_extras",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

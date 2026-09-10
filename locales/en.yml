@@ -186,6 +186,7 @@ git_panel_empty: Git
 git_panel_remote_unsupported: Git panel not available for remote sessions
 git_panel_no_repo: Not in a git repository
 git_panel_not_in_repo: Current directory is not inside a git repository
+git_panel_repo_changed: Repository changed; the action was skipped
 git_panel_detached: HEAD (detached)
 git_panel_loading: Loading repository status...
 git_panel_clean: Working tree clean
@@ -227,7 +228,7 @@ git_panel_ssh_host_key_title: Trust SSH host key?
 git_panel_ssh_host_key_title_host: Trust SSH host key for %{host}?
 git_panel_ssh_host_key_message: Git push is connecting to this SSH host for the first time. Verify the fingerprint before continuing.
 git_panel_ssh_host_key_fingerprint: "Fingerprint: %{fingerprint}"
-git_panel_ssh_host_key_warning: If you continue, NexShell will ask OpenSSH to add this new host key and retry the push. Changed host keys are not accepted automatically.
+git_panel_ssh_host_key_warning: If you continue, NexShell records the host key shown above in known_hosts and retries the push with strict checking. Changed host keys are not accepted automatically.
 git_panel_ssh_host_key_confirm: Trust and Push
 git_panel_ssh_host_key_cancel: Cancel
 
@@ -294,10 +295,12 @@ key_reset_font: Reset font
 dialog_close_window: "Close window?"
 dialog_close_window_msg: "You have %{count} running processes. Closing the window will terminate them."
 dialog_close_window_unsaved: "There are unsaved changes. Closing the window will discard them. Close anyway?"
+dialog_close_window_recording: "A terminal is recording. Closing the window will end the recording. Close anyway?"
 dialog_confirm_close: Confirm close
 dialog_quit_app: "Quit NexShell?"
 dialog_quit_app_msg: "You have %{count} running processes. Quitting will terminate them."
 dialog_quit_app_unsaved: "There are unsaved changes. Quitting will discard them. Quit anyway?"
+dialog_quit_app_recording: "A terminal is recording. Quitting will end the recording. Quit anyway?"
 dialog_confirm_quit: Confirm quit
 dialog_cancel: Cancel
 
@@ -471,3 +474,7 @@ log_banner_truncated: truncated at size cap
 toast_recording_started: Recording started
 toast_recording_saved: "Recording saved: %{path}"
 toast_recording_save_failed: "Failed to save recording: %{error}"
+
+# === SSH host key ===
+ssh_host_key_changed: "The SSH host key for %{host} does not match the one recorded in %{path}; the connection was aborted. If the host really rotated its key, remove the stale entry from that file and reconnect."
+ssh_known_hosts_unavailable: Cannot locate known_hosts (HOME is unset), so the SSH host key cannot be verified; the connection was aborted.
