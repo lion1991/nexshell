@@ -15,10 +15,11 @@ use nexshell::host_management::{
 };
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::vec2f;
+use warpui::platform::TerminationMode;
 use warpui::platform::WindowBounds;
 use warpui::{
     AddWindowOptions, ModelAsRef, ModelHandle, NextNewWindowsHasThisWindowsBoundsUponClose,
-    ViewContext,
+    ViewContext, WindowId,
 };
 
 impl RootView {
@@ -186,9 +187,36 @@ impl RootView {
         if let Some(wid) = self.edit_window_id.take() {
             #[cfg(target_os = "macos")]
             macos_window_util::reset_window_level();
-            ctx.windows().hide_window(wid);
+            // 真正销毁：hide 会把窗口留在框架窗口表里，污染按 window id 找 RootView 的分发。
+            ctx.windows()
+                .close_window(wid, TerminationMode::ForceTerminate);
         }
         self.active_edit_model = None;
+    }
+
+    /// 辅助窗口被原生 X 关掉时（不走 close_edit_window / close_manage_window），
+    /// 按 window id 清掉记录，否则 handle_action 的 gate 会永久吞掉主窗口事件。
+    pub(crate) fn handle_auxiliary_window_closed(
+        &mut self,
+        window_id: WindowId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let mut closed = false;
+        if self.edit_window_id == Some(window_id) {
+            self.edit_window_id = None;
+            self.active_edit_model = None;
+            closed = true;
+        }
+        if self.manage_window_id == Some(window_id) {
+            self.manage_window_id = None;
+            self.active_manage_model = None;
+            closed = true;
+        }
+        if closed {
+            #[cfg(target_os = "macos")]
+            macos_window_util::reset_window_level();
+            ctx.notify();
+        }
     }
 
     pub(super) fn open_group_tag_manage_window(&mut self, ctx: &mut ViewContext<Self>) {
@@ -256,7 +284,8 @@ impl RootView {
         if let Some(wid) = self.manage_window_id.take() {
             #[cfg(target_os = "macos")]
             macos_window_util::reset_window_level();
-            ctx.windows().hide_window(wid);
+            ctx.windows()
+                .close_window(wid, TerminationMode::ForceTerminate);
         }
         self.active_manage_model = None;
     }

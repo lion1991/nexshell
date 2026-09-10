@@ -787,10 +787,13 @@ fn dispatch_to_root_view(
     ctx: &mut AppContext,
     f: impl FnOnce(&mut RootView, &mut ViewContext<RootView>),
 ) {
-    let Some(window_id) = ctx.window_ids().into_iter().next() else {
-        return;
-    };
-    let Some(handle) = ctx.root_view::<RootView>(window_id) else {
+    // 主机编辑/分组管理等辅助窗口也在窗口表里，且顺序无保证：必须找到第一个 RootView 窗口，
+    // 否则未保存检查等会静默按 false 走。
+    let Some(handle) = ctx
+        .window_ids()
+        .into_iter()
+        .find_map(|window_id| ctx.root_view::<RootView>(window_id))
+    else {
         return;
     };
     handle.update(ctx, f);
@@ -1066,8 +1069,17 @@ fn main() -> Result<()> {
 
     let mut callbacks = platform::AppCallbacks::default();
 
-    // 必须设置，否则 handle_window_closed 不会被调用，窗口清理不完整
-    callbacks.on_window_will_close = Some(Box::new(|_closed_data, _ctx| {}));
+    // 必须设置，否则 handle_window_closed 不会被调用，窗口清理不完整。
+    // 辅助窗口被原生 X 关掉时同步清 RootView 上记录的 window id。
+    callbacks.on_window_will_close = Some(Box::new(|closed_data, ctx| {
+        let Some(closed) = closed_data else {
+            return;
+        };
+        let window_id = closed.window_id;
+        dispatch_to_root_view(ctx, move |view, ctx| {
+            view.handle_auxiliary_window_closed(window_id, ctx);
+        });
+    }));
 
     // 点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）
     callbacks.on_should_close_window = Some(Box::new(move |window_id, ctx| {
