@@ -1527,9 +1527,11 @@ async fn copy_local_file_stream(
     let mut input = tokio::fs::File::open(source)
         .await
         .map_err(|error| format!("open local {} failed: {error}", source.display()))?;
-    let mut output = tokio::fs::File::create(destination)
+    // 同目录临时文件写完再 rename 覆盖：中断不会破坏已存在的目标文件
+    let tmp = sftp_ops::local_temp_sibling(destination);
+    let mut output = tokio::fs::File::create(&tmp)
         .await
-        .map_err(|error| format!("create local {} failed: {error}", destination.display()))?;
+        .map_err(|error| format!("create local {} failed: {error}", tmp.display()))?;
 
     let result = async {
         let mut buf = vec![0u8; LOCAL_COPY_CHUNK_SIZE];
@@ -1564,15 +1566,33 @@ async fn copy_local_file_stream(
             .flush()
             .await
             .map_err(|error| format!("local flush failed: {error}"))?;
+        output
+            .sync_all()
+            .await
+            .map_err(|error| format!("local sync failed: {error}"))?;
         Ok(copied)
     }
     .await;
 
-    if result.is_err() {
-        drop(output);
-        let _ = tokio::fs::remove_file(destination).await;
+    drop(output);
+    match result {
+        Ok(copied) => match tokio::fs::rename(&tmp, destination).await {
+            Ok(()) => Ok(copied),
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                Err(format!(
+                    "rename({} -> {}) failed: {error}",
+                    tmp.display(),
+                    destination.display()
+                ))
+            }
+        },
+        Err(error) => {
+            // 失败/取消只清理临时文件，已存在的目标文件原样保留
+            let _ = tokio::fs::remove_file(&tmp).await;
+            Err(error)
+        }
     }
-    result
 }
 
 async fn send_transfer_started(
@@ -2439,6 +2459,56 @@ mod tests {
         );
         assert!(matches!(entries[0].kind, crate::sftp_ops::EntryKind::Dir));
         assert!(matches!(entries[1].kind, crate::sftp_ops::EntryKind::File));
+    }
+
+    fn run_local_copy_for_test(
+        source: &Path,
+        destination: &Path,
+        cancel: bool,
+    ) -> Result<u64, String> {
+        let (evt_tx, _evt_rx) = async_channel::unbounded();
+        let cancel = AtomicBool::new(cancel);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(copy_local_file_stream(
+                source,
+                destination,
+                1,
+                "dst.txt",
+                None,
+                0,
+                false,
+                &evt_tx,
+                &cancel,
+            ))
+    }
+
+    #[test]
+    fn local_copy_replaces_the_destination_atomically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src.txt");
+        let destination = tmp.path().join("dst.txt");
+        std::fs::write(&source, "new").unwrap();
+        std::fs::write(&destination, "original").unwrap();
+
+        assert_eq!(run_local_copy_for_test(&source, &destination, false), Ok(3));
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "new");
+        assert!(!sftp_ops::local_temp_sibling(&destination).exists());
+    }
+
+    #[test]
+    fn local_copy_cancel_keeps_the_existing_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src.txt");
+        let destination = tmp.path().join("dst.txt");
+        std::fs::write(&source, "new").unwrap();
+        std::fs::write(&destination, "original").unwrap();
+
+        assert!(run_local_copy_for_test(&source, &destination, true).is_err());
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "original");
+        assert!(!sftp_ops::local_temp_sibling(&destination).exists());
     }
 
     #[test]
