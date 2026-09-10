@@ -160,13 +160,33 @@ pub struct RemoteTree {
     pub total_bytes: u64,
 }
 
-/// 单段路径名校验：拒绝空 / "." / ".." / 含 '/' 或控制字符，防路径穿越。
+/// 单段路径名校验：拒绝空 / "." / ".." / 含斜杠、反斜杠、冒号或控制字符，防路径穿越。
+/// 反斜杠与冒号在 Windows 上分别是分隔符与盘符/ADS 标记，落到 `Path::join` 会逃出根目录。
 pub fn is_safe_path_segment(name: &str) -> bool {
     !name.is_empty()
         && name != "."
         && name != ".."
         && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
         && !name.chars().any(|c| c == '\0' || c.is_control())
+}
+
+/// 把远端相对路径（POSIX 风格）安全地拼到本地根目录下。
+/// 逐段校验后只接受单个 `Component::Normal`，最后断言结果仍在 root 内；否则返回 None。
+pub fn resolve_local_path(root: &Path, rel: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for seg in rel.split('/') {
+        if !is_safe_path_segment(seg) {
+            return None;
+        }
+        let mut comps = Path::new(seg).components();
+        match (comps.next(), comps.next()) {
+            (Some(std::path::Component::Normal(c)), None) if c == seg => out.push(c),
+            _ => return None,
+        }
+    }
+    out.starts_with(root).then_some(out)
 }
 
 /// 路径任一 '/' 分段是否为 ".."（防穿越）。
@@ -584,6 +604,28 @@ pub async fn stat_file(sftp: &SftpSession, path: &str) -> Result<RemoteEntry, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_path_segment_rejects_windows_separators_and_drive_letters() {
+        assert!(is_safe_path_segment("notes.txt"));
+        assert!(!is_safe_path_segment("..\\..\\AppData"));
+        assert!(!is_safe_path_segment("a\\b"));
+        assert!(!is_safe_path_segment("C:"));
+        assert!(!is_safe_path_segment("file:stream"));
+    }
+
+    #[test]
+    fn resolve_local_path_keeps_result_inside_root() {
+        let root = Path::new("/tmp/dl");
+        assert_eq!(
+            resolve_local_path(root, "a/b.txt"),
+            Some(PathBuf::from("/tmp/dl/a/b.txt"))
+        );
+        assert_eq!(resolve_local_path(root, "../escape"), None);
+        assert_eq!(resolve_local_path(root, "..\\escape"), None);
+        assert_eq!(resolve_local_path(root, "C:\\Windows\\x"), None);
+        assert_eq!(resolve_local_path(root, "a//b"), None);
+    }
 
     #[test]
     fn entry_kind_classifies_file_types() {

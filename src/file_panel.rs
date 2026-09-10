@@ -1992,7 +1992,17 @@ async fn run_download_dir(
     let mut dirs = tree.dirs.clone();
     dirs.sort_by_key(|d| d.matches('/').count());
     for d in &dirs {
-        let abs = local_root.join(d.replace('/', std::path::MAIN_SEPARATOR_STR));
+        // 逐段重建，拒绝任何逃出 local_root 的远端条目名
+        let Some(abs) = sftp_ops::resolve_local_path(local_root, d) else {
+            let _ = evt_tx
+                .send(SftpEvent::DownloadFailed {
+                    transfer_id,
+                    file_name: display_name,
+                    message: format!("非法远端目录名: {d:?}"),
+                })
+                .await;
+            return;
+        };
         if let Err(error) = tokio::fs::create_dir_all(&abs).await {
             let _ = evt_tx
                 .send(SftpEvent::DownloadFailed {
@@ -2031,7 +2041,10 @@ async fn run_download_dir(
             break;
         }
         let remote_path = format!("{}/{}", remote_root.trim_end_matches('/'), file.rel);
-        let local_path = local_root.join(file.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let Some(local_path) = sftp_ops::resolve_local_path(local_root, &file.rel) else {
+            failure = Some(format!("非法远端文件名: {:?}", file.rel));
+            break;
+        };
         match sftp_ops::get_file_stream(sftp, &remote_path, &local_path, &prog_tx, base, cancel)
             .await
         {
