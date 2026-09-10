@@ -943,6 +943,7 @@ pub fn initialize_host_database(db_path: &Path) -> Result<(), String> {
     migrate_add_rdp_resolution(&conn);
     migrate_seed_tags_table(&conn);
     crate::ssh_key_store::ensure_schema(&conn)?;
+    crate::rdp_cert_store::ensure_schema(&conn)?;
     Ok(())
 }
 

@@ -70,6 +70,17 @@ impl RootView {
             return false;
         };
 
+        // 保存 RDP 主机 = 重新信任该端点：清掉已固定的证书指纹，下次连接按首次信任重新固定。
+        if card.protocol.eq_ignore_ascii_case("rdp") {
+            let _ = nexshell::rdp_cert_store::forget_at(
+                &db_path,
+                &nexshell::rdp_cert_store::endpoint_key(
+                    &card.connection.host,
+                    card.connection.port,
+                ),
+            );
+        }
+
         match upsert_host_card_in_db_path(&db_path, &card) {
             Ok(()) => match self.load_host_snapshot_from_db() {
                 Ok(()) => {

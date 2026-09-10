@@ -47,6 +47,8 @@ use ironrdp_session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use parking_lot::Mutex;
 use tokio::net::TcpStream;
 
+use crate::rdp_cert_store;
+
 /// 连接参数，由调用方（主机库）填。分辨率也由调用方定。
 #[derive(Clone, Debug)]
 pub struct RdpSessionConfig {
@@ -582,8 +584,6 @@ async fn connect_and_run(
     // rustls 0.23 需显式选 provider（树内 ring/aws-lc-rs 共存），已装则忽略。
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // 证书无条件接受（与 ssh_session check_server_key 恒 Ok 同姿态）：
-    // ironrdp-tls 的 upgrade 不做链校验，天然接受任意服务端证书。
     let addr = format!("{}:{}", config.host, config.port);
     let tcp = TcpStream::connect(&addr)
         .await
@@ -656,10 +656,47 @@ async fn connect_and_run(
         .map_err(|e| format!("connect_begin failed: {e}"))?;
 
     // 阶段二：TLS 升级 + 取服务端公钥（CredSSP 绑定用）。
+    // 证书优先走平台根校验；自签（RDP 常态）落到回调里按 host:port 做指纹 TOFU。
     let initial_stream = framed.into_inner_no_leftover();
-    let (upgraded_stream, server_cert) = ironrdp_tls::upgrade(initial_stream, &config.host)
+    let endpoint = rdp_cert_store::endpoint_key(&config.host, config.port);
+    let trust_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let callback: ironrdp_tls::CertificateValidationCallback = {
+        let trust_error = Arc::clone(&trust_error);
+        Arc::new(move |cert_der: &[u8], endpoint: &str, error: &str| {
+            match rdp_cert_store::verify_or_pin(endpoint, cert_der) {
+                Ok(rdp_cert_store::CertTrustVerdict::Trusted)
+                | Ok(rdp_cert_store::CertTrustVerdict::Pinned) => true,
+                Ok(rdp_cert_store::CertTrustVerdict::Mismatch { expected }) => {
+                    let actual = rdp_cert_store::sha256_fingerprint(cert_der);
+                    *trust_error.lock() = Some(format!(
+                        "RDP server certificate for {endpoint} changed (expected {expected}, got {actual}); \
+                         connection aborted. Edit and save this host to trust the new certificate."
+                    ));
+                    false
+                }
+                Err(store_error) => {
+                    *trust_error.lock() = Some(format!(
+                        "RDP certificate check failed for {endpoint}: {store_error} (TLS error: {error})"
+                    ));
+                    false
+                }
+            }
+        })
+    };
+    let (upgraded_stream, server_cert) =
+        ironrdp_tls::upgrade_with_certificate_validation_callback_for_endpoint(
+            initial_stream,
+            &config.host,
+            &endpoint,
+            callback,
+        )
         .await
-        .map_err(|e| format!("TLS upgrade failed: {e}"))?;
+        .map_err(|e| {
+            trust_error
+                .lock()
+                .take()
+                .unwrap_or_else(|| format!("TLS upgrade failed: {e}"))
+        })?;
     let server_public_key = ironrdp_tls::extract_tls_server_public_key(&server_cert)
         .ok_or_else(|| "extract server public key failed".to_string())?
         .to_owned();
