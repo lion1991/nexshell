@@ -73,9 +73,7 @@ impl RootView {
             let items = vec![MenuItemFields::new(rust_i18n::t!("menu_terminal"))
                 .with_on_select_action(TerminalGridAction::NewTab)
                 .with_icon(warp_core::ui::icons::Icon::Terminal)
-                .with_key_shortcut_label(Some(terminal_shortcut_label(
-                    TerminalShortcut::NewTab,
-                )))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(TerminalShortcut::NewTab)))
                 .into_item()];
             let origin = ctx
                 .element_position_by_id(NEW_TAB_BUTTON_POSITION_ID)
@@ -686,20 +684,15 @@ impl RootView {
             self.terminal_tabs[index].file_panel_open;
         self.terminal_tabs[index].file_panel_state.error = None;
         self.terminal_tabs[index].serial_port = serial_port;
-        let fg_handle = new_terminal.shell_is_foreground_handle();
         let new_terminal = Arc::new(Mutex::new(new_terminal));
-
-        if let Ok(mut flags) = self.foreground_flags.lock() {
-            if index < flags.len() {
-                flags[index] = fg_handle;
-            }
-        }
 
         let focused_id = self.terminal_tabs[index].focused_pane_id;
         self.terminal_tabs[index]
             .pane_terminals
             .insert(focused_id, Arc::clone(&new_terminal));
         self.terminal_tabs[index].terminal = Arc::clone(&new_terminal);
+        // 重连换了 pane 的 runtime，整组前台标志重新收集。
+        self.sync_foreground_flags_for_tab(index);
         if self.active_tab_index == index {
             self.terminal = new_terminal;
             self.reset_active_terminal_view_state();

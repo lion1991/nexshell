@@ -278,8 +278,8 @@ pub(crate) struct RootView {
     // === 其它运行时状态（推送动画 / 窗口 / 分屏）===
     git_push_animation_tick: u64,
     last_window_title: String,
-    /// 各 tab 的前台进程 flag，与 on_should_close_window 回调共享
-    foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+    /// 各 tab 一组前台进程 flag（组内每个 pane 一个），与 on_should_close_window 回调共享
+    foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>,
     dragged_border: Option<DraggedBorder>,
 
     // === 设置页（settings_section）===
@@ -352,7 +352,7 @@ impl RootView {
     // 由 main.rs 的 open_main_window 调用，故需对父模块（crate root）可见。
     pub(super) fn new(
         ctx: &mut ViewContext<Self>,
-        foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+        foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>,
     ) -> Self {
         let ui_settings = load_ui_settings();
         rust_i18n::set_locale(resolve_locale(ui_settings.language));
@@ -2776,10 +2776,11 @@ impl RootView {
             NewTabPlacement::default(),
         );
         if let Ok(mut flags) = self.foreground_flags.lock() {
+            let group = vec![Arc::clone(&fg_handle)];
             if insert_index <= flags.len() {
-                flags.insert(insert_index, Arc::clone(&fg_handle));
+                flags.insert(insert_index, group);
             } else {
-                flags.push(Arc::clone(&fg_handle));
+                flags.push(group);
             }
         }
         let pane_id = NexPaneId::new();

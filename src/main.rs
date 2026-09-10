@@ -1000,7 +1000,7 @@ fn nexshell_menu_bar(_ctx: &mut AppContext) -> MenuBar {
     MenuBar::new(vec![app_menu, file_menu, edit_menu, window_menu])
 }
 
-fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>) {
+fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>) {
     ctx.add_window(
         AddWindowOptions {
             title: Some(DEFAULT_WINDOW_TITLE.to_string()),
@@ -1057,7 +1057,8 @@ fn main() -> Result<()> {
     #[cfg(target_os = "macos")]
     nexshell::platform::macos::install_warp_ime_shims();
 
-    let foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>> = Arc::new(Mutex::new(Vec::new()));
+    // 每个 tab 一组 flag（组内每个 pane 一个），任一 pane 有前台进程都要拦关窗/退出。
+    let foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>> = Arc::new(Mutex::new(Vec::new()));
 
     let flags_for_close = Arc::clone(&foreground_flags);
     let flags_for_quit = Arc::clone(&foreground_flags);
@@ -1072,7 +1073,13 @@ fn main() -> Result<()> {
     callbacks.on_should_close_window = Some(Box::new(move |window_id, ctx| {
         let running_count = flags_for_close
             .lock()
-            .map(|flags| flags.iter().filter(|f| !f.load(Ordering::Relaxed)).count())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .flatten()
+                    .filter(|f| !f.load(Ordering::Relaxed))
+                    .count()
+            })
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则关窗会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
@@ -1111,7 +1118,13 @@ fn main() -> Result<()> {
 
         let running_count = flags_for_quit
             .lock()
-            .map(|flags| flags.iter().filter(|f| !f.load(Ordering::Relaxed)).count())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .flatten()
+                    .filter(|f| !f.load(Ordering::Relaxed))
+                    .count()
+            })
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则 Cmd+Q 会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
