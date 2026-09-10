@@ -258,8 +258,9 @@ impl RootView {
             vec![
                 ModalButton::for_view(rust_i18n::t!("git_panel_ssh_host_key_confirm"), {
                     let tab_id = tab_id.clone();
+                    let entries = prompt.known_hosts_entries.clone();
                     move |view: &mut Self, ctx: &mut ViewContext<Self>| {
-                        view.queue_git_push_for_tab(&tab_id, true, ctx);
+                        view.queue_git_push_for_tab(&tab_id, Some(entries.clone()), ctx);
                     }
                 }),
                 ModalButton::for_view(

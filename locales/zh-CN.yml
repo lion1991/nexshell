@@ -227,7 +227,7 @@ git_panel_ssh_host_key_title: 是否信任 SSH 主机密钥？
 git_panel_ssh_host_key_title_host: 是否信任 %{host} 的 SSH 主机密钥？
 git_panel_ssh_host_key_message: Git 推送正在首次连接这个 SSH 主机。继续前请核对指纹。
 git_panel_ssh_host_key_fingerprint: "指纹：%{fingerprint}"
-git_panel_ssh_host_key_warning: 继续后，NexShell 会让 OpenSSH 添加这个新的主机密钥并重新推送。已变化的主机密钥不会被自动接受。
+git_panel_ssh_host_key_warning: 继续后，NexShell 会把上面这把主机密钥写入 known_hosts，并以严格校验重新推送。已变化的主机密钥不会被自动接受。
 git_panel_ssh_host_key_confirm: 信任并推送
 git_panel_ssh_host_key_cancel: 取消
 

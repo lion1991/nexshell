@@ -86,19 +86,19 @@ impl RootView {
     pub(super) fn queue_git_push_for_tab(
         &mut self,
         tab_id: &str,
-        accept_new_ssh_host: bool,
+        trusted_host_key: Option<String>,
         ctx: &mut ViewContext<Self>,
     ) {
         let Some(index) = self.terminal_tabs.iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        self.queue_git_push_for_index(index, accept_new_ssh_host, ctx);
+        self.queue_git_push_for_index(index, trusted_host_key, ctx);
     }
 
     fn queue_git_push_for_index(
         &mut self,
         index: usize,
-        accept_new_ssh_host: bool,
+        trusted_host_key: Option<String>,
         ctx: &mut ViewContext<Self>,
     ) {
         let Some(tab) = self.terminal_tabs.get(index) else {
@@ -116,9 +116,7 @@ impl RootView {
         let Some(worker) = tab.git_worker.as_ref() else {
             return;
         };
-        if !worker.send(GitRequest::Push {
-            accept_new_ssh_host,
-        }) {
+        if !worker.send(GitRequest::Push { trusted_host_key }) {
             return;
         }
         let tab_mut = &mut self.terminal_tabs[index];
@@ -131,7 +129,7 @@ impl RootView {
         let Some(panel_index) = self.active_git_panel_tab_index() else {
             return;
         };
-        self.queue_git_push_for_index(panel_index, false, ctx);
+        self.queue_git_push_for_index(panel_index, None, ctx);
     }
 
     pub(super) fn queue_git_discard_worktree_change_for_tab(

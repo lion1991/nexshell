@@ -23,7 +23,7 @@ pub enum HostKeyVerdict {
 }
 
 /// 默认 known_hosts 路径（~/.ssh/known_hosts）。
-fn default_known_hosts_path() -> Option<PathBuf> {
+pub fn default_known_hosts_path() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .filter(|value| !value.is_empty())?;
