@@ -124,10 +124,10 @@ pub enum GitRequest {
         message: String,
         amend: bool,
     },
-    /// `git push` 到当前分支 upstream。
+    /// `git push` 到当前分支 upstream。`trusted_host_key` 为用户确认过的 known_hosts 行。
     Push {
         expected_repo: PathBuf,
-        accept_new_ssh_host: bool,
+        trusted_host_key: Option<String>,
     },
     Shutdown,
 }
@@ -654,10 +654,10 @@ async fn run_worker(
             },
             GitRequest::Push {
                 expected_repo,
-                accept_new_ssh_host,
+                trusted_host_key,
             } => match matched_repo(&current_repo, &expected_repo, &evt_tx).await {
                 Some(root) => {
-                    run_push(&evt_tx, &root, history_limit, accept_new_ssh_host).await;
+                    run_push(&evt_tx, &root, history_limit, trusted_host_key).await;
                 }
                 None => {
                     let _ = evt_tx.send(GitEvent::PushFinished { success: false }).await;
@@ -833,12 +833,11 @@ async fn run_push(
     evt_tx: &async_channel::Sender<GitEvent>,
     root: &std::path::Path,
     history_limit: usize,
-    accept_new_ssh_host: bool,
+    trusted_host_key: Option<String>,
 ) {
-    let policy = if accept_new_ssh_host {
-        git_ops::SshHostKeyPolicy::AcceptNew
-    } else {
-        git_ops::SshHostKeyPolicy::Ask
+    let policy = match trusted_host_key {
+        Some(entries) => git_ops::SshHostKeyPolicy::Trust(entries),
+        None => git_ops::SshHostKeyPolicy::Ask,
     };
     let success = match git_ops::push(root, policy) {
         Ok(()) => {
@@ -999,6 +998,7 @@ mod tests {
                     message: "prompt".into(),
                     host: Some("example.com".into()),
                     fingerprint: Some("SHA256:x".into()),
+                    known_hosts_entries: "example.com ssh-ed25519 AAAA\n".into(),
                 },
             },
         );
@@ -1720,7 +1720,7 @@ mod tests {
 
         assert!(handle.send(GitRequest::Push {
             expected_repo: repo_root.expect("push 前应拿到 repo_root"),
-            accept_new_ssh_host: false,
+            trusted_host_key: None,
         }));
         let first_push_event = rt.block_on(async {
             tokio::time::timeout(Duration::from_secs(3), evt_rx.recv())

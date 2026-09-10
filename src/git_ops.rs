@@ -90,10 +90,12 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SshHostKeyPolicy {
+    /// 未知主机先弹确认，不自动写 known_hosts。
     Ask,
-    AcceptNew,
+    /// 用户已确认展示的 key：先把这些 keyscan 行固定进 known_hosts，再严格校验推送。
+    Trust(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,6 +103,8 @@ pub struct SshHostKeyPrompt {
     pub message: String,
     pub host: Option<String>,
     pub fingerprint: Option<String>,
+    /// 展示给用户的那把 key 的 known_hosts 原文；确认后原样固定，避免与实际连接脱节。
+    pub known_hosts_entries: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,6 +150,7 @@ pub fn ssh_host_key_prompt_from_git_error(message: &str) -> Option<SshHostKeyPro
             .lines()
             .find_map(extract_ssh_host_key_prompt_fingerprint),
         message: normalized.trim().to_string(),
+        known_hosts_entries: String::new(),
     })
 }
 
@@ -163,14 +168,15 @@ fn extract_ssh_host_key_prompt_fingerprint(line: &str) -> Option<String> {
     Some(line[start..].trim().trim_end_matches('.').to_string())
 }
 
-fn git_ssh_command(existing: Option<&str>, host_key_policy: SshHostKeyPolicy) -> String {
+fn git_ssh_command(existing: Option<&str>, host_key_policy: &SshHostKeyPolicy) -> String {
     let base = existing
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("ssh");
     let strict_host_key_checking = match host_key_policy {
         SshHostKeyPolicy::Ask => "ask",
-        SshHostKeyPolicy::AcceptNew => "accept-new",
+        // 确认后的 key 已写入 known_hosts，这里必须严格校验，不能再放行新 key。
+        SshHostKeyPolicy::Trust(_) => "yes",
     };
     format!(
         "{base} -o BatchMode=yes -o NumberOfPasswordPrompts=0 -o StrictHostKeyChecking={strict_host_key_checking}"
@@ -184,7 +190,9 @@ fn push_ssh_host_key_prompt(repo: &Path) -> Option<SshHostKeyPrompt> {
     }
 
     let display_host = endpoint.known_hosts_target();
-    let fingerprint = scan_ssh_host_key_fingerprint(&endpoint);
+    // 拿不到 keyscan 结果就没有可固定的 key，不弹确认。
+    let entries = scan_ssh_host_keys(&endpoint)?;
+    let fingerprint = ssh_host_key_fingerprint(&entries);
     let mut message = format!("The authenticity of host '{display_host}' can't be established.");
     if let Some(fingerprint) = fingerprint.as_deref() {
         message.push_str(&format!("\nHost key fingerprint is {fingerprint}."));
@@ -197,6 +205,7 @@ fn push_ssh_host_key_prompt(repo: &Path) -> Option<SshHostKeyPrompt> {
         message,
         host: Some(display_host),
         fingerprint,
+        known_hosts_entries: entries,
     })
 }
 
@@ -205,14 +214,29 @@ fn push_ssh_endpoint(repo: &Path) -> Option<SshEndpoint> {
     if branch == "HEAD" || branch.is_empty() {
         return None;
     }
-    let remote_key = format!("branch.{branch}.remote");
-    let remote = run_git(repo, &["config", "--get", &remote_key]).ok()?;
-    let remote = remote.trim();
-    if remote.is_empty() {
-        return None;
-    }
-    let url = run_git(repo, &["remote", "get-url", "--push", remote]).ok()?;
+    let config = |key: &str| run_git(repo, &["config", "--get", key]).ok();
+    let remote = resolve_push_remote(
+        config(&format!("branch.{branch}.pushRemote")).as_deref(),
+        config("remote.pushDefault").as_deref(),
+        config(&format!("branch.{branch}.remote")).as_deref(),
+    )?;
+    let url = run_git(repo, &["remote", "get-url", "--push", &remote]).ok()?;
     parse_ssh_endpoint(url.trim())
+}
+
+/// git push 的 remote 优先级：branch.<b>.pushRemote > remote.pushDefault > branch.<b>.remote > origin。
+fn resolve_push_remote(
+    branch_push_remote: Option<&str>,
+    remote_push_default: Option<&str>,
+    branch_remote: Option<&str>,
+) -> Option<String> {
+    [branch_push_remote, remote_push_default, branch_remote]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .or(Some("origin"))
+        .map(str::to_string)
 }
 
 fn parse_ssh_endpoint(url: &str) -> Option<SshEndpoint> {
@@ -281,7 +305,8 @@ fn ssh_known_host_exists(endpoint: &SshEndpoint) -> bool {
         .unwrap_or(false)
 }
 
-fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
+/// keyscan 得到的 known_hosts 原文行（去掉注释和空行）。
+fn scan_ssh_host_keys(endpoint: &SshEndpoint) -> Option<String> {
     let mut keyscan = background_command("ssh-keyscan");
     keyscan
         .args(["-T", "5", "-t", "ed25519,ecdsa,rsa"])
@@ -292,10 +317,29 @@ fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
         keyscan.args(["-p", &port.to_string()]);
     }
     let keyscan_output = keyscan.arg(&endpoint.host).output().ok()?;
-    if keyscan_output.stdout.is_empty() {
+    let entries = sanitize_known_hosts_entries(&String::from_utf8_lossy(&keyscan_output.stdout));
+    if entries.is_empty() {
         return None;
     }
+    Some(entries)
+}
 
+/// 只保留有效 known_hosts 行，丢掉 ssh-keyscan 的注释和空行。
+fn sanitize_known_hosts_entries(raw: &str) -> String {
+    let mut out = String::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// 对 known_hosts 行取指纹（展示用，取第一条）。
+fn ssh_host_key_fingerprint(entries: &str) -> Option<String> {
     let mut keygen = background_command("ssh-keygen")
         .args(["-lf", "-"])
         .stdin(Stdio::piped())
@@ -303,11 +347,7 @@ fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    keygen
-        .stdin
-        .take()?
-        .write_all(&keyscan_output.stdout)
-        .ok()?;
+    keygen.stdin.take()?.write_all(entries.as_bytes()).ok()?;
     let keygen_output = keygen.wait_with_output().ok()?;
     if !keygen_output.status.success() {
         return None;
@@ -316,6 +356,46 @@ fn scan_ssh_host_key_fingerprint(endpoint: &SshEndpoint) -> Option<String> {
     fingerprints
         .lines()
         .find_map(|line| line.split_whitespace().nth(1).map(str::to_string))
+}
+
+/// 把用户确认过的 known_hosts 行追加到 `path`，已存在的行不重复写。
+fn append_known_hosts_entries_at(path: &Path, entries: &str) -> Result<(), String> {
+    let entries = sanitize_known_hosts_entries(entries);
+    if entries.is_empty() {
+        return Err("no host key to trust".to_string());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("{error}"))?;
+    }
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let mut appended = String::new();
+    for line in entries.lines() {
+        if !existing.lines().any(|known| known.trim() == line) {
+            appended.push_str(line);
+            appended.push('\n');
+        }
+    }
+    if appended.is_empty() {
+        return Ok(());
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("{error}"))?;
+    if !existing.is_empty() && !existing.ends_with('\n') {
+        file.write_all(b"\n").map_err(|error| format!("{error}"))?;
+    }
+    file.write_all(appended.as_bytes())
+        .map_err(|error| format!("{error}"))
+}
+
+/// 固定用户确认的 host key 到 ~/.ssh/known_hosts。
+fn pin_known_hosts_entries(entries: &str) -> Result<(), String> {
+    let path = crate::ssh_session::default_known_hosts_path()
+        .ok_or_else(|| "cannot locate known_hosts (HOME is unset)".to_string())?;
+    append_known_hosts_entries_at(&path, entries)
+        .map_err(|error| format!("failed to record host key in known_hosts: {error}"))
 }
 
 /// 仓库根目录（rev-parse --show-toplevel）。非 git 目录返回 Err。
@@ -1115,14 +1195,19 @@ pub fn commit(repo: &Path, message: &str, amend: bool) -> Result<(), String> {
 
 /// `git push` 到当前分支配置的 upstream。
 pub fn push(repo: &Path, ssh_host_key_policy: SshHostKeyPolicy) -> Result<(), GitPushError> {
-    if ssh_host_key_policy == SshHostKeyPolicy::Ask {
-        if let Some(prompt) = push_ssh_host_key_prompt(repo) {
-            return Err(GitPushError::SshHostKeyPrompt(prompt));
+    match &ssh_host_key_policy {
+        SshHostKeyPolicy::Ask => {
+            if let Some(prompt) = push_ssh_host_key_prompt(repo) {
+                return Err(GitPushError::SshHostKeyPrompt(prompt));
+            }
+        }
+        SshHostKeyPolicy::Trust(entries) => {
+            pin_known_hosts_entries(entries).map_err(GitPushError::Failed)?;
         }
     }
 
     let existing = std::env::var("GIT_SSH_COMMAND").ok();
-    let ssh_command = git_ssh_command(existing.as_deref(), ssh_host_key_policy);
+    let ssh_command = git_ssh_command(existing.as_deref(), &ssh_host_key_policy);
     let result = run_git_configured(repo, &["push"], |command| {
         command
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -1130,8 +1215,11 @@ pub fn push(repo: &Path, ssh_host_key_policy: SshHostKeyPolicy) -> Result<(), Gi
     });
 
     result.map(|_| ()).map_err(|message| {
-        if ssh_host_key_policy == SshHostKeyPolicy::Ask {
-            if let Some(prompt) = ssh_host_key_prompt_from_git_error(&message) {
+        // ssh 侧报未知主机时，仍然只信 keyscan 得到并展示给用户的那把 key。
+        if matches!(ssh_host_key_policy, SshHostKeyPolicy::Ask)
+            && ssh_host_key_prompt_from_git_error(&message).is_some()
+        {
+            if let Some(prompt) = push_ssh_host_key_prompt(repo) {
                 return GitPushError::SshHostKeyPrompt(prompt);
             }
         }
@@ -1272,14 +1360,63 @@ Host key verification failed.
 
     #[test]
     fn git_ssh_command_disables_terminal_prompts() {
-        let command = git_ssh_command(Some("ssh -i key"), SshHostKeyPolicy::Ask);
+        let command = git_ssh_command(Some("ssh -i key"), &SshHostKeyPolicy::Ask);
         assert!(command.contains("ssh -i key"));
         assert!(command.contains("BatchMode=yes"));
         assert!(command.contains("NumberOfPasswordPrompts=0"));
         assert!(command.contains("StrictHostKeyChecking=ask"));
 
-        let command = git_ssh_command(None, SshHostKeyPolicy::AcceptNew);
-        assert!(command.contains("StrictHostKeyChecking=accept-new"));
+        let command = git_ssh_command(
+            None,
+            &SshHostKeyPolicy::Trust("example.com ssh-ed25519 AAAA".into()),
+        );
+        assert!(command.contains("StrictHostKeyChecking=yes"));
+    }
+
+    #[test]
+    fn resolve_push_remote_follows_git_priority() {
+        assert_eq!(
+            resolve_push_remote(Some("fork"), Some("mirror"), Some("origin")).as_deref(),
+            Some("fork")
+        );
+        assert_eq!(
+            resolve_push_remote(Some("  "), Some("mirror"), Some("origin")).as_deref(),
+            Some("mirror")
+        );
+        assert_eq!(
+            resolve_push_remote(None, None, Some("upstream")).as_deref(),
+            Some("upstream")
+        );
+        assert_eq!(
+            resolve_push_remote(None, None, None).as_deref(),
+            Some("origin")
+        );
+    }
+
+    #[test]
+    fn known_hosts_entries_are_pinned_without_duplicates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(".ssh").join("known_hosts");
+        let entries = "# comment
+[example.com]:2222 ssh-ed25519 AAAAKEY
+
+";
+
+        append_known_hosts_entries_at(&path, entries).unwrap();
+        append_known_hosts_entries_at(&path, entries).unwrap();
+
+        let recorded = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            recorded.lines().collect::<Vec<_>>(),
+            vec!["[example.com]:2222 ssh-ed25519 AAAAKEY"]
+        );
+
+        assert!(append_known_hosts_entries_at(
+            &path,
+            "# only comments
+"
+        )
+        .is_err());
     }
 
     #[test]
