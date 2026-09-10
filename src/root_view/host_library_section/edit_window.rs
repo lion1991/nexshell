@@ -289,6 +289,8 @@ impl RootView {
                 let is_new = ctx.model(&_model).is_new;
                 if self.save_host_edit_draft(draft, is_new, ctx) {
                     self.close_edit_window(ctx);
+                    // 连接配置可能已变，同步 fleet 让监控按新配置重启。
+                    self.sync_host_fleets(ctx);
                 }
                 ctx.notify();
             }
