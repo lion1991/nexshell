@@ -1,5 +1,5 @@
 //! EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第②步）：合成层 + macOS VideoToolbox H.264 硬解。
-//! 挂 EGFX DVC 通道，广告 V10.7+V8.1+V8（接上 decoder 后服务端自动选 AVC420）；
+//! 挂 EGFX DVC 通道，广告 V8.1+V8（接上 decoder 后服务端自动选 AVC420）；
 //! AVC420/Uncompressed/ClearCodec 均由库解好经 on_bitmap_updated（RGBA）落 surface（ClearCodec
 //! 连接级单例解码器，上游 #1175）；Progressive(WireToSurface2) 由本层调库解码器写 tile。
 //! EndFrame 时把已映射 surface 的脏区合成进共享 RdpFramebuffer，对齐现有 publish 语义。
@@ -23,10 +23,9 @@ use ironrdp_egfx::client::{
 };
 use ironrdp_egfx::decode::H264Decoder;
 use ironrdp_egfx::pdu::{
-    CacheToSurfacePdu, CapabilitiesV107Flags, CapabilitiesV81Flags, CapabilitiesV8Flags,
-    CapabilitySet, DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu,
-    MapSurfaceToScaledOutputPdu, SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu,
-    WireToSurface2Pdu,
+    CacheToSurfacePdu, CapabilitiesV81Flags, CapabilitiesV8Flags, CapabilitySet,
+    DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu, MapSurfaceToScaledOutputPdu,
+    SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu, WireToSurface2Pdu,
 };
 use parking_lot::Mutex;
 
@@ -61,7 +60,7 @@ use super::{DirtyRect, RdpEvent, RdpFramebuffer, RdpStats};
 
 /// 挂 EGFX 合成 handler + VideoToolbox 解码器的 DVC 静态通道。
 ///
-/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，现有 capabilities()（V10.7+V8.1+V8）
+/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，现有 capabilities()（V8.1+V8）
 /// 生效，服务端将选 AVC420（仍会混发 ClearCodec 小块与 Progressive）。
 pub fn build_dvc_client(
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
@@ -241,21 +240,14 @@ impl EgfxHandler {
 }
 
 impl GraphicsPipelineHandler for EgfxHandler {
-    /// 广告 V10.7(AVC420+444) + V8.1(AVC420) + V8 兜底；接上 decoder 后不再被库过滤。
+    /// 只广告 V8.1(AVC420) + V8 兜底：V10.x 未置 AVC_DISABLED 即表示支持 AVC444，而本 handler
+    /// 无 AVC444 解码（收到只丢弃），服务端择优选中后会黑屏——照库 client.rs 的
+    /// capabilities() 文档去掉 V10.x，SMALL_CACHE 语义由 V8.1/V8 保留。
     /// 默认声明 SMALL_CACHE，避免 Windows 服务端走长生命周期 surface-cache 复用路径。
-    /// 拖窗残留 trace 显示残留像素最终来自旧 s2s 内容被 s2c 捕获后再次 c2s 贴回，
-    /// 且服务端没有后续擦除；small-cache 会促使服务端更早 evict/重发直接擦除更新。
     /// 需要回到旧 large-cache 行为做 A/B 时，设置 NEXSHELL_RDP_EGFX_LARGE_CACHE=1。
     fn capabilities(&self) -> Vec<CapabilitySet> {
         let small_cache = std::env::var_os("NEXSHELL_RDP_EGFX_LARGE_CACHE").is_none();
         vec![
-            CapabilitySet::V10_7 {
-                flags: if small_cache {
-                    CapabilitiesV107Flags::SMALL_CACHE
-                } else {
-                    CapabilitiesV107Flags::empty()
-                },
-            },
             CapabilitySet::V8_1 {
                 flags: CapabilitiesV81Flags::AVC420_ENABLED
                     | if small_cache {
@@ -621,6 +613,32 @@ impl GraphicsPipelineHandler for EgfxHandler {
                     w.codec_id
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 未实现 AVC444 解码前不得广告 V10.x（库据此判定 AVC444 可用）。
+    #[test]
+    fn advertised_capabilities_exclude_avc444() {
+        let (tx, _rx) = async_channel::unbounded();
+        let handler = EgfxHandler::new(
+            Arc::new(Mutex::new(RdpFramebuffer::new(64, 64))),
+            tx,
+            Arc::new(RdpStats::new()),
+            64,
+            64,
+        );
+        let caps = handler.capabilities();
+        assert!(!caps.is_empty());
+        for cap in &caps {
+            assert!(
+                matches!(cap, CapabilitySet::V8_1 { .. } | CapabilitySet::V8 { .. }),
+                "不应广告支持 AVC444 的能力集: {cap:?}"
+            );
         }
     }
 }
