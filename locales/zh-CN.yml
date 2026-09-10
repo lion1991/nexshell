@@ -471,3 +471,7 @@ log_banner_truncated: 超出上限已截断
 toast_recording_started: 已开始录制日志
 toast_recording_saved: "日志已保存：%{path}"
 toast_recording_save_failed: "日志保存失败：%{error}"
+
+# === SSH host key ===
+ssh_host_key_changed: "%{host} 的 SSH 主机密钥与 %{path} 中记录的不一致，连接已中止。确认主机确实更换过密钥后，请删除该文件中对应的旧条目再重连。"
+ssh_known_hosts_unavailable: 无法定位 known_hosts 文件（HOME 未设置），SSH 主机密钥无法校验，连接已中止。

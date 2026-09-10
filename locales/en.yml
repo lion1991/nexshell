@@ -471,3 +471,7 @@ log_banner_truncated: truncated at size cap
 toast_recording_started: Recording started
 toast_recording_saved: "Recording saved: %{path}"
 toast_recording_save_failed: "Failed to save recording: %{error}"
+
+# === SSH host key ===
+ssh_host_key_changed: "The SSH host key for %{host} does not match the one recorded in %{path}; the connection was aborted. If the host really rotated its key, remove the stale entry from that file and reconnect."
+ssh_known_hosts_unavailable: Cannot locate known_hosts (HOME is unset), so the SSH host key cannot be verified; the connection was aborted.
