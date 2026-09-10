@@ -195,6 +195,14 @@ impl EgfxHandler {
         }
     }
 
+    /// 远端可控分配超预算等致命情况：打日志并通知 UI 断开（分配已被拒绝，不 panic）。
+    fn fail_session(&self, detail: &str) {
+        eprintln!("[egfx] fatal: {detail}");
+        let _ = self.event_tx.try_send(RdpEvent::Disconnected {
+            reason: detail.to_owned(),
+        });
+    }
+
     /// EndFrame：把本帧脏区包围盒内的已映射 surface 合成进 framebuffer，+generation，发一条
     /// FrameUpdated。帧内中间态不发布。
     fn publish(&mut self) {
@@ -310,7 +318,12 @@ impl GraphicsPipelineHandler for EgfxHandler {
                 surface.id, surface.width, surface.height
             );
         }
-        self.compositor.create_surface(surface);
+        if let Err(e) = self
+            .compositor
+            .create_surface(surface.id, surface.width, surface.height)
+        {
+            self.fail_session(&e.to_string());
+        }
     }
 
     fn on_surface_deleted(&mut self, surface_id: u16) {
@@ -507,7 +520,9 @@ impl GraphicsPipelineHandler for EgfxHandler {
                 pdu.cache_slot, pdu.surface_id, r.left, r.top, r.right, r.bottom, px
             );
         }
-        self.compositor.surface_to_cache(pdu);
+        if let Err(e) = self.compositor.surface_to_cache(pdu) {
+            self.fail_session(&e.to_string());
+        }
         wire_dump::probe_surface_to_cache(&self.compositor, pdu);
     }
 
