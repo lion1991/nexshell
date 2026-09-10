@@ -680,7 +680,7 @@ impl RootView {
         // 重连：旧 handle / sftp worker 都失效，全部清掉，等新 handle 推上来再重建。
         self.terminal_tabs[index].ssh_handle = None;
         // 旧 worker 持有的 SftpSession 已随原 SSH 通道关闭，留着会一直返回 "session closed"。
-        self.terminal_tabs[index].sftp_worker = None;
+        self.terminal_tabs[index].clear_file_panel_worker();
         self.terminal_tabs[index].host_overview_monitor = None;
         self.terminal_tabs[index].file_panel_state.loading =
             self.terminal_tabs[index].file_panel_open;

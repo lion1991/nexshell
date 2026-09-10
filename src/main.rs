@@ -541,6 +541,8 @@ struct TerminalSessionTab {
     file_panel_state: FilePanelState,
     /// 后台文件 worker。远程 tab 走 SFTP，本地 tab 走本机文件系统。
     sftp_worker: Option<FilePanelWorkerHandle>,
+    /// 当前 worker 的代号；事件必须同时匹配 tab 与它，旧 worker 的迟到事件才不会覆盖新连接。
+    sftp_worker_generation: Option<Generation>,
     /// 文件项 hover 状态，按名字索引。
     file_panel_entry_states: RefCell<HashMap<String, MouseStateHandle>>,
     file_panel_refresh_state: MouseStateHandle,
@@ -645,6 +647,12 @@ impl TerminalSessionTab {
 
     fn window_title(&self) -> String {
         self.label()
+    }
+
+    /// 丢弃文件面板 worker，并作废其代号（迟到事件不再命中本 tab）。
+    fn clear_file_panel_worker(&mut self) {
+        self.sftp_worker = None;
+        self.sftp_worker_generation = None;
     }
 
     fn code_viewer_is_saving(&self) -> bool {
