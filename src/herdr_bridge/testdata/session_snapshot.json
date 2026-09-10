@@ -1,0 +1,265 @@
+{
+  "id": "snap",
+  "result": {
+    "type": "session_snapshot",
+    "snapshot": {
+      "version": "0.9.0",
+      "protocol": 22,
+      "focused_workspace_id": "w12",
+      "focused_tab_id": "w12:t1",
+      "focused_pane_id": "w12:p1",
+      "workspaces": [
+        {
+          "workspace_id": "wG",
+          "number": 1,
+          "label": "tweaks",
+          "focused": false,
+          "active_tab_id": "wG:t1"
+        },
+        {
+          "workspace_id": "wS",
+          "number": 7,
+          "label": "taskops",
+          "focused": false,
+          "active_tab_id": "wS:t1"
+        },
+        {
+          "workspace_id": "w11",
+          "number": 11,
+          "label": "impl-tools",
+          "focused": false,
+          "active_tab_id": "w11:t1"
+        },
+        {
+          "workspace_id": "w12",
+          "number": 12,
+          "label": "nexshell",
+          "focused": true,
+          "active_tab_id": "w12:t1"
+        },
+        {
+          "workspace_id": "w14",
+          "number": 13,
+          "label": "impl-tools",
+          "focused": false,
+          "active_tab_id": "w14:t1"
+        },
+        {
+          "workspace_id": "wY1",
+          "number": 6,
+          "label": "Proxy",
+          "focused": false,
+          "active_tab_id": "wY1:t1"
+        },
+        {
+          "workspace_id": "wY2",
+          "number": 7,
+          "label": "Proxy",
+          "focused": false,
+          "active_tab_id": "wY2:t1"
+        },
+        {
+          "workspace_id": "wZ1",
+          "number": 8,
+          "label": "qemUI",
+          "focused": false,
+          "active_tab_id": "wZ1:t1"
+        },
+        {
+          "workspace_id": "wZ2",
+          "number": 9,
+          "label": "qemUI",
+          "focused": false,
+          "active_tab_id": "wZ2:t1"
+        }
+      ],
+      "tabs": [
+        {
+          "tab_id": "wG:t1",
+          "workspace_id": "wG",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "wS:t1",
+          "workspace_id": "wS",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "w11:t1",
+          "workspace_id": "w11",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "w12:t1",
+          "workspace_id": "w12",
+          "number": 1,
+          "label": "1",
+          "focused": true
+        },
+        {
+          "tab_id": "w14:t1",
+          "workspace_id": "w14",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "wY1:t1",
+          "workspace_id": "wY1",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "wY2:t1",
+          "workspace_id": "wY2",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "wZ1:t1",
+          "workspace_id": "wZ1",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        },
+        {
+          "tab_id": "wZ2:t1",
+          "workspace_id": "wZ2",
+          "number": 1,
+          "label": "1",
+          "focused": false
+        }
+      ],
+      "panes": [
+        {
+          "pane_id": "wG:p1",
+          "tab_id": "wG:t1",
+          "workspace_id": "wG",
+          "focused": false,
+          "cwd": null,
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/tweaks"
+        },
+        {
+          "pane_id": "wS:p2",
+          "tab_id": "wS:t1",
+          "workspace_id": "wS",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/work/taskops",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/work/taskops"
+        },
+        {
+          "pane_id": "w11:p1",
+          "tab_id": "w11:t1",
+          "workspace_id": "w11",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/work/impl-tools",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/work/impl-tools"
+        },
+        {
+          "pane_id": "w12:p1",
+          "tab_id": "w12:t1",
+          "workspace_id": "w12",
+          "focused": true,
+          "cwd": "/Users/matt/SynologyDrive/code/vpstools/nexshell",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/vpstools/nexshell"
+        },
+        {
+          "pane_id": "w14:p1",
+          "tab_id": "w14:t1",
+          "workspace_id": "w14",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/work/impl-tools",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/work/impl-tools"
+        },
+        {
+          "pane_id": "wY1:p1",
+          "tab_id": "wY1:t1",
+          "workspace_id": "wY1",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/Proxy/WProxyClient",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/Proxy/WProxyClient"
+        },
+        {
+          "pane_id": "wY2:p1",
+          "tab_id": "wY2:t1",
+          "workspace_id": "wY2",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/Proxy/WProxyWindows",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/Proxy/WProxyWindows"
+        },
+        {
+          "pane_id": "wZ1:p1",
+          "tab_id": "wZ1:t1",
+          "workspace_id": "wZ1",
+          "focused": false,
+          "cwd": null,
+          "foreground_cwd": null
+        },
+        {
+          "pane_id": "wZ2:p1",
+          "tab_id": "wZ2:t1",
+          "workspace_id": "wZ2",
+          "focused": false,
+          "cwd": "/Users/matt/SynologyDrive/code/work/tools/qemUI",
+          "foreground_cwd": "/Users/matt/SynologyDrive/code/work/tools/qemUI"
+        }
+      ],
+      "layouts": [
+        {
+          "workspace_id": "wG",
+          "tab_id": "wG:t1",
+          "focused_pane_id": "wG:p1"
+        },
+        {
+          "workspace_id": "wS",
+          "tab_id": "wS:t1",
+          "focused_pane_id": "wS:p2"
+        },
+        {
+          "workspace_id": "w11",
+          "tab_id": "w11:t1",
+          "focused_pane_id": "w11:p1"
+        },
+        {
+          "workspace_id": "w12",
+          "tab_id": "w12:t1",
+          "focused_pane_id": "w12:p1"
+        },
+        {
+          "workspace_id": "w14",
+          "tab_id": "w14:t1",
+          "focused_pane_id": "w14:p1"
+        },
+        {
+          "workspace_id": "wY1",
+          "tab_id": "wY1:t1",
+          "focused_pane_id": "wY1:p1"
+        },
+        {
+          "workspace_id": "wY2",
+          "tab_id": "wY2:t1",
+          "focused_pane_id": "wY2:p1"
+        },
+        {
+          "workspace_id": "wZ1",
+          "tab_id": "wZ1:t1",
+          "focused_pane_id": "wZ1:p1"
+        },
+        {
+          "workspace_id": "wZ2",
+          "tab_id": "wZ2:t1",
+          "focused_pane_id": "wZ2:p1"
+        }
+      ],
+      "agents": []
+    }
+  }
+}

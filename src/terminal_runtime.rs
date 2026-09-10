@@ -17,6 +17,7 @@ use std::{
 use parking_lot::FairMutex;
 use portable_pty::PtySize;
 
+use crate::foreground_kind::ForegroundKind;
 use crate::pty_event_loop;
 use crate::pty_event_loop::{EventLoopHandle, Message, PtyEvent, PtySink};
 use crate::ssh_session::{ChannelRequest, SshConnectOptions, SshHandle, SshSession};
@@ -205,6 +206,9 @@ pub struct TerminalRuntimeSnapshot {
     pub grid: TerminalGridSnapshot,
     /// shell 通过 OSC 7 上报的本地 cwd；远程 / 串口 tab 恒为 None。
     pub local_cwd: Option<PathBuf>,
+    /// git / 文件面板要跟随的目录：前台是 herdr 时取 herdr 焦点 pane 的 cwd，
+    /// 否则等于 `local_cwd`。分屏 / 新 tab 继承仍用 `local_cwd`。
+    pub panel_cwd: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -2345,6 +2349,8 @@ struct TerminalRuntimeState {
     shell_display_name: Option<String>,
     /// 最近一次 OSC 7 上报的本地 cwd（远程 tab 不解析，恒为 None）。
     local_cwd: Option<PathBuf>,
+    /// 前台进程是 herdr 时，herdr server 焦点 pane 的 cwd；否则 None。
+    herdr_cwd: Option<PathBuf>,
     /// OSC 7 扫描跨 chunk 拼接缓冲；上限 OSC7_BUF_CAP，超出丢弃旧字节。
     osc7_scan_buf: Vec<u8>,
     /// 录制中为 Some；process_output 旁路 raw bytes 进去。
@@ -2390,6 +2396,7 @@ impl TerminalRuntimeState {
             bootstrap_scan_buf: Vec::new(),
             shell_display_name: None,
             local_cwd: None,
+            herdr_cwd: None,
             osc7_scan_buf: Vec::new(),
             recorder: None,
         }
@@ -2447,6 +2454,7 @@ impl TerminalRuntimeState {
             marked_text: self.marked_text.clone(),
             lines,
             grid,
+            panel_cwd: self.herdr_cwd.clone().or_else(|| self.local_cwd.clone()),
             local_cwd: self.local_cwd.clone(),
         }
     }
@@ -2472,6 +2480,17 @@ impl TerminalRuntimeState {
             };
             self.find_pulse = self.find_pulse.wrapping_add(1);
         }
+    }
+
+    /// 写入 herdr 焦点 pane 的 cwd。变化时推进 revision，让 snapshot 缓存失效
+    /// （herdr cwd 不由 pty 输出驱动，光靠 revision 不动面板会读到旧快照）。
+    fn set_herdr_cwd(&mut self, cwd: Option<PathBuf>) -> bool {
+        if self.herdr_cwd == cwd {
+            return false;
+        }
+        self.herdr_cwd = cwd;
+        self.revision = self.revision.wrapping_add(1);
+        true
     }
 
     /// 扫描 OSC 7 序列上报的本地 cwd。每次 chunk 都调用，命中即更新 `local_cwd`。
@@ -2781,6 +2800,14 @@ impl Drop for SerialEventLoopHandle {
     }
 }
 
+/// `herdr_lease` 的内容：租约本体 + 上次 resolve 的输入快照（标题, bridge
+/// generation）。两者都没变时跳过重算——`refresh_foreground_status` 是 60Hz。
+#[derive(Default)]
+struct HerdrLeaseState {
+    lease: Option<crate::herdr_bridge::HerdrLease>,
+    resolved_for: Option<(Option<String>, u64)>,
+}
+
 pub struct LocalTerminalRuntime {
     state: Arc<FairMutex<TerminalRuntimeState>>,
     /// `None` for `failed()` runtimes — they have no PTY and no event loop.
@@ -2804,6 +2831,9 @@ pub struct LocalTerminalRuntime {
     pty_fd: Option<LocalPtyDescriptor>,
     /// 前台进程是否为 shell（非 ssh/mosh），由 refresh_foreground_status 更新
     shell_is_foreground: Arc<std::sync::atomic::AtomicBool>,
+    /// 前台是 herdr 期间持有的 bridge 租约 + 上次解析的输入快照；
+    /// 租约 drop 即 release，不会漏计数。
+    herdr_lease: std::sync::Mutex<HerdrLeaseState>,
     /// 上一次实际下发的 resize 请求，None 表示从未请求过；用于去重跳过同尺寸重复 resize。
     last_resize_request: std::sync::Mutex<Option<(u16, u16, u16, u16)>>,
 }
@@ -2990,6 +3020,7 @@ impl LocalTerminalRuntime {
             event_rx: Some(event_rx),
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            herdr_lease: std::sync::Mutex::new(HerdrLeaseState::default()),
             last_resize_request: std::sync::Mutex::new(None),
         })
     }
@@ -3042,6 +3073,7 @@ impl LocalTerminalRuntime {
             event_rx: Some(event_rx),
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            herdr_lease: std::sync::Mutex::new(HerdrLeaseState::default()),
             last_resize_request: std::sync::Mutex::new(None),
         })
     }
@@ -3075,6 +3107,7 @@ impl LocalTerminalRuntime {
                 bootstrap_scan_buf: Vec::new(),
                 shell_display_name: None,
                 local_cwd: None,
+                herdr_cwd: None,
                 osc7_scan_buf: Vec::new(),
                 recorder: None,
             })),
@@ -3086,6 +3119,7 @@ impl LocalTerminalRuntime {
             event_rx: None,
             pty_fd: None,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            herdr_lease: std::sync::Mutex::new(HerdrLeaseState::default()),
             last_resize_request: std::sync::Mutex::new(None),
         }
     }
@@ -3151,6 +3185,7 @@ impl LocalTerminalRuntime {
             event_rx,
             pty_fd,
             shell_is_foreground: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            herdr_lease: std::sync::Mutex::new(HerdrLeaseState::default()),
             last_resize_request: std::sync::Mutex::new(None),
         })
     }
@@ -3192,9 +3227,72 @@ impl LocalTerminalRuntime {
 
     /// 刷新前台进程状态快照，由 wakeup 回调（~60Hz）驱动
     pub fn refresh_foreground_status(&self) {
-        let is_fg = Self::query_shell_foreground(self.pty_fd);
+        let kind = Self::query_foreground_kind(self.pty_fd);
         self.shell_is_foreground
-            .store(is_fg, std::sync::atomic::Ordering::Relaxed);
+            .store(kind.is_shell(), std::sync::atomic::Ordering::Relaxed);
+        self.sync_herdr_lease(kind.is_herdr());
+    }
+
+    /// 按前台是否 herdr 增减 bridge 引用，并把该跟随的 cwd 写进 state。
+    ///
+    /// herdr 焦点是 per-client 的，server 问不到「本 client 在哪个 workspace」，
+    /// 只能靠 herdr client 写进宿主 pty 的窗口标题（默认 `{hostname}: {workspace}`）
+    /// 反查。锁序：先取 title 克隆并放掉 state 锁，再调 bridge（内部有自己的锁），
+    /// 最后重新锁 state 写入——**不在持 state 锁时调 bridge**。
+    fn sync_herdr_lease(&self, is_herdr: bool) {
+        let Ok(mut state) = self.herdr_lease.lock() else {
+            return;
+        };
+        if !is_herdr {
+            state.resolved_for = None;
+            if state.lease.take().is_some() {
+                self.state.lock().set_herdr_cwd(None);
+            }
+            return;
+        }
+
+        let bridge = crate::herdr_bridge::HerdrBridge::global();
+        if state.lease.is_none() {
+            state.lease = Some(bridge.acquire(self.herdr_waker()));
+        }
+
+        // 60Hz 轮询：标题和 bridge generation 都没变就没必要重算，省掉
+        // title clone + resolve 的每帧开销。
+        let generation = bridge.generation();
+        let title_unchanged = {
+            let runtime = self.state.lock();
+            state.resolved_for.as_ref().is_some_and(|(title, gen)| {
+                *gen == generation && title.as_deref() == runtime.title.as_deref()
+            })
+        };
+        if title_unchanged {
+            return;
+        }
+
+        let title = self.state.lock().title.clone();
+        let cwd = bridge.resolve_cwd(title.as_deref());
+        state.resolved_for = Some((title, generation));
+        if self.state.lock().set_herdr_cwd(cwd.clone()) {
+            // 只在真变化时打；轮询命中缓存时根本走不到这里。
+            // RUST_LOG=nexshell::terminal_runtime=debug 可看标题反查是否命中。
+            let title = state.resolved_for.as_ref().and_then(|(t, _)| t.clone());
+            log::debug!(
+                "herdr panel cwd -> {:?} (title {:?})",
+                cwd.as_ref().map(|p| p.display().to_string()),
+                title
+            );
+        }
+    }
+
+    /// bridge cwd 变化时不一定有 pty 输出，借 wakeup 通道戳一次 UI。
+    /// 用 WeakSender：event loop 结束后 upgrade 失败即忽略，不吊住通道。
+    fn herdr_waker(&self) -> Option<crate::herdr_bridge::Waker> {
+        let weak = self.event_loop.as_ref()?.weak_wakeup_tx.clone();
+        Some(Arc::new(move || {
+            if let Some(tx) = weak.upgrade() {
+                let _ = tx.try_send(());
+            }
+        }))
     }
 
     pub fn shell_is_foreground(&self) -> bool {
@@ -3221,11 +3319,13 @@ impl LocalTerminalRuntime {
     }
 
     #[cfg(unix)]
-    fn query_shell_foreground(pty_fd: Option<LocalPtyDescriptor>) -> bool {
-        let Some(fd) = pty_fd else { return true };
+    fn query_foreground_kind(pty_fd: Option<LocalPtyDescriptor>) -> ForegroundKind {
+        let Some(fd) = pty_fd else {
+            return ForegroundKind::default();
+        };
         let fg_pgid = unsafe { libc::tcgetpgrp(fd) };
         if fg_pgid <= 0 {
-            return true;
+            return ForegroundKind::default();
         }
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let ret = unsafe {
@@ -3238,34 +3338,16 @@ impl LocalTerminalRuntime {
             )
         };
         if ret <= 0 {
-            return true;
+            return ForegroundKind::default();
         }
         let name = unsafe { std::ffi::CStr::from_ptr(info.pbi_comm.as_ptr()) };
         let name = name.to_string_lossy();
-        matches!(
-            name.as_ref(),
-            "bash"
-                | "zsh"
-                | "fish"
-                | "sh"
-                | "dash"
-                | "ksh"
-                | "tcsh"
-                | "csh"
-                | "nu"
-                | "nushell"
-                | "pwsh"
-                | "powershell"
-                | "elvish"
-                | "oil"
-                | "osh"
-                | "xonsh"
-        )
+        ForegroundKind::classify(name.as_ref())
     }
 
     #[cfg(not(unix))]
-    fn query_shell_foreground(_pty_fd: Option<LocalPtyDescriptor>) -> bool {
-        true
+    fn query_foreground_kind(_pty_fd: Option<LocalPtyDescriptor>) -> ForegroundKind {
+        ForegroundKind::default()
     }
 
     pub fn send_input(&self, bytes: Vec<u8>) {
@@ -5384,6 +5466,80 @@ mod tests {
         // 第二次 cwd 变更
         state.scan_osc7(b"\x1b]7;file://h/var\x07");
         assert_eq!(state.local_cwd, Some(PathBuf::from("/var")));
+    }
+
+    #[test]
+    fn panel_cwd_defaults_to_local_cwd() {
+        let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
+        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        let snap = state.build_snapshot();
+        assert_eq!(snap.local_cwd, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(snap.panel_cwd, Some(PathBuf::from("/tmp/x")));
+    }
+
+    #[test]
+    fn herdr_cwd_overrides_panel_cwd_but_not_local_cwd() {
+        let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
+        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        state.set_herdr_cwd(Some(PathBuf::from("/srv/repo")));
+        let snap = state.build_snapshot();
+        assert_eq!(snap.local_cwd, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(snap.panel_cwd, Some(PathBuf::from("/srv/repo")));
+    }
+
+    #[test]
+    fn clearing_herdr_cwd_hands_panel_back_to_osc7() {
+        let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
+        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        state.set_herdr_cwd(Some(PathBuf::from("/srv/repo")));
+        state.set_herdr_cwd(None);
+        assert_eq!(
+            state.build_snapshot().panel_cwd,
+            Some(PathBuf::from("/tmp/x"))
+        );
+    }
+
+    /// dispatch 前会给每个本地 tab 都调一次 refresh_foreground_status（含后台
+    /// tab）。非 herdr / 无 pty 的 runtime 上它必须是幂等空操作：不改
+    /// shell_is_foreground、不动 panel_cwd、不占 bridge 租约。
+    #[test]
+    fn refresh_foreground_status_is_idempotent_without_a_pty() {
+        let rt = LocalTerminalRuntime::failed("t", "boom");
+        for _ in 0..3 {
+            rt.refresh_foreground_status();
+        }
+        assert!(rt.shell_is_foreground());
+        let lease_state = rt.herdr_lease.lock().unwrap();
+        assert!(lease_state.lease.is_none());
+        assert!(lease_state.resolved_for.is_none());
+        drop(lease_state);
+        assert_eq!(rt.snapshot().panel_cwd, None);
+    }
+
+    /// 前台从 herdr 变回普通 shell 时，herdr cwd 必须交还给 OSC 7。
+    #[test]
+    fn leaving_herdr_hands_panel_cwd_back_to_osc7() {
+        let rt = LocalTerminalRuntime::failed("t", "boom");
+        rt.state.lock().scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        rt.state.lock().set_herdr_cwd(Some(PathBuf::from("/srv")));
+        assert_eq!(rt.snapshot().panel_cwd, Some(PathBuf::from("/srv")));
+        // 前台不是 herdr → 清 herdr cwd（无租约时也要清）。
+        rt.sync_herdr_lease(false);
+        rt.state.lock().set_herdr_cwd(None);
+        assert_eq!(rt.snapshot().panel_cwd, Some(PathBuf::from("/tmp/x")));
+        assert_eq!(rt.snapshot().local_cwd, Some(PathBuf::from("/tmp/x")));
+    }
+
+    #[test]
+    fn herdr_cwd_change_bumps_revision_to_invalidate_snapshot_cache() {
+        let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
+        let before = state.revision;
+        state.set_herdr_cwd(Some(PathBuf::from("/a")));
+        assert_ne!(state.revision, before);
+        let after = state.revision;
+        // 同值重复写不推进 revision（herdr 事件很吵）。
+        state.set_herdr_cwd(Some(PathBuf::from("/a")));
+        assert_eq!(state.revision, after);
     }
 }
 

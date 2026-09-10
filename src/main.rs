@@ -1040,6 +1040,9 @@ fn main() -> Result<()> {
     #[cfg(unix)]
     raise_open_file_limit();
     // 设了 RUST_LOG 才接管 tracing（看 IronRDP 内部日志，如 RUST_LOG=ironrdp_rdpsnd=debug）。
+    // try_init 同时装 tracing-log 的 LogTracer（tracing-subscriber 默认 feature），
+    // 所以 log::debug! 也从这里出，例如 RUST_LOG=nexshell::herdr_bridge=debug
+    // 能看到 herdr 桥接的连接 / 订阅 / cwd 变更 / 断线重连。
     if std::env::var_os("RUST_LOG").is_some() {
         use tracing_subscriber::EnvFilter;
         let _ = tracing_subscriber::fmt()

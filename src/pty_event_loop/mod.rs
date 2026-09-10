@@ -145,6 +145,10 @@ pub type PtyEventReceiver = async_channel::Receiver<PtyEvent>;
 /// Handle to the running event loop, owned by `LocalTerminalRuntime`.
 pub struct EventLoopHandle {
     pub message_tx: mio_channel::Sender<Message>,
+    /// wakeup 发送端的**弱**引用：外部数据源（如 herdr bridge）能戳一次 UI 重绘，
+    /// 又不延长通道寿命——子进程退出、event loop 线程结束后强引用全部 drop，
+    /// 通道照旧关闭让 UI 的 throttle 流收尾。
+    pub weak_wakeup_tx: async_channel::WeakSender<()>,
     pub wakeup_rx: WakeupReceiver,
     pub event_rx: PtyEventReceiver,
     pub thread: Option<JoinHandle<()>>,
@@ -640,7 +644,7 @@ pub fn spawn_event_loop<S: PtySink>(
         master,
         rx,
         signals,
-        wakeup_tx,
+        wakeup_tx: wakeup_tx.clone(),
         event_tx,
         has_child_exited,
         killer: loop_killer,
@@ -653,6 +657,7 @@ pub fn spawn_event_loop<S: PtySink>(
 
     Ok(EventLoopHandle {
         message_tx,
+        weak_wakeup_tx: wakeup_tx.downgrade(),
         wakeup_rx,
         event_rx,
         thread: Some(thread),
@@ -798,6 +803,7 @@ pub fn spawn_event_loop<S: PtySink>(
 
     Ok(EventLoopHandle {
         message_tx,
+        weak_wakeup_tx: wakeup_tx.downgrade(),
         wakeup_rx,
         event_rx,
         thread: Some(thread),

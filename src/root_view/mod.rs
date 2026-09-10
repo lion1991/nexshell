@@ -315,6 +315,10 @@ pub(crate) struct RootView {
     // 首帧预热标志：在首帧把 settings 页面隐藏渲染，预热框架 layout/paint 缓存
     settings_prewarmed: std::cell::Cell<bool>,
     last_host_swap_time: Option<std::time::Instant>,
+    /// 上次刷新全部本地 tab 前台进程状态的时刻。每个 tab 各有一条 60Hz wakeup
+    /// 流，都会打到 handle_terminal_wakeup；不节流的话「每帧遍历全部 tab」会退化
+    /// 成 O(N²)。按 WAKEUP_THROTTLE_PERIOD 节流，全窗口每帧只遍历一次。
+    last_foreground_refresh: Option<Instant>,
     /// 远程保存在途时，关闭/换文件确认的「保存」续作暂存于此，待写成功后补执行（review C）。按 tab_id 键。
     code_viewer_pending_post: std::collections::HashMap<String, code_viewer_section::PostSave>,
     /// RDP、远程保存和主机搜索防抖共享的单调 generation 分配器。
@@ -767,6 +771,7 @@ impl RootView {
             open_file_editor_dropdown,
             settings_prewarmed: std::cell::Cell::new(false),
             last_host_swap_time: None,
+            last_foreground_refresh: None,
             code_viewer_pending_post: std::collections::HashMap::new(),
             async_generations: GenerationAllocator::default(),
             tab_hover_transitions: RefCell::new(TransitionMap::new()),
@@ -975,8 +980,10 @@ impl RootView {
     }
 
     fn handle_terminal_wakeup(&mut self, _: (), ctx: &mut ViewContext<Self>) {
+        // 每帧只刷一次：这里统一给所有本地 tab（含 active tab 与后台 tab）刷，
+        // 下面读 shell_is_foreground、以及后面的 dispatch_* 用的都是这一次的结果。
+        self.refresh_local_foreground_status();
         let (title, should_clear_editor) = if let Ok(rt) = self.terminal.lock() {
-            rt.refresh_foreground_status();
             let snap = rt.snapshot();
             let clear = !rt.shell_is_foreground()
                 || snap.grid.input_modes.alt_screen
@@ -1005,7 +1012,36 @@ impl RootView {
         self.wake_ui_anim(ctx);
     }
 
-    /// 扫描所有本地 tab 的 snapshot.local_cwd，与上次派发对比；变化即 lazy spawn
+    /// 给所有本地 tab（不只当前 tab）刷一次前台进程状态，每帧调用一次，
+    /// 排在 dispatch_*_cwd_updates 之前。dispatch 遍历的是全部 tab，只刷
+    /// active tab 会让后台 herdr tab 的 cwd 停更、退出 herdr 后租约还不释放。
+    /// active tab 的 `self.terminal` 就是它自己的 `tab.terminal`，已被覆盖；
+    /// 远程 / 串口 runtime 没有 pty_fd，刷不刷都是同一个默认值。
+    /// 非 herdr 路径只是 tcgetpgrp + 一次原子写，没有竞争锁。
+    fn refresh_local_foreground_status(&mut self) {
+        let now = Instant::now();
+        // N 个 tab = N 条 wakeup 流，每条都会调到这里。不节流就是每帧 N 次全量
+        // 遍历（O(N²)）；按 UI 自己的 60Hz 节奏收敛成每帧一次。
+        if self
+            .last_foreground_refresh
+            .is_some_and(|last| now.duration_since(last) < WAKEUP_THROTTLE_PERIOD)
+        {
+            return;
+        }
+        self.last_foreground_refresh = Some(now);
+        for tab in self
+            .terminal_tabs
+            .iter()
+            .filter(|t| matches!(t.kind, TerminalSessionKind::Local))
+        {
+            if let Ok(rt) = tab.terminal.lock() {
+                rt.refresh_foreground_status();
+            }
+        }
+    }
+
+    /// 扫描所有本地 tab 的 snapshot.panel_cwd（前台是 herdr 时为 herdr 焦点 pane
+    /// 的 cwd，否则即 OSC 7 的 local_cwd），与上次派发对比；变化即 lazy spawn
     /// git worker 并发 SetCwd。远程 / 串口 tab 跳过。
     fn dispatch_git_cwd_updates(view: &mut Self, ctx: &mut ViewContext<Self>) {
         let pending: Vec<(String, PathBuf)> = view
@@ -1013,7 +1049,7 @@ impl RootView {
             .iter()
             .filter(|t| matches!(t.kind, TerminalSessionKind::Local))
             .filter_map(|t| {
-                let snap_cwd = t.terminal.lock().ok()?.snapshot().local_cwd.clone()?;
+                let snap_cwd = t.terminal.lock().ok()?.snapshot().panel_cwd.clone()?;
                 if t.git_last_dispatched_cwd.as_ref() == Some(&snap_cwd) {
                     None
                 } else {

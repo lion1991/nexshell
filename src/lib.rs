@@ -36,11 +36,13 @@ pub mod design_tokens;
 pub mod features;
 pub mod file_drop_target;
 pub mod file_panel;
+pub mod foreground_kind;
 pub mod frame_export;
 pub mod generation;
 pub mod git_ops;
 pub mod git_panel;
 pub mod glass_backdrop;
+pub mod herdr_bridge;
 pub mod history_suggester;
 pub mod host_management;
 pub mod host_overview;
@@ -1579,6 +1581,7 @@ Inter-|   Receive                                                |  Transmit
                 marked_text: None,
                 lines: [""].map(String::from).to_vec(),
                 grid: terminal_runtime::TerminalGridSnapshot::empty(),
+                panel_cwd: None,
                 local_cwd: None,
             }
         );

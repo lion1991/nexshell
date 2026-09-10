@@ -41,7 +41,11 @@ impl RootView {
         }
         let current_focused = tab.focused_pane_id;
         let host_id = tab.host_id.clone();
-        // 分屏继承源 pane 的 cwd（仅本地终端经 OSC7 上报，远程/串口恒为 None）
+        // 分屏继承源 pane 的 cwd（仅本地终端经 OSC7 上报，远程/串口恒为 None）。
+        // 刻意用 local_cwd 而非 panel_cwd：前台跑 herdr 时新分屏应落在 herdr 的
+        // 启动目录（新 shell 是 nexshell 的子进程，与 herdr pane 无关），而不是
+        // herdr 内部焦点 pane 的目录。让分屏跟随 herdr 焦点目录是另一个取舍，
+        // 本次范围外。
         let source_cwd = tab
             .terminal
             .lock()

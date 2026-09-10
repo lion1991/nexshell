@@ -334,7 +334,7 @@ impl RootView {
     fn local_file_panel_request_path(&self, index: usize) -> Option<std::path::PathBuf> {
         let tab = self.terminal_tabs.get(index)?;
         if tab.file_panel_state.follow_cwd {
-            tab.terminal.lock().ok()?.snapshot().local_cwd.clone()
+            tab.terminal.lock().ok()?.snapshot().panel_cwd.clone()
         } else {
             let cwd = tab.file_panel_state.cwd.trim();
             (!cwd.is_empty() && cwd != ".").then(|| std::path::PathBuf::from(cwd))
@@ -344,7 +344,7 @@ impl RootView {
     fn local_file_panel_fallback_path(&self, index: usize) -> std::path::PathBuf {
         self.terminal_tabs
             .get(index)
-            .and_then(|tab| tab.terminal.lock().ok()?.snapshot().local_cwd.clone())
+            .and_then(|tab| tab.terminal.lock().ok()?.snapshot().panel_cwd.clone())
             .or_else(|| {
                 self.terminal_tabs.get(index).and_then(|tab| {
                     let cwd = tab.file_panel_state.cwd.trim();
@@ -366,7 +366,7 @@ impl RootView {
                     && t.file_panel_state.follow_cwd
             })
             .filter_map(|t| {
-                let snap_cwd = t.terminal.lock().ok()?.snapshot().local_cwd.clone()?;
+                let snap_cwd = t.terminal.lock().ok()?.snapshot().panel_cwd.clone()?;
                 if t.file_panel_state.cwd == snap_cwd.to_string_lossy() {
                     None
                 } else {

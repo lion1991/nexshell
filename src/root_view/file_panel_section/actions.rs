@@ -207,7 +207,7 @@ impl RootView {
             if !matches!(tab.kind, TerminalSessionKind::Local) {
                 return None;
             }
-            tab.terminal.lock().ok()?.snapshot().local_cwd.clone()
+            tab.terminal.lock().ok()?.snapshot().panel_cwd.clone()
         });
         let Some(cwd) = cwd else {
             return;
