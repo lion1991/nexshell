@@ -160,18 +160,82 @@ pub struct RemoteTree {
     pub total_bytes: u64,
 }
 
-/// 单段路径名校验：拒绝空 / "." / ".." / 含 '/' 或控制字符，防路径穿越。
+/// 单段路径名校验：拒绝空 / "." / ".." / 含斜杠、反斜杠、冒号或控制字符，防路径穿越。
+/// 反斜杠与冒号在 Windows 上分别是分隔符与盘符/ADS 标记，落到 `Path::join` 会逃出根目录。
 pub fn is_safe_path_segment(name: &str) -> bool {
     !name.is_empty()
         && name != "."
         && name != ".."
         && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains(':')
         && !name.chars().any(|c| c == '\0' || c.is_control())
+}
+
+/// 把远端相对路径（POSIX 风格）安全地拼到本地根目录下。
+/// 逐段校验后只接受单个 `Component::Normal`，最后断言结果仍在 root 内；否则返回 None。
+pub fn resolve_local_path(root: &Path, rel: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for seg in rel.split('/') {
+        if !is_safe_path_segment(seg) {
+            return None;
+        }
+        let mut comps = Path::new(seg).components();
+        match (comps.next(), comps.next()) {
+            (Some(std::path::Component::Normal(c)), None) if c == seg => out.push(c),
+            _ => return None,
+        }
+    }
+    out.starts_with(root).then_some(out)
 }
 
 /// 路径任一 '/' 分段是否为 ".."（防穿越）。
 pub fn path_has_dotdot(path: &str) -> bool {
     path.split('/').any(|seg| seg == "..")
+}
+
+/// 原子覆盖用的同目录临时文件名：`.<name>.nexshell-tmp`。
+/// 必须同目录，rename 才在同一文件系统内，是真正的原子替换。
+pub fn temp_sibling(path: &str) -> String {
+    match path.rfind('/') {
+        Some(idx) => format!("{}/.{}.nexshell-tmp", &path[..idx], &path[idx + 1..]),
+        None => format!(".{path}.nexshell-tmp"),
+    }
+}
+
+/// [`temp_sibling`] 的本地路径版本。
+pub fn local_temp_sibling(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+    let tmp = format!(".{name}.nexshell-tmp");
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(tmp),
+        _ => PathBuf::from(tmp),
+    }
+}
+
+/// 把临时文件原子改名成目标。russh-sftp 没有 posix-rename 扩展，
+/// 而 SFTP v3 的 rename 是否允许覆盖各服务端不一：先直接试，失败再删目标重试。
+/// 目标已有的权限位先搬到临时文件上，避免覆盖后丢掉可执行位。
+async fn rename_overwrite(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
+    if let Ok(meta) = sftp.metadata(to).await {
+        if let Some(perm) = meta.permissions {
+            let attrs = russh_sftp::protocol::FileAttributes {
+                permissions: Some(perm & 0o7777),
+                ..Default::default()
+            };
+            let _ = sftp.set_metadata(from, attrs).await;
+        }
+    }
+    if sftp.rename(from, to).await.is_ok() {
+        return Ok(());
+    }
+    let _ = sftp.remove_file(to).await;
+    sftp.rename(from, to)
+        .await
+        .map_err(|error| format!("rename({from} -> {to}) failed: {error}"))
 }
 
 /// 广度优先递归远端目录；rel 为相对 root 的 POSIX 路径（不含前导斜杠）。
@@ -314,12 +378,13 @@ pub async fn remove_dir_recursive(sftp: &SftpSession, path: &str) -> Result<(), 
         .map_err(|error| format!("remove_dir({path}) failed: {error}"))
 }
 
-/// touch 等价：用 CREATE | TRUNCATE 打开然后立即关闭，得到 0 字节文件。
+/// touch 等价：排他创建后立即关闭，得到 0 字节文件。
+/// 用 EXCLUDE 而非 TRUNCATE：同名文件已存在时报错，不静默清空。
 pub async fn create_empty_file(sftp: &SftpSession, path: &str) -> Result<(), String> {
     let mut f = sftp
         .open_with_flags(
             path,
-            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
         )
         .await
         .map_err(|error| format!("create file {path} failed: {error}"))?;
@@ -366,13 +431,15 @@ pub async fn put_file_stream(
         .await
         .map_err(|error| format!("open local {} failed: {error}", local.display()))?;
 
+    // 先写同目录临时文件，完整写完再 rename 覆盖：中断不会破坏原文件
+    let tmp = temp_sibling(remote);
     let mut remote_file = sftp
         .open_with_flags(
-            remote,
+            &tmp,
             OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
         )
         .await
-        .map_err(|error| format!("open remote {remote} failed: {error}"))?;
+        .map_err(|error| format!("open remote {tmp} failed: {error}"))?;
 
     let result = async {
         let mut buf = vec![0u8; CHUNK_SIZE];
@@ -409,12 +476,21 @@ pub async fn put_file_stream(
     }
     .await;
 
-    if result.is_err() {
-        // 失败/取消时清理半截远端文件，避免残留损坏文件冒充完整上传
-        drop(remote_file);
-        let _ = sftp.remove_file(remote).await;
+    drop(remote_file);
+    match result {
+        Ok(transferred) => match rename_overwrite(sftp, &tmp, remote).await {
+            Ok(()) => Ok(transferred),
+            Err(error) => {
+                let _ = sftp.remove_file(&tmp).await;
+                Err(error)
+            }
+        },
+        Err(error) => {
+            // 失败/取消只清理临时文件，原文件原样保留
+            let _ = sftp.remove_file(&tmp).await;
+            Err(error)
+        }
     }
-    result
 }
 
 /// 下载远端文件到本地。
@@ -451,9 +527,11 @@ pub async fn get_file_stream(
             let _ = fs::create_dir_all(parent).await;
         }
     }
-    let mut local_file = fs::File::create(local)
+    // 同上：本地也走临时文件 + rename，失败不会留下半截文件顶替原文件
+    let tmp = local_temp_sibling(local);
+    let mut local_file = fs::File::create(&tmp)
         .await
-        .map_err(|error| format!("create local {} failed: {error}", local.display()))?;
+        .map_err(|error| format!("create local {} failed: {error}", tmp.display()))?;
 
     let result = async {
         let mut buf = vec![0u8; CHUNK_SIZE];
@@ -482,16 +560,32 @@ pub async fn get_file_stream(
             .flush()
             .await
             .map_err(|error| format!("local flush failed: {error}"))?;
+        local_file
+            .sync_all()
+            .await
+            .map_err(|error| format!("local sync failed: {error}"))?;
         Ok(transferred)
     }
     .await;
 
-    if result.is_err() {
-        // 失败/取消时清理半截本地文件，避免残留损坏文件
-        drop(local_file);
-        let _ = fs::remove_file(local).await;
+    drop(local_file);
+    match result {
+        Ok(transferred) => match fs::rename(&tmp, local).await {
+            Ok(()) => Ok(transferred),
+            Err(error) => {
+                let _ = fs::remove_file(&tmp).await;
+                Err(format!(
+                    "rename({} -> {}) failed: {error}",
+                    tmp.display(),
+                    local.display()
+                ))
+            }
+        },
+        Err(error) => {
+            let _ = fs::remove_file(&tmp).await;
+            Err(error)
+        }
     }
-    result
 }
 
 /// 把远端文件读进内存，供内置编辑器（ADR 0005）。最多读到 `max_bytes + 1` 字节即停：
@@ -531,33 +625,53 @@ pub async fn read_file_to_memory(
 }
 
 /// 把内存内容覆盖写回远端文件，供内置编辑器保存（ADR 0005）。
-/// 直接 TRUNCATE 覆盖，无备份（同本地 0003 的 fs::write）；失败不删原文件，编辑器侧仍持脏内容可重试。
+/// 同目录临时文件写完再 rename 覆盖；中途失败只清理临时文件，原文件保持完整。
 pub async fn write_file_from_memory(
     sftp: &SftpSession,
     path: &str,
     content: &[u8],
 ) -> Result<(), String> {
+    let tmp = temp_sibling(path);
     let mut remote_file = sftp
         .open_with_flags(
-            path,
+            &tmp,
             OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
         )
         .await
-        .map_err(|error| format!("open remote {path} failed: {error}"))?;
-    for chunk in content.chunks(CHUNK_SIZE) {
+        .map_err(|error| format!("open remote {tmp} failed: {error}"))?;
+
+    let result = async {
+        for chunk in content.chunks(CHUNK_SIZE) {
+            remote_file
+                .write_all(chunk)
+                .await
+                .map_err(|error| format!("remote write failed: {error}"))?;
+        }
         remote_file
-            .write_all(chunk)
+            .flush()
             .await
-            .map_err(|error| format!("remote write failed: {error}"))?;
+            .map_err(|error| format!("remote flush failed: {error}"))?;
+        remote_file
+            .shutdown()
+            .await
+            .map_err(|error| format!("remote close failed: {error}"))
     }
-    remote_file
-        .flush()
-        .await
-        .map_err(|error| format!("remote flush failed: {error}"))?;
-    remote_file
-        .shutdown()
-        .await
-        .map_err(|error| format!("remote close failed: {error}"))
+    .await;
+
+    drop(remote_file);
+    match result {
+        Ok(()) => match rename_overwrite(sftp, &tmp, path).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = sftp.remove_file(&tmp).await;
+                Err(error)
+            }
+        },
+        Err(error) => {
+            let _ = sftp.remove_file(&tmp).await;
+            Err(error)
+        }
+    }
 }
 
 /// 取单个远端文件元数据，供保存前冲突检测（ADR 0005）。
@@ -584,6 +698,50 @@ pub async fn stat_file(sftp: &SftpSession, path: &str) -> Result<RemoteEntry, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_path_segment_rejects_windows_separators_and_drive_letters() {
+        assert!(is_safe_path_segment("notes.txt"));
+        assert!(!is_safe_path_segment("..\\..\\AppData"));
+        assert!(!is_safe_path_segment("a\\b"));
+        assert!(!is_safe_path_segment("C:"));
+        assert!(!is_safe_path_segment("file:stream"));
+    }
+
+    #[test]
+    fn resolve_local_path_keeps_result_inside_root() {
+        let root = Path::new("/tmp/dl");
+        assert_eq!(
+            resolve_local_path(root, "a/b.txt"),
+            Some(PathBuf::from("/tmp/dl/a/b.txt"))
+        );
+        assert_eq!(resolve_local_path(root, "../escape"), None);
+        assert_eq!(resolve_local_path(root, "..\\escape"), None);
+        assert_eq!(resolve_local_path(root, "C:\\Windows\\x"), None);
+        assert_eq!(resolve_local_path(root, "a//b"), None);
+    }
+
+    #[test]
+    fn temp_sibling_stays_in_the_target_directory() {
+        assert_eq!(
+            temp_sibling("/var/www/a.txt"),
+            "/var/www/.a.txt.nexshell-tmp"
+        );
+        assert_eq!(temp_sibling("/a"), "/.a.nexshell-tmp");
+        assert_eq!(temp_sibling("a.txt"), ".a.txt.nexshell-tmp");
+    }
+
+    #[test]
+    fn local_temp_sibling_stays_in_the_target_directory() {
+        assert_eq!(
+            local_temp_sibling(Path::new("/tmp/dl/a.txt")),
+            PathBuf::from("/tmp/dl/.a.txt.nexshell-tmp")
+        );
+        assert_eq!(
+            local_temp_sibling(Path::new("a.txt")),
+            PathBuf::from(".a.txt.nexshell-tmp")
+        );
+    }
 
     #[test]
     fn entry_kind_classifies_file_types() {

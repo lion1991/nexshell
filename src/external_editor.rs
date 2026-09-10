@@ -154,19 +154,54 @@ pub fn detect_installed_editors() -> Vec<ExternalEditor> {
 
 /// 「打开」：系统默认关联程序。
 pub fn open_path_with_default(path: &str) -> Result<(), String> {
-    let arg = safe_arg(path);
-    #[cfg(target_os = "macos")]
-    {
-        spawn("open", &[arg.as_str()])
-    }
     #[cfg(target_os = "windows")]
     {
-        // start 第一个引号参数是窗口标题，留空。
-        spawn("cmd", &["/C", "start", "", arg.as_str()])
+        return shell_execute_open(path);
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     {
-        spawn("xdg-open", &[arg.as_str()])
+        let arg = safe_arg(path);
+        #[cfg(target_os = "macos")]
+        {
+            spawn("open", &[arg.as_str()])
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            spawn("xdg-open", &[arg.as_str()])
+        }
+    }
+}
+
+/// Windows 用 ShellExecuteW 直接交给 shell 关联程序，路径作为独立参数传递，
+/// 不经 `cmd.exe` 解析，`&` `|` `(` 等元字符无法被当成命令。
+#[cfg(target_os = "windows")]
+fn shell_execute_open(path: &str) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    fn wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    }
+
+    let verb = wide("open");
+    let file = wide(path);
+    // 第 6 个参数 SW_SHOWNORMAL = 1；返回值 <= 32 表示失败。
+    let code = unsafe {
+        windows_sys::Win32::UI::Shell::ShellExecuteW(
+            std::ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    } as isize;
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(format!("{path} 打开失败: ShellExecuteW={code}"))
     }
 }
 

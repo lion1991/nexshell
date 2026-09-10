@@ -29,6 +29,9 @@ use warpui::{AppContext, Element, ViewContext, ViewHandle};
 /// 本地文本文件查看上限：超过则回退「用外部程序打开」，避免大文件卡死渲染。
 const CODE_VIEWER_MAX_BYTES: u64 = 4 * 1024 * 1024;
 
+/// 远程保存成功后发现仍脏时的自动补存上限，防止边存边改导致无限重存。
+const MAX_SAVE_RETRIES: u8 = 3;
+
 /// 保存成功后的续作。本地同步保存当场执行；远程异步保存在写成功的回调里执行。
 /// pub(in crate::root_view) 以便 RootView 的 code_viewer_pending_post 字段持有（review C）。
 #[derive(Clone)]
@@ -301,13 +304,15 @@ impl RootView {
             },
             // 远程：乐观异步，先冲突检测（force=false）。
             Some(handle) => {
-                self.fire_remote_save(tab_id, path, handle, text, expected, false, post, ctx);
+                self.fire_remote_save(tab_id, path, handle, text, expected, false, post, 0, ctx);
             }
         }
     }
 
     /// 远程异步保存引擎：置「保存中」态、起任务，结果回 on_remote_save_outcome（ADR 0005）。
     /// force=true 跳过冲突检测（用户在冲突弹窗里选了「覆盖」）。
+    /// retry 是「存完发现还脏」的自动补存轮次，防抖动上限 MAX_SAVE_RETRIES。
+    #[allow(clippy::too_many_arguments)]
     fn fire_remote_save(
         &mut self,
         tab_id: String,
@@ -317,6 +322,7 @@ impl RootView {
         expected: Option<RemoteMeta>,
         force: bool,
         post: PostSave,
+        retry: u8,
         ctx: &mut ViewContext<Self>,
     ) {
         let save_generation = self.async_generations.allocate();
@@ -343,6 +349,7 @@ impl RootView {
                     handle.clone(),
                     snapshot.clone(),
                     post.clone(),
+                    retry,
                     ctx,
                 );
             },
@@ -352,6 +359,7 @@ impl RootView {
 
     /// 远程保存结果回灌：成功→更新基线/meta + 清保存中 + 重算脏 + 执行 post；
     /// 冲突→弹覆盖/取消；出错→notice + 保留脏（编辑器仍持内容可重试，ADR 0005）。
+    #[allow(clippy::too_many_arguments)]
     fn on_remote_save_outcome(
         &mut self,
         outcome: RemoteSaveOutcome,
@@ -361,6 +369,7 @@ impl RootView {
         handle: SshHandle,
         snapshot: String,
         post: PostSave,
+        retry: u8,
         ctx: &mut ViewContext<Self>,
     ) {
         // 身份校验：tab 已关 / 已被换成别的文件 → 本次异步结果作废（review F）。
@@ -397,10 +406,34 @@ impl RootView {
                 }
                 self.host_state.notice = Some(rust_i18n::t!("code_viewer_saved").to_string());
                 // 保存中可能又改了：按当前编辑器文本 vs 新基线重算脏。
-                if let Some(view) = view {
-                    self.refresh_code_viewer_dirty(&tab_id, &view, ctx);
+                if let Some(view) = view.as_ref() {
+                    self.refresh_code_viewer_dirty(&tab_id, view, ctx);
                 }
                 ctx.notify();
+                // 仍脏说明保存期间的编辑没落盘；带续作（关闭/换文件）时先补存当前文本，
+                // 否则续作会把这些编辑销毁（P1-6）。retry 上限防止编辑不停时无限重存。
+                let still_dirty = self
+                    .terminal_tabs
+                    .iter()
+                    .find(|t| t.id == tab_id)
+                    .map_or(false, |t| t.code_viewer_dirty);
+                if still_dirty && !matches!(post, PostSave::None) && retry < MAX_SAVE_RETRIES {
+                    if let Some(view) = view {
+                        let text = view.as_ref(ctx).text(ctx).into_string();
+                        self.fire_remote_save(
+                            tab_id,
+                            path,
+                            handle,
+                            text,
+                            Some(meta),
+                            false,
+                            post,
+                            retry + 1,
+                            ctx,
+                        );
+                        return;
+                    }
+                }
                 self.run_post_save(post, &tab_id, ctx);
             }
             RemoteSaveOutcome::Conflict { .. } => {
@@ -460,6 +493,7 @@ impl RootView {
                             None,
                             true,
                             post.clone(),
+                            0,
                             ctx,
                         );
                     }

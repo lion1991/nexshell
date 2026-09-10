@@ -51,7 +51,7 @@ use nexshell::container_fleet::ContainerFleet;
 use nexshell::file_panel::{
     apply_sftp_event, spawn_sftp_worker, FilePanelState, FilePanelWorkerHandle, SftpRequest,
 };
-use nexshell::generation::GenerationAllocator;
+use nexshell::generation::{accepts_generation, GenerationAllocator};
 use nexshell::git_panel::{apply_git_event, spawn_git_worker, GitEvent, GitPanelState, GitRequest};
 use nexshell::host_management::{
     default_database_path, load_or_initialize_host_management_snapshot_from_db_path,
@@ -914,11 +914,14 @@ impl RootView {
             };
             (handle, tab.id.clone(), tab.file_panel_state.cwd.clone())
         };
+        // 每次启动分配代号：重连后旧 worker 的迟到事件不再命中本 tab（P1-8）。
+        let generation = view.async_generations.allocate();
         match spawn_sftp_worker(handle, &label) {
             Ok((worker, evt_rx)) => {
                 worker.send(SftpRequest::List(init_path));
                 if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
                     tab.sftp_worker = Some(FilePanelWorkerHandle::Sftp(worker));
+                    tab.sftp_worker_generation = Some(generation);
                     tab.file_panel_state.loading = true;
                     tab.file_panel_state.error = None;
                 }
@@ -927,6 +930,9 @@ impl RootView {
                     evt_rx,
                     move |view, evt, ctx| {
                         if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == owner) {
+                            if !accepts_generation(tab.sftp_worker_generation, generation) {
+                                return;
+                            }
                             apply_sftp_event(&mut tab.file_panel_state, evt);
                             ctx.notify();
                         }
@@ -2859,6 +2865,7 @@ impl RootView {
                 file_panel_width: FILE_PANEL_WIDTH_DEFAULT,
                 file_panel_state: FilePanelState::new(),
                 sftp_worker: None,
+                sftp_worker_generation: None,
                 file_panel_entry_states: RefCell::new(HashMap::new()),
                 file_panel_refresh_state: Arc::new(Mutex::new(MouseState::default())),
                 file_panel_up_state: Arc::new(Mutex::new(MouseState::default())),

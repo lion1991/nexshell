@@ -130,6 +130,8 @@ objc2-core-video = { version = "0.3", features = ["std", "CVBase", "CVReturn", "
 objc2-video-toolbox = { version = "0.3", features = ["std", "objc2", "objc2-core-media", "objc2-core-video", "VTDecompressionSession", "VTDecompressionProperties", "VTSession", "VTErrors"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# ShellExecuteW：文件面板「打开」走系统关联程序，替代会被元字符注入的 `cmd /C start`。
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 font-kit = { git = "https://github.com/warpdotdev/font-kit", rev = "a04b225ecb639bb850f21d05212cfdc7465000f3", default-features = false, features = ["source"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -24,6 +24,7 @@ use nexshell::file_drop_target::FileDropTarget;
 use nexshell::file_panel::{
     apply_local_file_panel_event, spawn_local_file_worker, FilePanelWorkerHandle, SftpRequest,
 };
+use nexshell::generation::accepts_generation;
 use warpui::elements::{
     Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragAxis, Draggable,
     Empty, Expanded, Fill, Flex, Hoverable, MainAxisSize, ParentElement, Radius, Text,
@@ -230,11 +231,14 @@ impl RootView {
             }
             tab.id.clone()
         };
+        // 同 SFTP worker：代号绑定本次 worker，重启后旧事件失效。
+        let generation = view.async_generations.allocate();
         match spawn_local_file_worker(&label, init_path.clone()) {
             Ok((worker, evt_rx)) => {
                 worker.send(SftpRequest::List(init_path.to_string_lossy().into_owned()));
                 if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
                     tab.sftp_worker = Some(FilePanelWorkerHandle::Local(worker));
+                    tab.sftp_worker_generation = Some(generation);
                     tab.file_panel_state.loading = true;
                     tab.file_panel_state.error = None;
                 }
@@ -243,6 +247,9 @@ impl RootView {
                     evt_rx,
                     move |view, evt, ctx| {
                         if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == owner) {
+                            if !accepts_generation(tab.sftp_worker_generation, generation) {
+                                return;
+                            }
                             apply_local_file_panel_event(&mut tab.file_panel_state, evt);
                             ctx.notify();
                         }
@@ -269,7 +276,7 @@ impl RootView {
         if tab.ssh_handle.is_none() {
             return;
         }
-        tab.sftp_worker = None;
+        tab.clear_file_panel_worker();
         if tab.file_panel_open {
             tab.file_panel_state.loading = false;
             tab.file_panel_state.error = Some("连接已断开".to_string());
@@ -286,7 +293,7 @@ impl RootView {
         };
         if !Self::terminal_tab_is_connected(&self.terminal_tabs[index]) {
             let tab = &mut self.terminal_tabs[index];
-            tab.sftp_worker = None;
+            tab.clear_file_panel_worker();
             tab.file_panel_state.loading = false;
             tab.file_panel_state.error = Some("连接已断开".to_string());
             return;
@@ -306,7 +313,7 @@ impl RootView {
                 if sent {
                     return;
                 }
-                self.terminal_tabs[index].sftp_worker = None;
+                self.terminal_tabs[index].clear_file_panel_worker();
             }
 
             let init_path =
@@ -319,7 +326,7 @@ impl RootView {
             if worker.send(SftpRequest::Refresh) {
                 return;
             }
-            self.terminal_tabs[index].sftp_worker = None;
+            self.terminal_tabs[index].clear_file_panel_worker();
         }
 
         if self.terminal_tabs[index].ssh_handle.is_some() {
@@ -383,7 +390,7 @@ impl RootView {
             if let Some(tab) = view.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
                 if let Some(worker) = tab.sftp_worker.as_ref() {
                     if !worker.send(SftpRequest::List(cwd.to_string_lossy().into_owned())) {
-                        tab.sftp_worker = None;
+                        tab.clear_file_panel_worker();
                     }
                 }
             }

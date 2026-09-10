@@ -1115,7 +1115,13 @@ async fn run_local_file_worker(
                         .await;
                 } else {
                     let path = local_path_from_panel_string(&parent).join(&name);
-                    if let Err(error) = tokio::fs::File::create(&path).await {
+                    // 排他创建：同名文件已存在时报错，不清空原文件
+                    let created = tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path)
+                        .await;
+                    if let Err(error) = created {
                         let _ = evt_tx
                             .send(SftpEvent::Error {
                                 message: format!("create file {} failed: {error}", path.display()),
@@ -1521,9 +1527,11 @@ async fn copy_local_file_stream(
     let mut input = tokio::fs::File::open(source)
         .await
         .map_err(|error| format!("open local {} failed: {error}", source.display()))?;
-    let mut output = tokio::fs::File::create(destination)
+    // 同目录临时文件写完再 rename 覆盖：中断不会破坏已存在的目标文件
+    let tmp = sftp_ops::local_temp_sibling(destination);
+    let mut output = tokio::fs::File::create(&tmp)
         .await
-        .map_err(|error| format!("create local {} failed: {error}", destination.display()))?;
+        .map_err(|error| format!("create local {} failed: {error}", tmp.display()))?;
 
     let result = async {
         let mut buf = vec![0u8; LOCAL_COPY_CHUNK_SIZE];
@@ -1558,15 +1566,33 @@ async fn copy_local_file_stream(
             .flush()
             .await
             .map_err(|error| format!("local flush failed: {error}"))?;
+        output
+            .sync_all()
+            .await
+            .map_err(|error| format!("local sync failed: {error}"))?;
         Ok(copied)
     }
     .await;
 
-    if result.is_err() {
-        drop(output);
-        let _ = tokio::fs::remove_file(destination).await;
+    drop(output);
+    match result {
+        Ok(copied) => match tokio::fs::rename(&tmp, destination).await {
+            Ok(()) => Ok(copied),
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                Err(format!(
+                    "rename({} -> {}) failed: {error}",
+                    tmp.display(),
+                    destination.display()
+                ))
+            }
+        },
+        Err(error) => {
+            // 失败/取消只清理临时文件，已存在的目标文件原样保留
+            let _ = tokio::fs::remove_file(&tmp).await;
+            Err(error)
+        }
     }
-    result
 }
 
 async fn send_transfer_started(
@@ -1992,7 +2018,17 @@ async fn run_download_dir(
     let mut dirs = tree.dirs.clone();
     dirs.sort_by_key(|d| d.matches('/').count());
     for d in &dirs {
-        let abs = local_root.join(d.replace('/', std::path::MAIN_SEPARATOR_STR));
+        // 逐段重建，拒绝任何逃出 local_root 的远端条目名
+        let Some(abs) = sftp_ops::resolve_local_path(local_root, d) else {
+            let _ = evt_tx
+                .send(SftpEvent::DownloadFailed {
+                    transfer_id,
+                    file_name: display_name,
+                    message: format!("非法远端目录名: {d:?}"),
+                })
+                .await;
+            return;
+        };
         if let Err(error) = tokio::fs::create_dir_all(&abs).await {
             let _ = evt_tx
                 .send(SftpEvent::DownloadFailed {
@@ -2031,7 +2067,10 @@ async fn run_download_dir(
             break;
         }
         let remote_path = format!("{}/{}", remote_root.trim_end_matches('/'), file.rel);
-        let local_path = local_root.join(file.rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let Some(local_path) = sftp_ops::resolve_local_path(local_root, &file.rel) else {
+            failure = Some(format!("非法远端文件名: {:?}", file.rel));
+            break;
+        };
         match sftp_ops::get_file_stream(sftp, &remote_path, &local_path, &prog_tx, base, cancel)
             .await
         {
@@ -2420,6 +2459,90 @@ mod tests {
         );
         assert!(matches!(entries[0].kind, crate::sftp_ops::EntryKind::Dir));
         assert!(matches!(entries[1].kind, crate::sftp_ops::EntryKind::File));
+    }
+
+    fn run_local_copy_for_test(
+        source: &Path,
+        destination: &Path,
+        cancel: bool,
+    ) -> Result<u64, String> {
+        let (evt_tx, _evt_rx) = async_channel::unbounded();
+        let cancel = AtomicBool::new(cancel);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(copy_local_file_stream(
+                source,
+                destination,
+                1,
+                "dst.txt",
+                None,
+                0,
+                false,
+                &evt_tx,
+                &cancel,
+            ))
+    }
+
+    #[test]
+    fn local_copy_replaces_the_destination_atomically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src.txt");
+        let destination = tmp.path().join("dst.txt");
+        std::fs::write(&source, "new").unwrap();
+        std::fs::write(&destination, "original").unwrap();
+
+        assert_eq!(run_local_copy_for_test(&source, &destination, false), Ok(3));
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "new");
+        assert!(!sftp_ops::local_temp_sibling(&destination).exists());
+    }
+
+    #[test]
+    fn local_copy_cancel_keeps_the_existing_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src.txt");
+        let destination = tmp.path().join("dst.txt");
+        std::fs::write(&source, "new").unwrap();
+        std::fs::write(&destination, "original").unwrap();
+
+        assert!(run_local_copy_for_test(&source, &destination, true).is_err());
+        assert_eq!(std::fs::read_to_string(&destination).unwrap(), "original");
+        assert!(!sftp_ops::local_temp_sibling(&destination).exists());
+    }
+
+    #[test]
+    fn local_touch_refuses_to_truncate_an_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("keep.txt");
+        std::fs::write(&target, "original").unwrap();
+        let (worker, rx) =
+            spawn_local_file_worker("unit-local-touch", tmp.path().to_path_buf()).unwrap();
+        assert!(worker.send(SftpRequest::Touch {
+            parent: tmp.path().to_string_lossy().into_owned(),
+            name: "keep.txt".to_string(),
+        }));
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let saw_error = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let SftpEvent::Error { .. } = rx.recv().await.unwrap() {
+                        return true;
+                    }
+                }
+            })
+            .await
+            .unwrap_or(false)
+        });
+        assert!(
+            saw_error,
+            "touch on an existing file should report an error"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "original");
     }
 
     #[test]
