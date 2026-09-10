@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::generation::{accepts_generation, Generation, GenerationAllocator};
-use crate::host_management::HostConnectionConfig;
+use crate::host_management::{connection_fingerprint, HostConnectionConfig};
 use crate::host_overview::{
     remote_ssh_config_from_host_config, spawn_host_overview_monitor, HostOverviewEvent,
     HostOverviewMonitorHandle, HostOverviewUiState,
@@ -18,6 +18,7 @@ struct FleetEntry {
     ui: HostOverviewUiState,
     _handle: Option<HostOverviewMonitorHandle>, // Drop 即 stop
     generation: Generation,
+    fingerprint: u64, // 连接配置指纹，变化即重启
 }
 
 /// 一台主机起监控后交回调用方消费的事件流。
@@ -48,9 +49,12 @@ impl HostOverviewFleet {
 
         let mut streams = Vec::new();
         for (host_id, config) in hosts {
-            if !self.entry_needs_start(host_id) {
+            let fingerprint = connection_fingerprint(config);
+            if !self.entry_needs_start(host_id, fingerprint) {
                 continue;
             }
+            // 配置变了：先失效旧 generation、丢 handle、清旧快照，避免旧主机数据串台。
+            self.invalidate_stale_config(host_id, fingerprint, &config.host);
             let display = config.host.clone();
             match spawn_host_overview_monitor(
                 remote_ssh_config_from_host_config(config),
@@ -62,6 +66,7 @@ impl HostOverviewFleet {
                         Some(entry) => {
                             entry._handle = Some(handle);
                             entry.generation = generation;
+                            entry.fingerprint = fingerprint;
                         }
                         None => {
                             self.entries.insert(
@@ -70,6 +75,7 @@ impl HostOverviewFleet {
                                     ui: HostOverviewUiState::waiting(display),
                                     _handle: Some(handle),
                                     generation,
+                                    fingerprint,
                                 },
                             );
                         }
@@ -82,6 +88,7 @@ impl HostOverviewFleet {
                         Some(entry) => {
                             entry._handle = None;
                             entry.generation = Generation::INVALID;
+                            entry.fingerprint = fingerprint;
                             entry.ui.apply_event(HostOverviewEvent::Error(error));
                         }
                         None => {
@@ -93,6 +100,7 @@ impl HostOverviewFleet {
                                     ui,
                                     _handle: None,
                                     generation: Generation::INVALID,
+                                    fingerprint,
                                 },
                             );
                         }
@@ -103,10 +111,24 @@ impl HostOverviewFleet {
         streams
     }
 
-    fn entry_needs_start(&self, host_id: &str) -> bool {
-        self.entries
-            .get(host_id)
-            .map_or(true, |entry| entry._handle.is_none())
+    fn entry_needs_start(&self, host_id: &str, fingerprint: u64) -> bool {
+        self.entries.get(host_id).map_or(true, |entry| {
+            entry._handle.is_none() || entry.fingerprint != fingerprint
+        })
+    }
+
+    /// 配置指纹变化时把 entry 打回初始态：旧 handle 停掉、旧 generation 作废、快照清空。
+    fn invalidate_stale_config(&mut self, host_id: &str, fingerprint: u64, display: &str) {
+        let Some(entry) = self.entries.get_mut(host_id) else {
+            return;
+        };
+        if entry.fingerprint == fingerprint {
+            return;
+        }
+        entry._handle = None;
+        entry.generation = Generation::INVALID;
+        entry.fingerprint = fingerprint;
+        entry.ui = HostOverviewUiState::waiting(display.to_string());
     }
 
     fn retain_targets(&mut self, desired: &HashSet<&str>) {
@@ -168,6 +190,7 @@ mod tests {
             ui: HostOverviewUiState::waiting(label.to_string()),
             _handle: None,
             generation: Generation::new(2).unwrap(),
+            fingerprint: 0,
         }
     }
 
@@ -178,8 +201,28 @@ mod tests {
             .entries
             .insert("host-a".to_string(), paused_entry("a.example"));
 
-        assert!(fleet.entry_needs_start("host-a"));
-        assert!(fleet.entry_needs_start("host-b"));
+        assert!(fleet.entry_needs_start("host-a", 0));
+        assert!(fleet.entry_needs_start("host-b", 0));
+    }
+
+    #[test]
+    fn changing_connection_config_forces_restart_and_drops_the_old_snapshot() {
+        let mut fleet = HostOverviewFleet::new();
+        let mut entry = paused_entry("old.example");
+        entry.fingerprint = 1;
+        fleet.entries.insert("host-a".to_string(), entry);
+
+        assert!(fleet.entry_needs_start("host-a", 2));
+
+        fleet.invalidate_stale_config("host-a", 2, "new.example");
+
+        assert_eq!(fleet.entries["host-a"].generation, Generation::INVALID);
+        assert_eq!(fleet.entries["host-a"].fingerprint, 2);
+        assert!(!fleet.apply_event_for_generation(
+            "host-a",
+            Generation::new(2).unwrap(),
+            super::HostOverviewEvent::Error("stale after config change".to_string())
+        ));
     }
 
     #[test]

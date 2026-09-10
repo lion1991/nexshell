@@ -795,10 +795,13 @@ fn dispatch_to_root_view(
     ctx: &mut AppContext,
     f: impl FnOnce(&mut RootView, &mut ViewContext<RootView>),
 ) {
-    let Some(window_id) = ctx.window_ids().into_iter().next() else {
-        return;
-    };
-    let Some(handle) = ctx.root_view::<RootView>(window_id) else {
+    // 主机编辑/分组管理等辅助窗口也在窗口表里，且顺序无保证：必须找到第一个 RootView 窗口，
+    // 否则未保存检查等会静默按 false 走。
+    let Some(handle) = ctx
+        .window_ids()
+        .into_iter()
+        .find_map(|window_id| ctx.root_view::<RootView>(window_id))
+    else {
         return;
     };
     handle.update(ctx, f);
@@ -811,6 +814,15 @@ fn app_has_unsaved_code_viewer(ctx: &mut AppContext) -> bool {
         has_unsaved = view.has_unsaved_code_viewer();
     });
     has_unsaved
+}
+
+/// 关窗 / 退出 app 回调里读 RootView 是否有终端在录制（P1-18）。
+fn app_has_active_recording(ctx: &mut AppContext) -> bool {
+    let mut recording = false;
+    dispatch_to_root_view(ctx, |view, _| {
+        recording = view.has_active_recording();
+    });
+    recording
 }
 
 fn register_menu_global_actions(ctx: &mut AppContext) {
@@ -1008,7 +1020,7 @@ fn nexshell_menu_bar(_ctx: &mut AppContext) -> MenuBar {
     MenuBar::new(vec![app_menu, file_menu, edit_menu, window_menu])
 }
 
-fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>>) {
+fn open_main_window(ctx: &mut AppContext, foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>>) {
     ctx.add_window(
         AddWindowOptions {
             title: Some(DEFAULT_WINDOW_TITLE.to_string()),
@@ -1065,7 +1077,8 @@ fn main() -> Result<()> {
     #[cfg(target_os = "macos")]
     nexshell::platform::macos::install_warp_ime_shims();
 
-    let foreground_flags: Arc<Mutex<Vec<Arc<AtomicBool>>>> = Arc::new(Mutex::new(Vec::new()));
+    // 每个 tab 一组 flag（组内每个 pane 一个），任一 pane 有前台进程都要拦关窗/退出。
+    let foreground_flags: Arc<Mutex<Vec<Vec<Arc<AtomicBool>>>>> = Arc::new(Mutex::new(Vec::new()));
 
     let flags_for_close = Arc::clone(&foreground_flags);
     let flags_for_quit = Arc::clone(&foreground_flags);
@@ -1073,24 +1086,43 @@ fn main() -> Result<()> {
 
     let mut callbacks = platform::AppCallbacks::default();
 
-    // 必须设置，否则 handle_window_closed 不会被调用，窗口清理不完整
-    callbacks.on_window_will_close = Some(Box::new(|_closed_data, _ctx| {}));
+    // 必须设置，否则 handle_window_closed 不会被调用，窗口清理不完整。
+    // 辅助窗口被原生 X 关掉时同步清 RootView 上记录的 window id。
+    callbacks.on_window_will_close = Some(Box::new(|closed_data, ctx| {
+        let Some(closed) = closed_data else {
+            return;
+        };
+        let window_id = closed.window_id;
+        dispatch_to_root_view(ctx, move |view, ctx| {
+            view.handle_auxiliary_window_closed(window_id, ctx);
+        });
+    }));
 
     // 点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）
     callbacks.on_should_close_window = Some(Box::new(move |window_id, ctx| {
         let running_count = flags_for_close
             .lock()
-            .map(|flags| flags.iter().filter(|f| !f.load(Ordering::Relaxed)).count())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .flatten()
+                    .filter(|f| !f.load(Ordering::Relaxed))
+                    .count()
+            })
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则关窗会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
+        // 录制中的终端同级拦截，否则关窗会结束录制（审查 P1-18）。
+        let is_recording = app_has_active_recording(ctx);
 
-        if running_count == 0 && !has_unsaved {
+        if running_count == 0 && !has_unsaved && !is_recording {
             return ApproveTerminateResult::Terminate;
         }
 
         let message = if has_unsaved {
             rust_i18n::t!("dialog_close_window_unsaved").to_string()
+        } else if is_recording {
+            rust_i18n::t!("dialog_close_window_recording").to_string()
         } else {
             rust_i18n::t!("dialog_close_window_msg", count = running_count).to_string()
         };
@@ -1119,17 +1151,27 @@ fn main() -> Result<()> {
 
         let running_count = flags_for_quit
             .lock()
-            .map(|flags| flags.iter().filter(|f| !f.load(Ordering::Relaxed)).count())
+            .map(|flags| {
+                flags
+                    .iter()
+                    .flatten()
+                    .filter(|f| !f.load(Ordering::Relaxed))
+                    .count()
+            })
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则 Cmd+Q 会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
+        // 录制中的终端同级拦截（审查 P1-18）。
+        let is_recording = app_has_active_recording(ctx);
 
-        if running_count == 0 && !has_unsaved {
+        if running_count == 0 && !has_unsaved && !is_recording {
             return ApproveTerminateResult::Terminate;
         }
 
         let message = if has_unsaved {
             rust_i18n::t!("dialog_quit_app_unsaved").to_string()
+        } else if is_recording {
+            rust_i18n::t!("dialog_quit_app_recording").to_string()
         } else {
             rust_i18n::t!("dialog_quit_app_msg", count = running_count).to_string()
         };

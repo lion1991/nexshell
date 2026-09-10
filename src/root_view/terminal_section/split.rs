@@ -1,6 +1,6 @@
 // terminal_section::split — 分屏 / pane 布局（附录 A #85-98）。
 // 只含 impl RootView；split/close/navigate/focus/resize/maximize 由 mod.rs handle_action 分发，
-// 用 pub(in crate::root_view)。sync_foreground_flag_for_tab 仅本文件内用，保持私有。
+// 用 pub(in crate::root_view)。sync_foreground_flags_for_tab 跨 section 调（重连后重收集）。
 
 use std::sync::{Arc, Mutex};
 
@@ -14,17 +14,20 @@ use nexshell::pane_tree::{Direction, DraggedBorder, SplitDirection};
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
 impl RootView {
-    fn sync_foreground_flag_for_tab(&self, tab_index: usize) {
-        let fg = self
-            .terminal
-            .lock()
-            .ok()
-            .map(|rt| rt.shell_is_foreground_handle());
-        if let Some(fg) = fg {
-            if let Ok(mut flags) = self.foreground_flags.lock() {
-                if tab_index < flags.len() {
-                    flags[tab_index] = fg;
-                }
+    /// 重新收集某 tab 全部 pane 的前台标志（分屏 / 关 pane / 导航 / 重连后调用）。
+    /// 单 slot 只记一个 pane 会漏掉其他 pane 的前台进程，关窗退出就不再提示。
+    pub(in crate::root_view) fn sync_foreground_flags_for_tab(&self, tab_index: usize) {
+        let Some(tab) = self.terminal_tabs.get(tab_index) else {
+            return;
+        };
+        let group: Vec<_> = tab
+            .pane_terminals
+            .values()
+            .filter_map(|rt| rt.lock().ok().map(|rt| rt.shell_is_foreground_handle()))
+            .collect();
+        if let Ok(mut flags) = self.foreground_flags.lock() {
+            if tab_index < flags.len() {
+                flags[tab_index] = group;
             }
         }
     }
@@ -151,7 +154,7 @@ impl RootView {
             *layout = None;
         }
         self.reset_active_terminal_view_state();
-        self.sync_foreground_flag_for_tab(self.active_tab_index);
+        self.sync_foreground_flags_for_tab(self.active_tab_index);
         ctx.notify();
     }
 
@@ -167,6 +170,16 @@ impl RootView {
         }
 
         let pane_id = tab.focused_pane_id;
+        // 关 pane 会丢掉该 pane 的 runtime，先把录制中的内容落盘。
+        let closing_runtime = tab.pane_terminals.get(&pane_id).cloned();
+        if let Some(runtime) = closing_runtime {
+            let label = tab.window_title();
+            self.flush_recordings(&[runtime], &label);
+        }
+        let tab = match self.terminal_tabs.get_mut(self.active_tab_index) {
+            Some(t) => t,
+            None => return,
+        };
         tab.pane_tree.remove(pane_id);
         // 记下被关 pane 的会话 id，稍后清玻璃脏区指纹。
         let glass_key = tab
@@ -197,7 +210,7 @@ impl RootView {
             *layout = None;
         }
         self.reset_active_terminal_view_state();
-        self.sync_foreground_flag_for_tab(self.active_tab_index);
+        self.sync_foreground_flags_for_tab(self.active_tab_index);
         ctx.notify();
     }
 
@@ -223,7 +236,7 @@ impl RootView {
                 *layout = None;
             }
             self.reset_active_terminal_view_state();
-            self.sync_foreground_flag_for_tab(self.active_tab_index);
+            self.sync_foreground_flags_for_tab(self.active_tab_index);
             ctx.notify();
         }
     }

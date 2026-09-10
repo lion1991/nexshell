@@ -3517,7 +3517,9 @@ impl LocalTerminalRuntime {
     pub fn start_recording(&self) {
         let mut state = self.state.lock();
         if state.recorder.is_none() {
-            state.recorder = Some(TerminalRecorder::start());
+            // 带会话名：Drop 兜底落盘时文件名可辨认来源。
+            let label = state.session_id.clone();
+            state.recorder = Some(TerminalRecorder::start_labeled(&label));
         }
     }
 

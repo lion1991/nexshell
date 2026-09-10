@@ -295,10 +295,12 @@ key_reset_font: 重置字体
 dialog_close_window: 关闭窗口？
 dialog_close_window_msg: "你有 %{count} 个进程正在运行，关闭窗口将终止这些进程。"
 dialog_close_window_unsaved: "有未保存的更改，关闭窗口将丢失。确认关闭？"
+dialog_close_window_recording: "有终端正在录制日志，关闭窗口将结束录制。确认关闭？"
 dialog_confirm_close: 确认关闭
 dialog_quit_app: 退出 NexShell？
 dialog_quit_app_msg: "你有 %{count} 个进程正在运行，退出将终止这些进程。"
 dialog_quit_app_unsaved: "有未保存的更改，退出将丢失。确认退出？"
+dialog_quit_app_recording: "有终端正在录制日志，退出将结束录制。确认退出？"
 dialog_confirm_quit: 确认退出
 dialog_cancel: 取消
 
