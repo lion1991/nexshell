@@ -25,8 +25,9 @@ typeset -ga precmd_functions
 precmd_functions+=(__nexshell_emit_bootstrap_marker)
 
 # OSC 7 cwd 上报：每次目录变化 + 每次 prompt 都发一遍（首屏也覆盖）
+# host 段留空（file:///path）：接收端据此认本机，远端 shell 的 OSC 7 会带主机名被拒
 __nexshell_emit_osc7() {
-  printf '\e]7;file://%s%s\a' "${HOST:-localhost}" "$PWD"
+  printf '\e]7;file://%s\a' "$PWD"
 }
 typeset -ga chpwd_functions
 chpwd_functions+=(__nexshell_emit_osc7)
@@ -53,9 +54,9 @@ __nexshell_emit_bootstrap_marker() {
 }
 PROMPT_COMMAND="__nexshell_emit_bootstrap_marker;${PROMPT_COMMAND:-:}"
 
-# OSC 7 cwd 上报：用 PROMPT_COMMAND 在每次 prompt 前发一次
+# OSC 7 cwd 上报：用 PROMPT_COMMAND 在每次 prompt 前发一次（host 段留空 = 本机）
 __nexshell_emit_osc7() {
-  printf '\e]7;file://%s%s\a' "${HOSTNAME:-localhost}" "$PWD"
+  printf '\e]7;file://%s\a' "$PWD"
 }
 PROMPT_COMMAND="__nexshell_emit_osc7;${PROMPT_COMMAND}"
 "#;
@@ -70,7 +71,7 @@ pub const FISH_INIT_COMMAND: &str = concat!(
     " functions -e __nexshell_emit_bootstrap_marker;",
     " end;",
     "function __nexshell_emit_osc7 --on-variable PWD;",
-    " printf '\\e]7;file://%s%s\\a' (hostname) $PWD;",
+    " printf '\\e]7;file://%s\\a' $PWD;",
     " end;",
     "__nexshell_emit_osc7",
 );
@@ -105,4 +106,18 @@ pub fn setup_bash_integration() -> Option<PathBuf> {
     let rc = dir.join("bashrc");
     fs::write(&rc, BASH_WRAPPER_RC).ok()?;
     Some(rc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 三种 shell 的 OSC 7 都必须发空 host（file:///path），否则远端
+    /// hostname 会被 osc7::parse_osc7_payload 拒掉，本地 cwd 也就跟不上。
+    #[test]
+    fn osc7_scripts_emit_empty_host() {
+        for script in [ZSH_WRAPPER_RC, BASH_WRAPPER_RC, FISH_INIT_COMMAND] {
+            assert!(script.contains(r"\e]7;file://%s\a"), "{script}");
+        }
+    }
 }

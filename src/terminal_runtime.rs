@@ -18,6 +18,7 @@ use parking_lot::FairMutex;
 use portable_pty::PtySize;
 
 use crate::foreground_kind::ForegroundKind;
+use crate::osc7::parse_osc7_payload;
 use crate::pty_event_loop;
 use crate::pty_event_loop::{EventLoopHandle, Message, PtyEvent, PtySink};
 use crate::ssh_session::{ChannelRequest, SshConnectOptions, SshHandle, SshSession};
@@ -2503,7 +2504,7 @@ impl TerminalRuntimeState {
         combined.extend_from_slice(bytes);
         // 处理所有完整 sequence，得到剩余 tail。
         let tail = consume_osc7_sequences(&combined, |path| {
-            if let Some(cwd) = parse_osc7_payload(path) {
+            if let Some(cwd) = parse_osc7_payload(path, crate::osc7::local_hostname()) {
                 self.local_cwd = Some(cwd);
             }
         });
@@ -5255,58 +5256,6 @@ fn find_osc_terminator(payload: &[u8]) -> Option<(usize, usize)> {
     None
 }
 
-/// 解析 OSC 7 payload，提取 PathBuf。支持两种形式：
-/// - `file://host/path`：剥掉 `file://` + host，剩 `/path` 做 url-decode。
-/// - 退化形式：直接 `/path` 或 `path`，整体 url-decode。
-/// host 段当前忽略（v1 只关心本地）。
-fn parse_osc7_payload(payload: &[u8]) -> Option<PathBuf> {
-    let text = std::str::from_utf8(payload).ok()?;
-    let path_part = if let Some(rest) = text.strip_prefix("file://") {
-        // 跳过 host：第一个 '/' 之后是路径
-        match rest.find('/') {
-            Some(slash) => &rest[slash..],
-            None => return None,
-        }
-    } else {
-        text
-    };
-    let decoded = url_decode_percent(path_part);
-    if decoded.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(decoded))
-    }
-}
-
-/// 极简 URL percent-decode：`%XX` → 单字节，其余原样。
-/// 不依赖外部 crate；非 UTF-8 时尽量保留原始字节。
-fn url_decode_percent(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
-                out.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_digit(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5390,25 +5339,6 @@ mod tests {
     }
 
     #[test]
-    fn osc7_parse_handles_three_forms() {
-        let p1 = parse_osc7_payload(b"file://host/home/matt").unwrap();
-        assert_eq!(p1, PathBuf::from("/home/matt"));
-
-        let p2 = parse_osc7_payload(b"file:///home/matt").unwrap();
-        assert_eq!(p2, PathBuf::from("/home/matt"));
-
-        let p3 = parse_osc7_payload(b"/tmp/foo").unwrap();
-        assert_eq!(p3, PathBuf::from("/tmp/foo"));
-    }
-
-    #[test]
-    fn osc7_parse_decodes_percent_escapes() {
-        let payload = b"file://host/home/with%20space/%E4%B8%AD";
-        let p = parse_osc7_payload(payload).unwrap();
-        assert_eq!(p, PathBuf::from("/home/with space/中"));
-    }
-
-    #[test]
     fn consume_osc7_handles_full_sequence_bel() {
         let buf = b"junk\x1b]7;file:///a/b\x07more";
         let mut hits = Vec::new();
@@ -5461,17 +5391,32 @@ mod tests {
     fn scan_osc7_updates_local_cwd() {
         let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
         assert!(state.local_cwd.is_none());
-        state.scan_osc7(b"prefix\x1b]7;file://h/tmp/x\x07tail");
+        state.scan_osc7(b"prefix\x1b]7;file:///tmp/x\x07tail");
         assert_eq!(state.local_cwd, Some(PathBuf::from("/tmp/x")));
         // 第二次 cwd 变更
-        state.scan_osc7(b"\x1b]7;file://h/var\x07");
+        state.scan_osc7(b"\x1b]7;file:///var\x07");
         assert_eq!(state.local_cwd, Some(PathBuf::from("/var")));
+    }
+
+    /// 远端 shell（SSH 里）发的 OSC 7 带自己的 hostname，必须不动本地 cwd。
+    #[test]
+    fn scan_osc7_ignores_remote_host() {
+        let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
+        state.scan_osc7(b"\x1b]7;file:///tmp/x\x07");
+        assert_eq!(state.local_cwd, Some(PathBuf::from("/tmp/x")));
+
+        state.scan_osc7(b"\x1b]7;file://vps-tokyo/root\x07");
+        assert_eq!(
+            state.local_cwd,
+            Some(PathBuf::from("/tmp/x")),
+            "远端 host 不应污染本地 cwd"
+        );
     }
 
     #[test]
     fn panel_cwd_defaults_to_local_cwd() {
         let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
-        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        state.scan_osc7(b"\x1b]7;file:///tmp/x\x07");
         let snap = state.build_snapshot();
         assert_eq!(snap.local_cwd, Some(PathBuf::from("/tmp/x")));
         assert_eq!(snap.panel_cwd, Some(PathBuf::from("/tmp/x")));
@@ -5480,7 +5425,7 @@ mod tests {
     #[test]
     fn herdr_cwd_overrides_panel_cwd_but_not_local_cwd() {
         let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
-        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        state.scan_osc7(b"\x1b]7;file:///tmp/x\x07");
         state.set_herdr_cwd(Some(PathBuf::from("/srv/repo")));
         let snap = state.build_snapshot();
         assert_eq!(snap.local_cwd, Some(PathBuf::from("/tmp/x")));
@@ -5490,7 +5435,7 @@ mod tests {
     #[test]
     fn clearing_herdr_cwd_hands_panel_back_to_osc7() {
         let mut state = TerminalRuntimeState::new("t", true, "ok", 80, 24);
-        state.scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        state.scan_osc7(b"\x1b]7;file:///tmp/x\x07");
         state.set_herdr_cwd(Some(PathBuf::from("/srv/repo")));
         state.set_herdr_cwd(None);
         assert_eq!(
@@ -5520,7 +5465,7 @@ mod tests {
     #[test]
     fn leaving_herdr_hands_panel_cwd_back_to_osc7() {
         let rt = LocalTerminalRuntime::failed("t", "boom");
-        rt.state.lock().scan_osc7(b"\x1b]7;file://h/tmp/x\x07");
+        rt.state.lock().scan_osc7(b"\x1b]7;file:///tmp/x\x07");
         rt.state.lock().set_herdr_cwd(Some(PathBuf::from("/srv")));
         assert_eq!(rt.snapshot().panel_cwd, Some(PathBuf::from("/srv")));
         // 前台不是 herdr → 清 herdr cwd（无租约时也要清）。

@@ -54,6 +54,7 @@ pub mod menu;
 pub mod native_adapter;
 pub mod native_shell_adapter;
 pub mod native_shell_host;
+pub mod osc7;
 pub mod pane_state;
 #[cfg(feature = "warpui-app")]
 pub mod pane_tree;
