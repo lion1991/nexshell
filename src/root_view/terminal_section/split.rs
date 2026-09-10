@@ -170,6 +170,16 @@ impl RootView {
         }
 
         let pane_id = tab.focused_pane_id;
+        // 关 pane 会丢掉该 pane 的 runtime，先把录制中的内容落盘。
+        let closing_runtime = tab.pane_terminals.get(&pane_id).cloned();
+        if let Some(runtime) = closing_runtime {
+            let label = tab.window_title();
+            self.flush_recordings(&[runtime], &label);
+        }
+        let tab = match self.terminal_tabs.get_mut(self.active_tab_index) {
+            Some(t) => t,
+            None => return,
+        };
         tab.pane_tree.remove(pane_id);
         // 记下被关 pane 的会话 id，稍后清玻璃脏区指纹。
         let glass_key = tab

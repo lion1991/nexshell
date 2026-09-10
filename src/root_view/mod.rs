@@ -3022,6 +3022,15 @@ impl RootView {
     }
 
     fn remove_terminal_tab_at(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        // 关 tab 会丢掉全部 pane 的 runtime，先把录制中的内容落盘。
+        if let Some(tab) = self.terminal_tabs.get(index) {
+            let runtimes: Vec<_> = std::iter::once(&tab.terminal)
+                .chain(tab.pane_terminals.values())
+                .cloned()
+                .collect();
+            let label = tab.window_title();
+            self.flush_recordings(&runtimes, &label);
+        }
         let mut rdp_asset_id = None;
         let mut glass_keys: Vec<String> = Vec::new();
         if let Some(tab) = self.terminal_tabs.get(index) {

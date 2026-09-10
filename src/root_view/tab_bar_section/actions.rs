@@ -197,6 +197,44 @@ impl RootView {
         ctx.notify();
     }
 
+    /// 关 tab / 关 pane / 重连前把录制中的 transcript 落盘到录制默认目录，避免静默丢失。
+    pub(in crate::root_view) fn flush_recordings(
+        &mut self,
+        runtimes: &[Arc<Mutex<LocalTerminalRuntime>>],
+        label: &str,
+    ) {
+        for runtime in runtimes {
+            let bytes = match runtime.lock() {
+                Ok(runtime) if runtime.is_recording() => runtime.stop_recording(),
+                _ => None,
+            };
+            let Some(bytes) = bytes else {
+                continue;
+            };
+            self.host_state.notice = Some(
+                match nexshell::terminal_recorder::save_recording_to_default_dir(&bytes, label) {
+                    Ok(path) => {
+                        rust_i18n::t!("toast_recording_saved", path = path.display().to_string())
+                            .to_string()
+                    }
+                    Err(error) => {
+                        rust_i18n::t!("toast_recording_save_failed", error = error).to_string()
+                    }
+                },
+            );
+        }
+    }
+
+    /// 任一 tab 的任一 pane 在录制（关窗 / 退出前的提示门禁）。
+    pub(crate) fn has_active_recording(&self) -> bool {
+        self.terminal_tabs.iter().any(|tab| {
+            tab.pane_terminals
+                .values()
+                .chain(std::iter::once(&tab.terminal))
+                .any(|rt| rt.lock().map_or(false, |rt| rt.is_recording()))
+        })
+    }
+
     /// 切换录制：未录制则开始；录制中则停止并弹保存对话框写盘。
     pub(in crate::root_view) fn handle_toggle_tab_recording(
         &mut self,
@@ -687,6 +725,15 @@ impl RootView {
         let new_terminal = Arc::new(Mutex::new(new_terminal));
 
         let focused_id = self.terminal_tabs[index].focused_pane_id;
+        // 重连会丢掉旧 runtime，先把录制中的内容落盘。
+        let old_runtime = self.terminal_tabs[index]
+            .pane_terminals
+            .get(&focused_id)
+            .cloned();
+        if let Some(old_runtime) = old_runtime {
+            let label = self.terminal_tabs[index].window_title();
+            self.flush_recordings(&[old_runtime], &label);
+        }
         self.terminal_tabs[index]
             .pane_terminals
             .insert(focused_id, Arc::clone(&new_terminal));

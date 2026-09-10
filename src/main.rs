@@ -808,6 +808,15 @@ fn app_has_unsaved_code_viewer(ctx: &mut AppContext) -> bool {
     has_unsaved
 }
 
+/// 关窗 / 退出 app 回调里读 RootView 是否有终端在录制（P1-18）。
+fn app_has_active_recording(ctx: &mut AppContext) -> bool {
+    let mut recording = false;
+    dispatch_to_root_view(ctx, |view, _| {
+        recording = view.has_active_recording();
+    });
+    recording
+}
+
 fn register_menu_global_actions(ctx: &mut AppContext) {
     ctx.add_global_action("nexshell:find", |_: &(), ctx| {
         dispatch_to_root_view(ctx, |view, ctx| {
@@ -1095,13 +1104,17 @@ fn main() -> Result<()> {
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则关窗会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
+        // 录制中的终端同级拦截，否则关窗会结束录制（审查 P1-18）。
+        let is_recording = app_has_active_recording(ctx);
 
-        if running_count == 0 && !has_unsaved {
+        if running_count == 0 && !has_unsaved && !is_recording {
             return ApproveTerminateResult::Terminate;
         }
 
         let message = if has_unsaved {
             rust_i18n::t!("dialog_close_window_unsaved").to_string()
+        } else if is_recording {
+            rust_i18n::t!("dialog_close_window_recording").to_string()
         } else {
             rust_i18n::t!("dialog_close_window_msg", count = running_count).to_string()
         };
@@ -1140,13 +1153,17 @@ fn main() -> Result<()> {
             .unwrap_or(0);
         // 有未保存的内置编辑器内容也要拦截，否则 Cmd+Q 会静默丢失（审查 #1）。
         let has_unsaved = app_has_unsaved_code_viewer(ctx);
+        // 录制中的终端同级拦截（审查 P1-18）。
+        let is_recording = app_has_active_recording(ctx);
 
-        if running_count == 0 && !has_unsaved {
+        if running_count == 0 && !has_unsaved && !is_recording {
             return ApproveTerminateResult::Terminate;
         }
 
         let message = if has_unsaved {
             rust_i18n::t!("dialog_quit_app_unsaved").to_string()
+        } else if is_recording {
+            rust_i18n::t!("dialog_quit_app_recording").to_string()
         } else {
             rust_i18n::t!("dialog_quit_app_msg", count = running_count).to_string()
         };

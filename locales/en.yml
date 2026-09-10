@@ -294,10 +294,12 @@ key_reset_font: Reset font
 dialog_close_window: "Close window?"
 dialog_close_window_msg: "You have %{count} running processes. Closing the window will terminate them."
 dialog_close_window_unsaved: "There are unsaved changes. Closing the window will discard them. Close anyway?"
+dialog_close_window_recording: "A terminal is recording. Closing the window will end the recording. Close anyway?"
 dialog_confirm_close: Confirm close
 dialog_quit_app: "Quit NexShell?"
 dialog_quit_app_msg: "You have %{count} running processes. Quitting will terminate them."
 dialog_quit_app_unsaved: "There are unsaved changes. Quitting will discard them. Quit anyway?"
+dialog_quit_app_recording: "A terminal is recording. Quitting will end the recording. Quit anyway?"
 dialog_confirm_quit: Confirm quit
 dialog_cancel: Cancel
 
