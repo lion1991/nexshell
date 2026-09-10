@@ -186,6 +186,7 @@ git_panel_empty: Git
 git_panel_remote_unsupported: 远程会话不支持 git 面板
 git_panel_no_repo: 不在 git 仓库中
 git_panel_not_in_repo: 当前目录不在 git 仓库中
+git_panel_repo_changed: 仓库已切换，该操作已跳过
 git_panel_detached: HEAD（detached）
 git_panel_loading: 读取仓库状态中...
 git_panel_clean: 工作区干净

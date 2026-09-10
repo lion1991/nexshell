@@ -186,6 +186,7 @@ git_panel_empty: Git
 git_panel_remote_unsupported: Git panel not available for remote sessions
 git_panel_no_repo: Not in a git repository
 git_panel_not_in_repo: Current directory is not inside a git repository
+git_panel_repo_changed: Repository changed; the action was skipped
 git_panel_detached: HEAD (detached)
 git_panel_loading: Loading repository status...
 git_panel_clean: Working tree clean

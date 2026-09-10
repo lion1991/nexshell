@@ -68,10 +68,14 @@ impl RootView {
         if trimmed.is_empty() {
             return;
         }
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
         let queued = worker.send(GitRequest::Commit {
+            expected_repo,
             message: trimmed,
             amend: false,
         });
@@ -113,10 +117,14 @@ impl RootView {
         ) {
             return;
         }
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
         if !worker.send(GitRequest::Push {
+            expected_repo,
             accept_new_ssh_host,
         }) {
             return;
@@ -146,10 +154,16 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.iter().find(|tab| tab.id == tab_id) else {
             return;
         };
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
-        if worker.send(GitRequest::DiscardWorktreeChanges(vec![path])) {
+        if worker.send(GitRequest::DiscardWorktreeChanges {
+            expected_repo,
+            paths: vec![path],
+        }) {
             ctx.notify();
         }
     }
@@ -166,10 +180,16 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.iter().find(|tab| tab.id == tab_id) else {
             return;
         };
-        let Some(worker) = tab.git_worker.as_ref() else {
+        let (Some(expected_repo), Some(worker)) = (
+            tab.git_panel_state.repo_root.clone(),
+            tab.git_worker.as_ref(),
+        ) else {
             return;
         };
-        if worker.send(GitRequest::DeleteUntracked(vec![path])) {
+        if worker.send(GitRequest::DeleteUntracked {
+            expected_repo,
+            paths: vec![path],
+        }) {
             ctx.notify();
         }
     }
