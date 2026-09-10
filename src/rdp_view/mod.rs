@@ -7,7 +7,9 @@ pub mod keymap;
 pub mod page_element;
 pub mod pointer;
 
-pub use geometry::{rdp_desktop_scale_factor, rdp_desktop_size, RdpViewport, ResizeDebounce};
+pub use geometry::{
+    rdp_desktop_scale_factor, rdp_desktop_size, rdp_fixed_desktop_size, RdpViewport, ResizeDebounce,
+};
 pub use hotkey_guard::HotkeyGuardSlot;
 pub use page_element::RdpPageElement;
 pub use pointer::pointer_to_cursor;

@@ -387,6 +387,8 @@ form_password: 密码
 form_display_quality: 显示质量
 form_display_quality_standard: 标准
 form_display_quality_hidpi: 高清 HiDPI
+form_rdp_resolution: 远程分辨率
+form_rdp_resolution_fit_window: 跟随窗口
 form_serial_device: 串口设备
 form_baud_rate: 波特率
 form_description: 描述

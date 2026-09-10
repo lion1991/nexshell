@@ -18,7 +18,9 @@ use warpui::image_cache::{CustomImageFormat, CustomImageHeader, ImageType};
 use warpui::r#async::Timer;
 use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
 
-use crate::rdp_view::{rdp_desktop_scale_factor, rdp_desktop_size, RdpPageElement};
+use crate::rdp_view::{
+    rdp_desktop_scale_factor, rdp_desktop_size, rdp_fixed_desktop_size, RdpPageElement,
+};
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{
@@ -44,7 +46,12 @@ impl RootView {
     ) {
         let (content_area, scale) = self.rdp_content_area(ctx);
         let hidpi = matches!(config.rdp_display_quality, RdpDisplayQuality::Hidpi);
-        let (width, height) = rdp_desktop_size(content_area, scale, hidpi);
+        // 固定分辨率：按用户设定连接，不随窗口；否则按内容区推导。
+        let fixed = config.rdp_resolution.fixed_size();
+        let (width, height) = match fixed {
+            Some((w, h)) => rdp_fixed_desktop_size(w, h),
+            None => rdp_desktop_size(content_area, scale, hidpi),
+        };
         let rdp_config = RdpSessionConfig {
             host: config.host.trim().to_string(),
             port: config.port,
@@ -95,6 +102,7 @@ impl RootView {
                 current_pointer: warpui::platform::Cursor::Arrow,
                 pointer_cursor_cache: std::collections::HashMap::new(),
                 hidpi,
+                fixed_resolution: fixed.is_some(),
                 stats,
                 conn_info_open: false,
                 conn_info_last_sample: None,
@@ -478,12 +486,15 @@ impl RootView {
     /// 时向会话发 resize 请求（防抖在 ResizeDebounce）。无已连接 RDP tab 即停表。
     fn schedule_rdp_resize_tick(ctx: &mut ViewContext<Self>) {
         ctx.spawn(Timer::after(Duration::from_millis(100)), |me, _, ctx| {
-            let any_connected = me.terminal_tabs.iter().any(|t| {
-                t.rdp
-                    .as_ref()
-                    .map_or(false, |r| matches!(r.phase, RdpConnectionPhase::Connected))
+            // 与下方循环同一门槛：固定分辨率 / 非 EGFX 的 tab 不参与轮询，全都不需要就停表。
+            let any_pollable = me.terminal_tabs.iter().any(|t| {
+                t.rdp.as_ref().map_or(false, |r| {
+                    matches!(r.phase, RdpConnectionPhase::Connected)
+                        && r.config.enable_egfx
+                        && !r.fixed_resolution
+                })
             });
-            if !any_connected {
+            if !any_pollable {
                 me.rdp_resize_ticking = false;
                 return;
             }
@@ -493,8 +504,11 @@ impl RootView {
                 let Some(rdp) = tab.rdp.as_mut() else {
                     continue;
                 };
-                // 仅 EGFX 会话支持 Display Control 动态分辨率；legacy 不请求。
-                if !matches!(rdp.phase, RdpConnectionPhase::Connected) || !rdp.config.enable_egfx {
+                // 仅 EGFX 会话支持 Display Control 动态分辨率；legacy / 固定分辨率不请求。
+                if !matches!(rdp.phase, RdpConnectionPhase::Connected)
+                    || !rdp.config.enable_egfx
+                    || rdp.fixed_resolution
+                {
                     continue;
                 }
                 let target = rdp_desktop_size(content_area, scale, rdp.hidpi);

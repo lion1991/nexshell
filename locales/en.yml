@@ -387,6 +387,8 @@ form_password: Password
 form_display_quality: Display quality
 form_display_quality_standard: Standard
 form_display_quality_hidpi: HiDPI
+form_rdp_resolution: Remote resolution
+form_rdp_resolution_fit_window: Fit window
 form_serial_device: Serial device
 form_baud_rate: Baud rate
 form_description: Description

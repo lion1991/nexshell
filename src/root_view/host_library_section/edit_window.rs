@@ -306,6 +306,7 @@ impl RootView {
             connection.auth_method = "password".to_string();
             connection.password = optional_text(&draft.password);
             connection.rdp_display_quality = draft.rdp_display_quality;
+            connection.rdp_resolution = draft.rdp_resolution;
             return connection;
         }
 

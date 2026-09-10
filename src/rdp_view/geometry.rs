@@ -73,6 +73,11 @@ pub fn rdp_desktop_size(content_area: Vector2F, scale: f32, hidpi: bool) -> (u16
     (clamp_even(w), clamp_even(h))
 }
 
+/// 用户指定的固定分辨率 → 连接分辨率：与跟随窗口同一套 clamp + 偶数对齐，不受窗口/HiDPI 影响。
+pub fn rdp_fixed_desktop_size(width: u16, height: u16) -> (u16, u16) {
+    (clamp_even(i64::from(width)), clamp_even(i64::from(height)))
+}
+
 /// 请求远端主机 DPI 缩放百分比（对齐 Windows App）。HiDPI 下按物理/逻辑比例×100，
 /// clamp 到 connector 有效区间 [100,500]（2.0→200，1.0→100）；非 HiDPI 返回 0=不请求。
 pub fn rdp_desktop_scale_factor(scale: f32, hidpi: bool) -> u32 {
@@ -139,6 +144,13 @@ impl ResizeDebounce {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_desktop_size_clamps_and_aligns_even() {
+        assert_eq!(rdp_fixed_desktop_size(1920, 1080), (1920, 1080));
+        assert_eq!(rdp_fixed_desktop_size(1281, 721), (1280, 720));
+        assert_eq!(rdp_fixed_desktop_size(100, 9000), (640, 8192));
+    }
 
     #[test]
     fn letterbox_pillarboxes_when_width_constrained() {

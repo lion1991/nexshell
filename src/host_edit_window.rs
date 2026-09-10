@@ -26,7 +26,7 @@ use crate::warp_dropdown::{
     render_warp_dropdown, render_warp_dropdown_with_top_bar, WarpDropdownCustomProps,
     WarpDropdownOption, WarpDropdownProps,
 };
-use nexshell::host_management::{HostSystemIcon, RdpDisplayQuality};
+use nexshell::host_management::{HostSystemIcon, RdpDisplayQuality, RdpResolution};
 use warpui::{Entity, ReadModel, UpdateModel};
 
 // RDP 端口默认值：切到 RDP 且端口仍是 SSH 默认(22) 时自动改用此值。
@@ -66,6 +66,7 @@ pub struct HostEditDraft {
     pub serial_dtr: bool,
     pub serial_rts: bool,
     pub rdp_display_quality: RdpDisplayQuality,
+    pub rdp_resolution: RdpResolution,
     pub system: HostSystemIcon,
 }
 
@@ -102,6 +103,7 @@ impl HostEditDraft {
             serial_dtr: c.serial_dtr,
             serial_rts: c.serial_rts,
             rdp_display_quality: c.rdp_display_quality,
+            rdp_resolution: c.rdp_resolution,
             system: card.system,
         }
     }
@@ -143,6 +145,7 @@ impl HostEditDraft {
             serial_dtr: false,
             serial_rts: false,
             rdp_display_quality: RdpDisplayQuality::Standard,
+            rdp_resolution: RdpResolution::FitWindow,
             system: HostSystemIcon::Terminal,
         }
     }
@@ -179,6 +182,7 @@ pub enum HostDropdownKind {
     SerialStopBits,
     SerialParity,
     SerialFlowControl,
+    RdpResolution,
 }
 
 // ── Model (跨窗口通信) ──
@@ -207,6 +211,7 @@ impl warpui::Entity for HostEditModel {
 pub enum HostEditAction {
     SelectProtocol(String),
     SelectRdpQuality(RdpDisplayQuality),
+    SelectRdpResolution(RdpResolution),
     SelectAuthMethod(String),
     ToggleAdvancedSettings,
     ToggleKeepAlive,
@@ -243,6 +248,7 @@ struct FieldStates {
     protocol_serial_state: MouseStateHandle,
     rdp_quality_standard_state: MouseStateHandle,
     rdp_quality_hidpi_state: MouseStateHandle,
+    rdp_resolution_state: MouseStateHandle,
     auth_password_state: MouseStateHandle,
     auth_key_state: MouseStateHandle,
     advanced_state: MouseStateHandle,
@@ -275,6 +281,7 @@ struct FieldStates {
     serial_parity_item_states: RefCell<BTreeMap<String, MouseStateHandle>>,
     serial_flow_control_item_states: RefCell<BTreeMap<String, MouseStateHandle>>,
     tag_item_states: RefCell<BTreeMap<String, MouseStateHandle>>,
+    rdp_resolution_item_states: RefCell<BTreeMap<String, MouseStateHandle>>,
 }
 
 impl FieldStates {
@@ -287,6 +294,7 @@ impl FieldStates {
             protocol_serial_state: ms(),
             rdp_quality_standard_state: ms(),
             rdp_quality_hidpi_state: ms(),
+            rdp_resolution_state: ms(),
             auth_password_state: ms(),
             auth_key_state: ms(),
             advanced_state: ms(),
@@ -319,6 +327,7 @@ impl FieldStates {
             serial_parity_item_states: RefCell::new(BTreeMap::new()),
             serial_flow_control_item_states: RefCell::new(BTreeMap::new()),
             tag_item_states: RefCell::new(BTreeMap::new()),
+            rdp_resolution_item_states: RefCell::new(BTreeMap::new()),
         }
     }
 }
@@ -1039,6 +1048,16 @@ impl warpui::TypedActionView for HostEditView {
                 });
                 ctx.notify();
             }
+            HostEditAction::SelectRdpResolution(resolution) => {
+                self.states.borrow_mut().open_dropdown = None;
+                ctx.update_model(&self.model, |m, ctx| {
+                    if m.draft.rdp_resolution != *resolution {
+                        m.draft.rdp_resolution = *resolution;
+                        ctx.notify();
+                    }
+                });
+                ctx.notify();
+            }
             HostEditAction::SelectSerialDevice(device) => {
                 self.states.borrow_mut().open_dropdown = None;
                 self.set_serial_device_value(device, ctx);
@@ -1400,6 +1419,22 @@ fn render_form(
             ui_font,
             hc,
         ));
+
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_rdp_resolution"),
+            ui_font,
+            hc,
+        ));
+        col.add_child(render_dropdown_select_field(
+            HostDropdownKind::RdpResolution,
+            rdp_resolution_label(draft.rdp_resolution),
+            &states.rdp_resolution_state,
+            states.open_dropdown == Some(HostDropdownKind::RdpResolution),
+            rdp_resolution_dropdown_options(draft.rdp_resolution, states),
+            ui_font,
+            appearance,
+            480.0,
+        ));
     } else if draft.protocol == "SSH" {
         col.add_child(render_field_label(
             &rust_i18n::t!("form_host_address"),
@@ -1711,6 +1746,7 @@ fn dropdown_position_id(kind: HostDropdownKind) -> &'static str {
         HostDropdownKind::SerialStopBits => "host_edit_serial_stop_bits_dropdown_top_bar",
         HostDropdownKind::SerialParity => "host_edit_serial_parity_dropdown_top_bar",
         HostDropdownKind::SerialFlowControl => "host_edit_serial_flow_dropdown_top_bar",
+        HostDropdownKind::RdpResolution => "host_edit_rdp_resolution_dropdown_top_bar",
     }
 }
 
@@ -1836,6 +1872,46 @@ fn serial_baud_rate_dropdown_options(
             action: HostEditAction::SelectSerialBaudRate(rate),
             selected: current == rate,
             state: dropdown_item_state(&states.serial_baud_rate_item_states, rate.to_string()),
+            icon_path: None,
+            shortcut: None,
+        })
+        .collect()
+}
+
+fn rdp_resolution_label(current: RdpResolution) -> String {
+    match current.fixed_size() {
+        None => rust_i18n::t!("form_rdp_resolution_fit_window").to_string(),
+        Some((w, h)) => format!("{w} × {h}"),
+    }
+}
+
+/// 跟随窗口 + 预设；库里存的非预设固定值（导入/旧数据）也列出，避免一打开就被改掉。
+fn rdp_resolution_dropdown_options(
+    current: RdpResolution,
+    states: &FieldStates,
+) -> Vec<WarpDropdownOption<HostEditAction>> {
+    let mut options = vec![RdpResolution::FitWindow];
+    if let Some((w, h)) = current.fixed_size() {
+        if !RdpResolution::PRESETS.contains(&(w, h)) {
+            options.push(current);
+        }
+    }
+    options.extend(
+        RdpResolution::PRESETS
+            .iter()
+            .map(|&(w, h)| RdpResolution::fixed(w, h)),
+    );
+
+    options
+        .into_iter()
+        .map(|resolution| WarpDropdownOption {
+            label: rdp_resolution_label(resolution),
+            action: HostEditAction::SelectRdpResolution(resolution),
+            selected: resolution == current,
+            state: dropdown_item_state(
+                &states.rdp_resolution_item_states,
+                resolution.to_db_string(),
+            ),
             icon_path: None,
             shortcut: None,
         })

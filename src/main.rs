@@ -490,6 +490,8 @@ struct RdpTabState {
     pointer_cursor_cache: std::collections::HashMap<u64, (f32, warpui::platform::Cursor)>,
     /// 显示质量档：true=高清(HiDPI)，用于连接信息面板展示。
     hidpi: bool,
+    /// 用户指定固定分辨率：true 时不随窗口尺寸发 Display Control resize。
+    fixed_resolution: bool,
     /// 协议层运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
     stats: Arc<nexshell::rdp_session::RdpStats>,
     /// 连接信息浮层开关。

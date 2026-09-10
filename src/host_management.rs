@@ -130,6 +130,9 @@ pub struct HostConnectionConfig {
     // RDP 显示质量：标准（逻辑像素）/ 高清（物理像素）。仅 RDP 协议使用。
     #[serde(default)]
     pub rdp_display_quality: RdpDisplayQuality,
+    // RDP 远端分辨率：跟随窗口（默认）/ 固定宽×高。仅 RDP 协议使用。
+    #[serde(default)]
+    pub rdp_resolution: RdpResolution,
 }
 
 // RDP 显示质量二选一：标准=逻辑像素（默认），高清=物理像素（HiDPI）。
@@ -153,6 +156,88 @@ impl RdpDisplayQuality {
         match value.trim().to_ascii_lowercase().as_str() {
             "hidpi" => Self::Hidpi,
             _ => Self::Standard,
+        }
+    }
+}
+
+/// RDP 远端分辨率：跟随窗口（连接/缩放时按内容区推导）或固定宽×高（连接后不随窗口变）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase", from = "RdpResolutionRepr")]
+pub enum RdpResolution {
+    #[default]
+    FitWindow,
+    Fixed {
+        width: u16,
+        height: u16,
+    },
+}
+
+/// 反序列化中转：让 serde 走 `RdpResolution::fixed` 的同一区间校验（越界回退跟随窗口）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RdpResolutionRepr {
+    FitWindow,
+    Fixed { width: u16, height: u16 },
+}
+
+impl From<RdpResolutionRepr> for RdpResolution {
+    fn from(value: RdpResolutionRepr) -> Self {
+        match value {
+            RdpResolutionRepr::FitWindow => Self::FitWindow,
+            RdpResolutionRepr::Fixed { width, height } => Self::fixed(width, height),
+        }
+    }
+}
+
+impl RdpResolution {
+    /// 编辑窗口下拉里的常用固定分辨率。
+    pub const PRESETS: [(u16, u16); 6] = [
+        (1280, 720),
+        (1366, 768),
+        (1600, 900),
+        (1920, 1080),
+        (2560, 1440),
+        (3840, 2160),
+    ];
+    /// 固定分辨率合法区间（与 rdp_view::geometry 的 clamp 一致）。
+    pub const MIN_SIDE: u16 = 640;
+    pub const MAX_SIDE: u16 = 8192;
+
+    /// 构造固定分辨率；任一边越界即回退跟随窗口（与 `from_db` 语义一致）。
+    pub fn fixed(width: u16, height: u16) -> Self {
+        let ok = |v: u16| (Self::MIN_SIDE..=Self::MAX_SIDE).contains(&v);
+        if ok(width) && ok(height) {
+            Self::Fixed { width, height }
+        } else {
+            Self::FitWindow
+        }
+    }
+
+    /// 固定模式返回 (宽, 高)，跟随窗口返回 None。
+    pub fn fixed_size(self) -> Option<(u16, u16)> {
+        match self {
+            Self::FitWindow => None,
+            Self::Fixed { width, height } => Some((width, height)),
+        }
+    }
+
+    /// 存库字符串："auto" 或 "宽x高"。
+    pub fn to_db_string(self) -> String {
+        match self {
+            Self::FitWindow => "auto".to_string(),
+            Self::Fixed { width, height } => format!("{width}x{height}"),
+        }
+    }
+
+    /// 解析存库/导入字符串；非法或越界一律回退跟随窗口。
+    pub fn from_db(value: &str) -> Self {
+        let value = value.trim().to_ascii_lowercase();
+        let Some((w, h)) = value.split_once(['x', '×']) else {
+            return Self::FitWindow;
+        };
+        match (w.trim().parse::<u16>(), h.trim().parse::<u16>()) {
+            (Ok(width), Ok(height)) => Self::fixed(width, height),
+            _ => Self::FitWindow,
         }
     }
 }
@@ -184,6 +269,7 @@ impl HostConnectionConfig {
             term_encoding: "utf-8".to_string(),
             key_id: None,
             rdp_display_quality: RdpDisplayQuality::Standard,
+            rdp_resolution: RdpResolution::FitWindow,
         }
     }
 
@@ -220,6 +306,7 @@ impl HostConnectionConfig {
             term_encoding: "utf-8".to_string(),
             key_id: None,
             rdp_display_quality: RdpDisplayQuality::Standard,
+            rdp_resolution: RdpResolution::FitWindow,
         }
     }
 
@@ -853,6 +940,7 @@ pub fn initialize_host_database(db_path: &Path) -> Result<(), String> {
         .map_err(|error| format!("initialize NexShell host db: {error}"))?;
     migrate_add_sort_order(&conn);
     migrate_add_rdp_display_quality(&conn);
+    migrate_add_rdp_resolution(&conn);
     migrate_seed_tags_table(&conn);
     crate::ssh_key_store::ensure_schema(&conn)?;
     Ok(())
@@ -862,6 +950,14 @@ pub fn initialize_host_database(db_path: &Path) -> Result<(), String> {
 fn migrate_add_rdp_display_quality(conn: &Connection) {
     let _ = conn.execute(
         "ALTER TABLE hosts ADD COLUMN rdp_display_quality TEXT NOT NULL DEFAULT 'standard'",
+        [],
+    );
+}
+
+// 给 hosts 补 rdp_resolution 列（幂等）："auto" 或 "宽x高"。
+fn migrate_add_rdp_resolution(conn: &Connection) {
+    let _ = conn.execute(
+        "ALTER TABLE hosts ADD COLUMN rdp_resolution TEXT NOT NULL DEFAULT 'auto'",
         [],
     );
 }
@@ -1242,14 +1338,14 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             serial_flow_control, serial_dtr, serial_rts, group_id,
             keep_alive_enabled, keep_alive_interval, keep_alive_max_failures,
             tcp_connect_timeout, auth_timeout, term_encoding, tags, created_at, updated_at, key_id,
-            rdp_display_quality
+            rdp_display_quality, rdp_resolution
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17,
             ?18, ?19, ?20, ?21,
             ?22, ?23, ?24,
-            ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+            ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
         )
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
@@ -1281,7 +1377,8 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             tags = excluded.tags,
             updated_at = excluded.updated_at,
             key_id = excluded.key_id,
-            rdp_display_quality = excluded.rdp_display_quality",
+            rdp_display_quality = excluded.rdp_display_quality,
+            rdp_resolution = excluded.rdp_resolution",
         params![
             host.id,
             host.name.trim(),
@@ -1319,6 +1416,7 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             now,
             config.key_id.as_deref().map(str::trim),
             config.rdp_display_quality.as_str(),
+            config.rdp_resolution.to_db_string(),
         ],
     )
     .map_err(|error| format!("upsert host {}: {error}", host.id))?;
@@ -1451,7 +1549,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
              COALESCE(tcp_connect_timeout, 15), COALESCE(auth_timeout, 30), \
              COALESCE(term_encoding, 'utf-8'), COALESCE(tags, '[]'), \
              COALESCE(sort_order, 0), key_id, \
-             COALESCE(rdp_display_quality, 'standard') \
+             COALESCE(rdp_display_quality, 'standard'), COALESCE(rdp_resolution, 'auto') \
              FROM hosts ORDER BY sort_order ASC, created_at DESC",
         )
         .map_err(|error| format!("query hosts: {error}"))?;
@@ -1493,6 +1591,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
                 term_encoding: row.get(26)?,
                 key_id: row.get(29)?,
                 rdp_display_quality: RdpDisplayQuality::from_db(&row.get::<_, String>(30)?),
+                rdp_resolution: RdpResolution::from_db(&row.get::<_, String>(31)?),
             };
             let endpoint = connection.endpoint(&protocol);
 
@@ -2163,6 +2262,91 @@ mod tests {
             RdpDisplayQuality::Hidpi
         );
         assert_eq!(host.connection.password.as_deref(), Some("pw"));
+    }
+
+    #[test]
+    fn rdp_resolution_parses_and_rejects_out_of_range() {
+        assert_eq!(RdpResolution::from_db("auto"), RdpResolution::FitWindow);
+        assert_eq!(RdpResolution::from_db(""), RdpResolution::FitWindow);
+        assert_eq!(
+            RdpResolution::from_db("1920x1080"),
+            RdpResolution::fixed(1920, 1080)
+        );
+        assert_eq!(
+            RdpResolution::from_db(" 1280 × 720 "),
+            RdpResolution::fixed(1280, 720)
+        );
+        assert_eq!(RdpResolution::from_db("100x100"), RdpResolution::FitWindow);
+        assert_eq!(
+            RdpResolution::from_db("9000x1080"),
+            RdpResolution::FitWindow
+        );
+        assert_eq!(RdpResolution::from_db("abc"), RdpResolution::FitWindow);
+        assert_eq!(RdpResolution::fixed(2560, 1440).to_db_string(), "2560x1440");
+        assert_eq!(RdpResolution::FitWindow.to_db_string(), "auto");
+    }
+
+    #[test]
+    fn rdp_resolution_fixed_constructor_rejects_out_of_range() {
+        assert_eq!(
+            RdpResolution::fixed(1920, 1080),
+            RdpResolution::Fixed {
+                width: 1920,
+                height: 1080
+            }
+        );
+        assert_eq!(RdpResolution::fixed(639, 1080), RdpResolution::FitWindow);
+        assert_eq!(RdpResolution::fixed(1920, 8193), RdpResolution::FitWindow);
+        assert_eq!(RdpResolution::fixed(0, 0), RdpResolution::FitWindow);
+    }
+
+    #[test]
+    fn rdp_resolution_serde_validates_range() {
+        let legal: RdpResolution =
+            serde_json::from_str(r#"{"fixed":{"width":1920,"height":1080}}"#).unwrap();
+        assert_eq!(legal, RdpResolution::fixed(1920, 1080));
+
+        let too_small: RdpResolution =
+            serde_json::from_str(r#"{"fixed":{"width":100,"height":100}}"#).unwrap();
+        assert_eq!(too_small, RdpResolution::FitWindow);
+
+        let too_big: RdpResolution =
+            serde_json::from_str(r#"{"fixed":{"width":9000,"height":1080}}"#).unwrap();
+        assert_eq!(too_big, RdpResolution::FitWindow);
+
+        // 序列化→反序列化对称。
+        let json = serde_json::to_string(&RdpResolution::fixed(2560, 1440)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RdpResolution>(&json).unwrap(),
+            RdpResolution::fixed(2560, 1440)
+        );
+        let json = serde_json::to_string(&RdpResolution::FitWindow).unwrap();
+        assert_eq!(
+            serde_json::from_str::<RdpResolution>(&json).unwrap(),
+            RdpResolution::FitWindow
+        );
+    }
+
+    #[test]
+    fn rdp_resolution_roundtrips_through_db() {
+        let (db_path, _conn) = temp_db();
+        let mut card = rdp_card("Administrator", Some("pw"), RdpDisplayQuality::Standard);
+        card.connection.rdp_resolution = RdpResolution::fixed(1920, 1080);
+        upsert_host_card_in_db_path(&db_path, &card).unwrap();
+
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        let host = snapshot.hosts.iter().find(|h| h.id == "rdp-1").unwrap();
+        assert_eq!(
+            host.connection.rdp_resolution,
+            RdpResolution::fixed(1920, 1080)
+        );
+
+        // 未设置的旧数据靠列默认值回退跟随窗口。
+        let card = rdp_card("Administrator", Some("pw"), RdpDisplayQuality::Standard);
+        upsert_host_card_in_db_path(&db_path, &card).unwrap();
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        let host = snapshot.hosts.iter().find(|h| h.id == "rdp-1").unwrap();
+        assert_eq!(host.connection.rdp_resolution, RdpResolution::FitWindow);
     }
 
     #[test]
