@@ -262,6 +262,9 @@ impl RootView {
                             return None;
                         }
                         // 一次分配带头构造：绕开 clone+splice 的两次全帧搬运（len 恒 = w*h*4，无需校验）。
+                        // 但每帧仍有两次全帧拷贝：此处 Vec 一次、AssetCache 内 try_from_bytes 再拷成
+                        // RgbaImage 一次；根因是 warpui_core AssetCache::insert_raw_asset_bytes 只收
+                        // &[u8]、无原地更新入口，零拷贝需跨仓在 warpui_core 加复用缓冲/直写纹理 API。
                         let header = CustomImageHeader {
                             width: fb.width as u32,
                             height: fb.height as u32,

@@ -1,6 +1,6 @@
 # IronRDP 依赖追平上游并收缩 fork 补丁
 
-Status: proposed (2026-08-31)；openspec change `upgrade-upstream-warp-ironrdp`
+Status: accepted (2026-09-10)；openspec change `upgrade-upstream-warp-ironrdp`
 
 ## 背景
 
@@ -38,6 +38,11 @@ fork `lion1991/IronRDP@egfx-fixes`（`f120928`，合并基 Devolutions `069786c`
 延后（调试设施，非用户功能）：ab32498、9355e53、patches/raw-gfx-pdu-dump。NexShell 自有 `NEXSHELL_RDP_EGFX_WIRE_DUMP` + `examples/egfx_replay.rs` 覆盖回放需求；需要时再按新结构移植。
 
 条件保留（需抓包确认后定）：bbd5249① TileState 按 surface 键控——若 Windows 跨 codecContextId 发 UPGRADE 则需要。
+
+`21d61ed`（`with_builtin_compositing` 开关）之后，fork 又追加三个真机/回放发现的补丁提交，
+即上表"（新，真机发现）/（新，回放发现）"三行对应的实际 commit：`bdeabf2b`（SRL 读取器改回
+FreeRDP 语义）、`bffd60b2`（分块 SVC 消息不再无条件加 CHANNEL_FLAG_SHOW_PROTOCOL）、
+`d9ee6759`（rdpdr-native LockControl 回 STATUS_SUCCESS）。三者与当前基线 rev 一致。
 
 ## 基线
 

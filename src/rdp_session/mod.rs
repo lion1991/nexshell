@@ -354,7 +354,9 @@ impl RdpFramebuffer {
 
 /// UI 侧持有的会话句柄。drop 或 close() 时优雅断开。
 pub struct RdpSessionHandle {
-    /// 会话事件流（unbounded：UI 慢消费也不阻塞协议线程）。
+    /// 会话事件流。unbounded 是为协议线程永不阻塞；FrameUpdated 是纯通知（像素在共享
+    /// framebuffer，generation 为权威），UI 侧靠 generation 早退吞掉不前进的积压，但每条
+    /// 前进事件仍触发一次全帧上传。后续可改容量 1 + 满则丢（见 code-review-2026-07-23 P2-10）。
     pub frame_rx: async_channel::Receiver<RdpEvent>,
     /// 共享 framebuffer，UI 重绘时读快照。
     pub framebuffer: Arc<Mutex<RdpFramebuffer>>,
