@@ -104,8 +104,10 @@ pub struct Compositor {
     /// surface → 当前活跃 codec_context_id。ironrdp 的 context 键是 (surface, ctx)，
     /// Windows 会频繁轮换 ctx；旧 context 仍持整屏 tile 系数，必须显式回收（否则数小时涨到数十 GB）。
     progressive_ctx: HashMap<u16, u32>,
-    /// 本地统计：已释放的 Progressive context 数（真机验证泄漏修复用）。
+    /// 本地统计：ctx 轮换释放的 Progressive context 数（真机验证泄漏修复用）。
     prog_ctx_freed: u64,
+    /// 本地统计：DeleteEncodingContext 释放的 Progressive context 数。
+    dec_freed: u64,
     progressive_frames: HashMap<u16, ProgressiveFramePaintState>,
     fallback_progressive_frame_id: u32,
     /// Progressive 解码失败累计（供频控日志分类计数）。
@@ -123,6 +125,7 @@ impl Compositor {
             progressive: ProgressiveDecoder::new(),
             progressive_ctx: HashMap::new(),
             prog_ctx_freed: 0,
+            dec_freed: 0,
             progressive_frames: HashMap::new(),
             fallback_progressive_frame_id: 0,
             prog_fail_count: 0,
@@ -219,20 +222,29 @@ impl Compositor {
     /// DeleteEncodingContext：只回收**非当前活跃**的 context。
     /// FreeRDP 的 context 是 per-surface 故 gfx.c 直接 no-op；ironrdp 是 per-(surface, ctx)，
     /// 一直 no-op 会让轮换掉的旧 context 永久驻留（每个 1080p context ≈19MB）。
-    /// 但当前活跃 context 仍要保留：删了它之后到来的 UPGRADE tile 会在全零系数上升级，
-    /// 输出中性灰 (128,128,128) 块并被 tile cache 固化（ADR 0008）。
+    /// 当前活跃 context 仍要保留：删了它之后到来的 UPGRADE tile 会走 fork 的
+    /// `pass == 0` 静默丢弃分支（progressive.rs:1734-1736），该区域停在旧/粗糙像素。
+    /// 只统计确实记录过该 surface 且 id ≠ 活跃 id 的删除（避免把未知 ctx 计入）。
     pub fn delete_encoding_context(&mut self, surface_id: u16, codec_context_id: u32) {
-        if self.progressive_ctx.get(&surface_id) == Some(&codec_context_id) {
+        let active = self.progressive_ctx.get(&surface_id);
+        if active == Some(&codec_context_id) {
             return;
         }
         self.progressive
             .delete_context(surface_id, codec_context_id);
-        self.prog_ctx_freed += 1;
+        if active.is_some() {
+            self.dec_freed += 1;
+        }
     }
 
-    /// 已释放的 Progressive context 累计数（诊断）。
+    /// ctx 轮换释放的 Progressive context 累计数（诊断）。
     pub fn prog_ctx_freed(&self) -> u64 {
         self.prog_ctx_freed
+    }
+
+    /// DeleteEncodingContext 释放的 Progressive context 累计数（诊断）。
+    pub fn dec_freed(&self) -> u64 {
+        self.dec_freed
     }
 
     // ---- 写入 ----
@@ -280,6 +292,15 @@ impl Compositor {
         if let Some(old) = stale {
             self.progressive.delete_context(pdu.surface_id, old);
             self.prog_ctx_freed += 1;
+            // 频控日志：正常是单调换新 ctx；若此行刷得和 PDU 同量级，说明服务端在同一
+            // surface 上交替复用两个 ctx（每次轮换都丢整屏 tile 状态，需另行处理）。
+            let n = self.prog_ctx_freed;
+            if n <= 5 || n.is_multiple_of(300) {
+                eprintln!(
+                    "[egfx] progressive ctx rotated (#{n}) surface={} {old} -> {}",
+                    pdu.surface_id, pdu.codec_context_id
+                );
+            }
         }
         let tiles = match self.progressive.decode_bitmap(
             pdu.surface_id,
@@ -1038,11 +1059,23 @@ mod tests {
         assert_eq!(c.prog_ctx_freed(), 0, "同一 context 复用不释放");
         c.write_progressive(&pdu(8), Some(3));
         assert_eq!(c.prog_ctx_freed(), 1, "旧 context 7 应被释放");
-        // DEC 针对当前活跃 ctx 仍 no-op（防中性灰块），针对旧 ctx 才释放。
+        assert_eq!(c.progressive_ctx.get(&1), Some(&8), "活跃 ctx 应更新为 8");
+        // DEC 针对当前活跃 ctx 仍 no-op（保住 tile 系数），针对旧 ctx 才释放；计数分开。
         c.delete_encoding_context(1, 8);
-        assert_eq!(c.prog_ctx_freed(), 1);
+        assert_eq!(c.dec_freed(), 0);
         c.delete_encoding_context(1, 7);
-        assert_eq!(c.prog_ctx_freed(), 2);
+        assert_eq!(c.dec_freed(), 1);
+        assert_eq!(c.prog_ctx_freed(), 1, "DEC 不该计入轮换计数");
+        // 活跃 ctx 表随 surface 删除 / reset 清空。
+        c.delete_surface(1);
+        assert!(c.progressive_ctx.is_empty(), "delete_surface 应清活跃 ctx");
+        c.surfaces.insert(2, Surface::new(64, 64));
+        let mut pdu2 = pdu(9);
+        pdu2.surface_id = 2;
+        c.write_progressive(&pdu2, Some(4));
+        assert_eq!(c.progressive_ctx.get(&2), Some(&9));
+        c.reset();
+        assert!(c.progressive_ctx.is_empty(), "reset 应清活跃 ctx");
     }
 
     #[test]
