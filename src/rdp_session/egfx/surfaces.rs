@@ -207,13 +207,10 @@ impl Compositor {
         for s in self.surfaces.values() {
             self.allocated_bytes = self.allocated_bytes.saturating_sub(s.pixels.len());
         }
-        // progressive.reset() 只清 contexts，不清 per-surface sub-band references
-        // （每 tile 24KB）；先逐 surface delete_surface 把 references 一并回收。
-        let ids: Vec<u16> = self.surfaces.keys().copied().collect();
-        for id in ids {
-            self.progressive.delete_surface(id);
-        }
         self.surfaces.clear();
+        // 只 reset contexts：不能在这里逐 surface delete_surface——那会连带清
+        // surface_context_flags，若服务端 ResetGraphics 后不重发 CONTEXT 块即
+        // MissingBlock("CONTEXT") 画面冻结。references 有界（每 surface ≈12MB），非泄漏源。
         self.progressive.reset();
         self.progressive_ctx.clear();
         self.progressive_frames.clear();
