@@ -108,3 +108,28 @@ CacheToSurface 翻贴扩散固化。拖动中「c2s 贴净 ↔ prog 复活」交
 复测：修复前同参数 2/2 复现的键盘移窗 7 轮 + 鼠标拖动 7 轮全部零残留、零管线错误。
 诊断沉淀：trace 增 prog tile 坐标、c2s 全部 dst 点、s2c/c2s 近黑竖线检测（HASLINE）与
 FNV 内容哈希、`NEXSHELL_RDP_EGFX_SURFDUMP` 周期落盘 surface 原始像素。
+
+## 第⑥步 Progressive context 内存泄漏（2026-09-10）
+
+症状：RDP 会话连接 Windows 数小时后进程 RSS 涨到 ~50GB。
+
+根因（第③步修复的反作用）：FreeRDP 的 Progressive 上下文是 **per-surface**，故它的
+DeleteEncodingContext 直接 no-op；ironrdp 的 `ProgressiveDecoder.contexts` 键是
+**(surface_id, codec_context_id)**，语义不同。Windows 会话中服务端频繁轮换
+`codec_context_id`，而本地 `delete_encoding_context` 照 FreeRDP 做成完全 no-op
+（且 handler 根本没把 `codec_context_id` 传下来），于是每个被取代的旧 context 都带着
+整屏 tile 状态（每 tile `Box<TileState>` ≈37KB，1080p 单 context ≈19MB）永久驻留。
+另外 `reset()` 只调 `progressive.reset()`（仅清 contexts），per-surface sub-band
+`references`（每 tile 24KB）不回收。
+
+修复：`Compositor` 维护 `progressive_ctx: HashMap<surface_id, 当前活跃 codec_context_id>`。
+- `write_progressive` 解码前发现 id 轮换 → 先 `delete_context(surface, 旧 id)`。
+- `delete_encoding_context(surface_id, codec_context_id)` 只删**非**当前活跃 context；
+  等于活跃 id 时仍 no-op —— 第③步的中性灰块顾虑只针对当前 context（删它后 UPGRADE tile
+  会在全零系数上升级），删已被取代的旧 context 无此风险。
+- `reset()` 先逐旧 surface `delete_surface(id)` 回收 references，再 `reset()`。
+- 诊断：`[egfx-diag]` 行新增 `progctxfree=`（context 释放累计），真机验证泄漏是否收敛。
+
+顺带：帧内 `updated_tiles` 改 HashSet 去重（原先同 frame_id 跨多 PDU 只增不减 + 线性
+`contains`，O(n²)）；`fail_session` 加 `already_failed` 标记，致命错误只发一次
+Disconnected（原先每 PDU 重复往 unbounded channel 发）。
