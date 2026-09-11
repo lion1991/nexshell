@@ -3,7 +3,7 @@
 //! 像素块操作为自由函数（可单测）；Progressive 解码器状态 per-surface 由库内部管理。
 //! ClearCodec/AVC420/Uncompressed 由库解好经 on_bitmap_updated → write_bitmap 落盘。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ironrdp_egfx::client::BitmapUpdate;
 use ironrdp_egfx::pdu::{
@@ -83,6 +83,8 @@ struct ProgressiveFramePaintState {
     /// 帧内各 tile 最新重建像素（64x64 RGBA）。上游解码器不再暴露 tile 状态，
     /// 后续 PDU 的 REGION 命中先前 tile 时从这里重绘。
     tile_pixels: HashMap<(u16, u16), Vec<u8>>,
+    /// updated_tiles 的成员集，避免同 frame_id 跨多 PDU 累积时 O(n²) 线性去重。
+    updated_set: HashSet<(u16, u16)>,
 }
 
 #[derive(Default)]
@@ -310,6 +312,7 @@ impl Compositor {
         if frame.frame_id != Some(frame_id) {
             frame.frame_id = Some(frame_id);
             frame.updated_tiles.clear();
+            frame.updated_set.clear();
             frame.tile_pixels.clear();
         }
         for tile in tiles {
@@ -317,10 +320,8 @@ impl Compositor {
                 .tile_pixels
                 .insert((tile.x_idx, tile.y_idx), tile.pixels);
         }
-        let mut pdu_tiles = Vec::new();
         for tile in paint_plan.updated_tiles {
-            if !pdu_tiles.contains(&tile) {
-                pdu_tiles.push(tile);
+            if frame.updated_set.insert(tile) {
                 frame.updated_tiles.push(tile);
             }
         }
@@ -330,12 +331,7 @@ impl Compositor {
         // 裁剪）。用于判定拖窗轨迹残留是否由 tile 裁剪漏掉擦除更新所致（对照旧行为）。
         let noclip = std::env::var_os("NEXSHELL_RDP_PROG_NOCLIP").is_some();
         let mut dirties = Vec::with_capacity(frame.updated_tiles.len());
-        let mut painted_tiles = Vec::new();
         for &(tile_x, tile_y) in &frame.updated_tiles {
-            if painted_tiles.contains(&(tile_x, tile_y)) {
-                continue;
-            }
-            painted_tiles.push((tile_x, tile_y));
             // 先算裁剪子矩形：与本 PDU region 不相交的累积 tile，其重建结果本会被下方 clip 丢弃，
             // 故跳过重建（reconstruct_to_rgba 是 IDWT，最重的活）。上屏像素逐字节不变。
             let sub_rects = if noclip {
