@@ -41,6 +41,10 @@ pub struct EgfxDiag {
     last_flush: Instant,
     cur: Counts,
     total_end_frames: u64,
+    /// Compositor 侧上报的 Progressive context 释放累计（泄漏修复真机验证）：
+    /// ctx 轮换释放数 / DeleteEncodingContext 释放数。
+    prog_ctx_freed: u64,
+    dec_freed: u64,
 }
 
 impl EgfxDiag {
@@ -50,6 +54,8 @@ impl EgfxDiag {
             last_flush: Instant::now(),
             cur: Counts::default(),
             total_end_frames: 0,
+            prog_ctx_freed: 0,
+            dec_freed: 0,
         }
     }
 
@@ -119,6 +125,13 @@ impl EgfxDiag {
             self.cur.map += 1;
         }
     }
+    /// 上报 Compositor 的 Progressive context 释放累计（每帧末刷新）。
+    pub fn set_prog_ctx_freed(&mut self, rotated: u64, dec: u64) {
+        if self.enabled {
+            self.prog_ctx_freed = rotated;
+            self.dec_freed = dec;
+        }
+    }
     pub fn on_pipeline_error(&mut self) {
         self.cur.pipeline_error += self.enabled as u64;
     }
@@ -149,7 +162,7 @@ impl EgfxDiag {
         eprintln!(
             "[egfx-diag] {dt:.1}s wire1{{avc420={} clear={} uncomp={}}} \
 prog={}(empty={}) fill={} s2s={} s2c={} c2s={} evict={} \
-surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}) err={}{drop}",
+surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}) err={} progctxfree={}(dec={}){drop}",
             c.avc420,
             c.clearcodec,
             c.uncompressed,
@@ -167,6 +180,8 @@ surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}) err={}{drop}",
             c.end_frame,
             self.total_end_frames,
             c.pipeline_error,
+            self.prog_ctx_freed,
+            self.dec_freed,
             dt = self.last_flush.elapsed().as_secs_f64(),
         );
         self.cur = Counts::default();

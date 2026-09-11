@@ -116,6 +116,8 @@ struct EgfxHandler {
     /// 像素级写入覆盖掩码（NEXSHELL_RDP_EGFX_COVERAGE=<file>）：desktop 尺寸，每字节
     /// 按操作类型置位（1=bitmap 2=prog 4=fill 8=s2s 16=c2s），drop 时落盘。黑块溯源用。
     coverage: Option<(std::path::PathBuf, Vec<u8>)>,
+    /// 已发过 Disconnected（只去重事件，不去重日志）。
+    already_failed: bool,
 }
 
 impl EgfxHandler {
@@ -145,6 +147,7 @@ impl EgfxHandler {
                     vec![0u8; usize::from(desktop_width) * usize::from(desktop_height)],
                 )
             }),
+            already_failed: false,
         }
     }
 
@@ -196,8 +199,14 @@ impl EgfxHandler {
     }
 
     /// 远端可控分配超预算等致命情况：打日志并通知 UI 断开（分配已被拒绝，不 panic）。
-    fn fail_session(&self, detail: &str) {
+    fn fail_session(&mut self, detail: &str) {
         eprintln!("[egfx] fatal: {detail}");
+        // 日志每次都打（诊断需要），但 Disconnected 只发一次：致命错误每 PDU 复现，
+        // 重复 try_send 会把 unbounded channel 灌满。
+        if self.already_failed {
+            return;
+        }
+        self.already_failed = true;
         let _ = self.event_tx.try_send(RdpEvent::Disconnected {
             reason: detail.to_owned(),
         });
@@ -440,7 +449,8 @@ impl GraphicsPipelineHandler for EgfxHandler {
     }
 
     fn on_delete_encoding_context(&mut self, pdu: &DeleteEncodingContextPdu) {
-        self.compositor.delete_encoding_context(pdu.surface_id);
+        self.compositor
+            .delete_encoding_context(pdu.surface_id, pdu.codec_context_id);
     }
 
     fn on_solid_fill(&mut self, pdu: &SolidFillPdu) {
@@ -565,6 +575,10 @@ impl GraphicsPipelineHandler for EgfxHandler {
 
     fn on_frame_complete(&mut self, _frame_id: u32) {
         self.frames += 1;
+        self.diag.set_prog_ctx_freed(
+            self.compositor.prog_ctx_freed(),
+            self.compositor.dec_freed(),
+        );
         self.diag.on_end_frame();
         self.publish();
         // 覆盖掩码/surface 原始像素定期覆写（probe 到点直接退出时 on_close 不一定触发）。
