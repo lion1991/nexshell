@@ -122,7 +122,7 @@ impl EgfxDiag {
             self.cur.map += 1;
         }
     }
-    /// 上报 Compositor 的 Progressive context 释放累计（每帧末刷新）。
+    /// 上报收到的 DeleteEncodingContext 累计（no-op 只计数），每帧末刷新。
     pub fn set_dec_count(&mut self, total: u64) {
         if self.enabled {
             self.dec_count = total;

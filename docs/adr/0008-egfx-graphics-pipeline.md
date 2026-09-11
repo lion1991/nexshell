@@ -132,8 +132,8 @@ codecContextId 管理状态**，它只按 surface 维护自己的编码器影子
 - `references`（DIFFERENCE tile 的前序系数）键是 `(surface_id, x_idx, y_idx)`，**per-surface**，
   delete_context 不会清它。所以 DIFFERENCE tile 不会报 `MissingTileReference`，而是把
   "另一条 context 血统的参考系数" 与本次增量相加 —— 静默解出垃圾，不是干净失败。
-- `ProgressiveTile::Upgrade` 分支在 `tile_state.pass == 0` 时静默 `return Ok(Vec::new())`
-  （progressive.rs:1734-1736）：新 context 的 tile 状态是全新的，pass=0，UPGRADE 直接被丢。
+- `ProgressiveTile::Upgrade` 分支开头的 `pass == 0` 早退（静默 `return Ok(Vec::new())`）：
+  新 context 的 tile 状态是全新的，pass=0，UPGRADE 直接被丢。
 - 一旦新 context 里来了一个 FIRST 把 tile 重新播种（pass>0），后续 UPGRADE 的 SRL 位平面
   就会在**错位的 pass / 位深**上叠加；Cb/Cr 量化表与 Y 不同，色度系数错位即渲染成绿底 +
   横向噪纹。这就是绿块——同样是"成功地画错"。
@@ -157,6 +157,17 @@ wire 上的 `pdu.codec_context_id` 被有意忽略，tile 状态按 surface 单�
 - 已核实固定 ctx 下 `surface_context_flags` 逻辑仍成立：该表按 surface_id 键，
   `use_reduce_extrapolate` 优先取本帧 REGION/CONTEXT，其次 `contexts[(surface, 0)]`
   （固定 ctx 下首帧后恒存在），最后落到该表 —— 三条来源都不依赖 ctx id。
+
+**这是刻意偏离 MS-RDPEGFX 字面规范、对齐 FreeRDP 实现事实的选择，不是疏漏，勿当 bug 改回。**
+规范把 codecContextId 写成编码上下文的标识，但真实 Windows 服务端每帧换 id 且几乎不发 DEC，
+按 id 分存状态必然崩坏；FreeRDP 十几年来一直忽略该字段，互操作以它为准。
+
+遗留风险：ResetGraphics 时 fork 的 `reset()` 只清 `contexts` / `frame_tiles`，**不清**
+`references`。若服务端 reset 后用同一 surface id 重建 surface，新一代 surface 的 DIFFERENCE
+tile 会命中上一代遗留的参考系数 → 画错（表现同绿块/脏内容）。当前靠"reset 后服务端通常先发
+非 DIFFERENCE 的 FIRST/SIMPLE 重新播种"兜住，未见真机复现。根治需改 fork：让 `reset()` 清
+`references` 但**保留** `surface_context_flags`（后者被清会导致 `MissingBlock("CONTEXT")`
+画面冻结，见上）。
 
 单测：`progressive_state_is_per_surface_not_per_codec_context` 用 `encode_progressive_stream`
 合成真实流——ctx=7 发 FIRST 建状态，ctx=8 发 UPGRADE；若按 (surface, ctx) 分存，UPGRADE 会
