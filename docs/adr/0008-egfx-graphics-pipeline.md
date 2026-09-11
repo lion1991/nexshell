@@ -125,10 +125,16 @@ DeleteEncodingContext 直接 no-op；ironrdp 的 `ProgressiveDecoder.contexts` �
 修复：`Compositor` 维护 `progressive_ctx: HashMap<surface_id, 当前活跃 codec_context_id>`。
 - `write_progressive` 解码前发现 id 轮换 → 先 `delete_context(surface, 旧 id)`。
 - `delete_encoding_context(surface_id, codec_context_id)` 只删**非**当前活跃 context；
-  等于活跃 id 时仍 no-op —— 第③步的中性灰块顾虑只针对当前 context（删它后 UPGRADE tile
-  会在全零系数上升级），删已被取代的旧 context 无此风险。
-- `reset()` 先逐旧 surface `delete_surface(id)` 回收 references，再 `reset()`。
-- 诊断：`[egfx-diag]` 行新增 `progctxfree=`（context 释放累计），真机验证泄漏是否收敛。
+  等于活跃 id 时仍 no-op —— 顾虑只针对当前 context：删掉它后到来的 UPGRADE tile 会走本
+  fork 的 `pass == 0` 静默丢弃分支（progressive.rs:1734-1736），该区域停在旧/粗糙像素；
+  删已被取代的旧 context 无此风险。
+- `reset()` 只清 `progressive_ctx` 表 + `progressive.reset()`。**不**逐 surface
+  `delete_surface`：后者连带清 `surface_context_flags`（progressive.rs:1554），
+  ResetGraphics 后若服务端不重发 CONTEXT 块即 `MissingBlock("CONTEXT")` 画面冻结；
+  `references` 本身有界（每 surface ≈12MB），不是泄漏来源。
+- 诊断：`[egfx-diag]` 行新增 `progctxfree=N(dec=M)`（N=ctx 轮换释放、M=DEC 释放），
+  并在轮换处加频控 eprintln —— 若刷得与 progressive PDU 同量级，说明服务端在同一 surface
+  上**交替**复用两个 ctx（每次轮换丢整屏 tile 状态），届时再考虑保留最近 N 个 ctx。
 
 顺带：帧内 `updated_tiles` 改 HashSet 去重（原先同 frame_id 跨多 PDU 只增不减 + 线性
 `contains`，O(n²)）；`fail_session` 加 `already_failed` 标记，致命错误只发一次

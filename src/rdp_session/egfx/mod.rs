@@ -116,7 +116,7 @@ struct EgfxHandler {
     /// 像素级写入覆盖掩码（NEXSHELL_RDP_EGFX_COVERAGE=<file>）：desktop 尺寸，每字节
     /// 按操作类型置位（1=bitmap 2=prog 4=fill 8=s2s 16=c2s），drop 时落盘。黑块溯源用。
     coverage: Option<(std::path::PathBuf, Vec<u8>)>,
-    /// 已发过 Disconnected：致命错误每 PDU 都会复现，unbounded channel 会被灌满。
+    /// 已发过 Disconnected（只去重事件，不去重日志）。
     already_failed: bool,
 }
 
@@ -200,11 +200,13 @@ impl EgfxHandler {
 
     /// 远端可控分配超预算等致命情况：打日志并通知 UI 断开（分配已被拒绝，不 panic）。
     fn fail_session(&mut self, detail: &str) {
+        eprintln!("[egfx] fatal: {detail}");
+        // 日志每次都打（诊断需要），但 Disconnected 只发一次：致命错误每 PDU 复现，
+        // 重复 try_send 会把 unbounded channel 灌满。
         if self.already_failed {
             return;
         }
         self.already_failed = true;
-        eprintln!("[egfx] fatal: {detail}");
         let _ = self.event_tx.try_send(RdpEvent::Disconnected {
             reason: detail.to_owned(),
         });
