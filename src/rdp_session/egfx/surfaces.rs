@@ -99,6 +99,11 @@ pub struct Compositor {
     /// surface + cache 已占像素字节，用于会话总预算。
     allocated_bytes: usize,
     progressive: ProgressiveDecoder,
+    /// surface → 当前活跃 codec_context_id。ironrdp 的 context 键是 (surface, ctx)，
+    /// Windows 会频繁轮换 ctx；旧 context 仍持整屏 tile 系数，必须显式回收（否则数小时涨到数十 GB）。
+    progressive_ctx: HashMap<u16, u32>,
+    /// 本地统计：已释放的 Progressive context 数（真机验证泄漏修复用）。
+    prog_ctx_freed: u64,
     progressive_frames: HashMap<u16, ProgressiveFramePaintState>,
     fallback_progressive_frame_id: u32,
     /// Progressive 解码失败累计（供频控日志分类计数）。
@@ -114,6 +119,8 @@ impl Compositor {
             cache: HashMap::new(),
             allocated_bytes: 0,
             progressive: ProgressiveDecoder::new(),
+            progressive_ctx: HashMap::new(),
+            prog_ctx_freed: 0,
             progressive_frames: HashMap::new(),
             fallback_progressive_frame_id: 0,
             prog_fail_count: 0,
@@ -181,6 +188,7 @@ impl Compositor {
         }
         // Progressive tile 系数状态随 surface 存亡（对齐 FreeRDP）。
         self.progressive.delete_surface(surface_id);
+        self.progressive_ctx.remove(&surface_id);
         self.progressive_frames.remove(&surface_id);
     }
 
@@ -197,16 +205,36 @@ impl Compositor {
         for s in self.surfaces.values() {
             self.allocated_bytes = self.allocated_bytes.saturating_sub(s.pixels.len());
         }
+        // progressive.reset() 只清 contexts，不清 per-surface sub-band references
+        // （每 tile 24KB）；先逐 surface delete_surface 把 references 一并回收。
+        let ids: Vec<u16> = self.surfaces.keys().copied().collect();
+        for id in ids {
+            self.progressive.delete_surface(id);
+        }
         self.surfaces.clear();
         self.progressive.reset();
+        self.progressive_ctx.clear();
         self.progressive_frames.clear();
     }
 
-    /// DeleteEncodingContext：**不清** Progressive tile 状态。对齐 FreeRDP（gfx.c 里是
-    /// no-op）：服务端频繁按 codec context 发 DEC，若据此清 per-surface 系数状态，随后的
-    /// UPGRADE tile 会在全零系数上升级 → 输出中性灰 (128,128,128) 块并被 tile cache 固化。
-    /// tile 状态只随 surface 删除/reset 消亡（见 delete_surface / reset）。
-    pub fn delete_encoding_context(&mut self, _surface_id: u16) {}
+    /// DeleteEncodingContext：只回收**非当前活跃**的 context。
+    /// FreeRDP 的 context 是 per-surface 故 gfx.c 直接 no-op；ironrdp 是 per-(surface, ctx)，
+    /// 一直 no-op 会让轮换掉的旧 context 永久驻留（每个 1080p context ≈19MB）。
+    /// 但当前活跃 context 仍要保留：删了它之后到来的 UPGRADE tile 会在全零系数上升级，
+    /// 输出中性灰 (128,128,128) 块并被 tile cache 固化（ADR 0008）。
+    pub fn delete_encoding_context(&mut self, surface_id: u16, codec_context_id: u32) {
+        if self.progressive_ctx.get(&surface_id) == Some(&codec_context_id) {
+            return;
+        }
+        self.progressive
+            .delete_context(surface_id, codec_context_id);
+        self.prog_ctx_freed += 1;
+    }
+
+    /// 已释放的 Progressive context 累计数（诊断）。
+    pub fn prog_ctx_freed(&self) -> u64 {
+        self.prog_ctx_freed
+    }
 
     // ---- 写入 ----
 
@@ -245,6 +273,15 @@ impl Compositor {
             return (Vec::new(), false);
         };
         let paint_plan = progressive_paint_plan(&pdu.bitmap_data);
+        // codec_context_id 轮换：先释放被取代的旧 context（其整屏 tile 状态已无用）。
+        let stale = self
+            .progressive_ctx
+            .insert(pdu.surface_id, pdu.codec_context_id)
+            .filter(|old| *old != pdu.codec_context_id);
+        if let Some(old) = stale {
+            self.progressive.delete_context(pdu.surface_id, old);
+            self.prog_ctx_freed += 1;
+        }
         let tiles = match self.progressive.decode_bitmap(
             pdu.surface_id,
             pdu.codec_context_id,
@@ -988,6 +1025,31 @@ mod tests {
         });
         assert_eq!(d.len(), 1);
         assert_eq!(&c.surfaces[&2].pixels[0..4], &[8, 8, 8, 8]);
+    }
+
+    #[test]
+    fn progressive_ctx_rotation_frees_old_context() {
+        // 同 surface 连续两个 codec_context_id：第二次写入前应释放第一个 context。
+        let mut c = Compositor::new();
+        c.surfaces.insert(1, Surface::new(64, 64));
+        let pdu = |ctx: u32| WireToSurface2Pdu {
+            surface_id: 1,
+            codec_id: ironrdp_egfx::pdu::Codec2Type::RemoteFxProgressive,
+            codec_context_id: ctx,
+            pixel_format: ironrdp_egfx::pdu::PixelFormat::XRgb,
+            bitmap_data: Vec::new(),
+        };
+        c.write_progressive(&pdu(7), Some(1));
+        assert_eq!(c.prog_ctx_freed(), 0, "首个 context 不该被释放");
+        c.write_progressive(&pdu(7), Some(2));
+        assert_eq!(c.prog_ctx_freed(), 0, "同一 context 复用不释放");
+        c.write_progressive(&pdu(8), Some(3));
+        assert_eq!(c.prog_ctx_freed(), 1, "旧 context 7 应被释放");
+        // DEC 针对当前活跃 ctx 仍 no-op（防中性灰块），针对旧 ctx 才释放。
+        c.delete_encoding_context(1, 8);
+        assert_eq!(c.prog_ctx_freed(), 1);
+        c.delete_encoding_context(1, 7);
+        assert_eq!(c.prog_ctx_freed(), 2);
     }
 
     #[test]

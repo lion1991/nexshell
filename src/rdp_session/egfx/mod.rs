@@ -440,7 +440,8 @@ impl GraphicsPipelineHandler for EgfxHandler {
     }
 
     fn on_delete_encoding_context(&mut self, pdu: &DeleteEncodingContextPdu) {
-        self.compositor.delete_encoding_context(pdu.surface_id);
+        self.compositor
+            .delete_encoding_context(pdu.surface_id, pdu.codec_context_id);
     }
 
     fn on_solid_fill(&mut self, pdu: &SolidFillPdu) {
