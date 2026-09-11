@@ -109,6 +109,9 @@ CacheToSurface 翻贴扩散固化。拖动中「c2s 贴净 ↔ prog 复活」交
 诊断沉淀：trace 增 prog tile 坐标、c2s 全部 dst 点、s2c/c2s 近黑竖线检测（HASLINE）与
 FNV 内容哈希、`NEXSHELL_RDP_EGFX_SURFDUMP` 周期落盘 surface 原始像素。
 
+现状（ADR 0011 追平上游后）：裁剪职责改由 nexshell 侧承担，实现见
+`src/rdp_session/egfx/surfaces.rs` `progressive_paint_plan` 函数上方注释。
+
 ## 第⑥步 Progressive context 内存泄漏 + 绿块（2026-09-10）
 
 症状一：RDP 会话连接 Windows 数小时后进程 RSS 涨到 ~50GB。

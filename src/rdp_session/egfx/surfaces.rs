@@ -612,6 +612,10 @@ struct TileSubRect {
     h: u16,
 }
 
+// 这里再解一遍 progressive stream，是为取本 PDU 的 REGION rects 与全量 tile 坐标：
+// 库返回的 DecodedTile.update_rectangles 只覆盖本 PDU 解出的 tile，裁不了 ADR 0008 第⑤步
+// 要求的"用本 PDU rects 裁剪先前 PDU 累积 tile（frame.tile_pixels）"，删掉会回归拖窗描边残留。
+// 改进方向：让 fork 的 decode_bitmap 顺带把 REGION rects 一起返回。
 fn progressive_paint_plan(bitmap_data: &[u8]) -> ProgressivePaintPlan {
     let Ok(blocks) = decode_progressive_stream(bitmap_data) else {
         return ProgressivePaintPlan::default();
