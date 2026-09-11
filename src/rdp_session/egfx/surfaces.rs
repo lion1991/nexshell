@@ -20,6 +20,9 @@ use ironrdp_pdu::codecs::rfx::RfxRectangle;
 const MAX_SURFACE_DIM: u16 = 8192;
 /// 会话像素总预算（surface + cache 合计）：1 GiB。
 const MAX_PIXEL_BUDGET: usize = 1 << 30;
+/// 传给库的固定 Progressive codec context id：**忽略** wire 上的 codecContextId，
+/// 让 tile 状态按 surface 单份存（对齐 FreeRDP progressive.c 的 per-surface 模型）。
+const PROGRESSIVE_CTX: u32 = 0;
 
 /// 远端请求的像素分配超预算：拒绝分配，调用方据此断开会话。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,13 +104,8 @@ pub struct Compositor {
     /// surface + cache 已占像素字节，用于会话总预算。
     allocated_bytes: usize,
     progressive: ProgressiveDecoder,
-    /// surface → 当前活跃 codec_context_id。ironrdp 的 context 键是 (surface, ctx)，
-    /// Windows 会频繁轮换 ctx；旧 context 仍持整屏 tile 系数，必须显式回收（否则数小时涨到数十 GB）。
-    progressive_ctx: HashMap<u16, u32>,
-    /// 本地统计：ctx 轮换释放的 Progressive context 数（真机验证泄漏修复用）。
-    prog_ctx_freed: u64,
-    /// 本地统计：DeleteEncodingContext 释放的 Progressive context 数。
-    dec_freed: u64,
+    /// 本地统计：收到的 DeleteEncodingContext 数（仅观测，DEC 本身是 no-op）。
+    dec_count: u64,
     progressive_frames: HashMap<u16, ProgressiveFramePaintState>,
     fallback_progressive_frame_id: u32,
     /// Progressive 解码失败累计（供频控日志分类计数）。
@@ -123,9 +121,7 @@ impl Compositor {
             cache: HashMap::new(),
             allocated_bytes: 0,
             progressive: ProgressiveDecoder::new(),
-            progressive_ctx: HashMap::new(),
-            prog_ctx_freed: 0,
-            dec_freed: 0,
+            dec_count: 0,
             progressive_frames: HashMap::new(),
             fallback_progressive_frame_id: 0,
             prog_fail_count: 0,
@@ -193,7 +189,6 @@ impl Compositor {
         }
         // Progressive tile 系数状态随 surface 存亡（对齐 FreeRDP）。
         self.progressive.delete_surface(surface_id);
-        self.progressive_ctx.remove(&surface_id);
         self.progressive_frames.remove(&surface_id);
     }
 
@@ -215,36 +210,19 @@ impl Compositor {
         // surface_context_flags，若服务端 ResetGraphics 后不重发 CONTEXT 块即
         // MissingBlock("CONTEXT") 画面冻结。references 有界（每 surface ≈12MB），非泄漏源。
         self.progressive.reset();
-        self.progressive_ctx.clear();
         self.progressive_frames.clear();
     }
 
-    /// DeleteEncodingContext：只回收**非当前活跃**的 context。
-    /// FreeRDP 的 context 是 per-surface 故 gfx.c 直接 no-op；ironrdp 是 per-(surface, ctx)，
-    /// 一直 no-op 会让轮换掉的旧 context 永久驻留（每个 1080p context ≈19MB）。
-    /// 当前活跃 context 仍要保留：删了它之后到来的 UPGRADE tile 会走 fork 的
-    /// `pass == 0` 静默丢弃分支（progressive.rs:1734-1736），该区域停在旧/粗糙像素。
-    /// 只统计确实记录过该 surface 且 id ≠ 活跃 id 的删除（避免把未知 ctx 计入）。
-    pub fn delete_encoding_context(&mut self, surface_id: u16, codec_context_id: u32) {
-        let active = self.progressive_ctx.get(&surface_id);
-        if active == Some(&codec_context_id) {
-            return;
-        }
-        self.progressive
-            .delete_context(surface_id, codec_context_id);
-        if active.is_some() {
-            self.dec_freed += 1;
-        }
+    /// DeleteEncodingContext：no-op（对齐 FreeRDP）。tile 状态按 surface 存，
+    /// codecContextId 不参与键（见 `PROGRESSIVE_CTX`），故 DEC 无需释放任何东西；
+    /// 状态只随 surface delete/reset 消亡。这里只计数供诊断观测。
+    pub fn delete_encoding_context(&mut self, _surface_id: u16, _codec_context_id: u32) {
+        self.dec_count += 1;
     }
 
-    /// ctx 轮换释放的 Progressive context 累计数（诊断）。
-    pub fn prog_ctx_freed(&self) -> u64 {
-        self.prog_ctx_freed
-    }
-
-    /// DeleteEncodingContext 释放的 Progressive context 累计数（诊断）。
-    pub fn dec_freed(&self) -> u64 {
-        self.dec_freed
+    /// 收到的 DeleteEncodingContext 累计数（诊断）。
+    pub fn dec_count(&self) -> u64 {
+        self.dec_count
     }
 
     // ---- 写入 ----
@@ -284,27 +262,11 @@ impl Compositor {
             return (Vec::new(), false);
         };
         let paint_plan = progressive_paint_plan(&pdu.bitmap_data);
-        // codec_context_id 轮换：先释放被取代的旧 context（其整屏 tile 状态已无用）。
-        let stale = self
-            .progressive_ctx
-            .insert(pdu.surface_id, pdu.codec_context_id)
-            .filter(|old| *old != pdu.codec_context_id);
-        if let Some(old) = stale {
-            self.progressive.delete_context(pdu.surface_id, old);
-            self.prog_ctx_freed += 1;
-            // 频控日志：正常是单调换新 ctx；若此行刷得和 PDU 同量级，说明服务端在同一
-            // surface 上交替复用两个 ctx（每次轮换都丢整屏 tile 状态，需另行处理）。
-            let n = self.prog_ctx_freed;
-            if n <= 5 || n.is_multiple_of(300) {
-                eprintln!(
-                    "[egfx] progressive ctx rotated (#{n}) surface={} {old} -> {}",
-                    pdu.surface_id, pdu.codec_context_id
-                );
-            }
-        }
+        // 固定 ctx：pdu.codec_context_id 被有意忽略（Windows 每帧换 id，按 id 分存状态
+        // 会让 DIFFERENCE/UPGRADE 找不到前序系数 → 绿块，见 ADR 0008 第⑥步）。
         let tiles = match self.progressive.decode_bitmap(
             pdu.surface_id,
-            pdu.codec_context_id,
+            PROGRESSIVE_CTX,
             surface.width,
             surface.height,
             &pdu.bitmap_data,
@@ -1041,41 +1003,130 @@ mod tests {
         assert_eq!(&c.surfaces[&2].pixels[0..4], &[8, 8, 8, 8]);
     }
 
+    /// 合成一条单 tile 的 progressive 流（SYNC[+CONTEXT]+FRAME+REGION+tile）。
+    fn progressive_stream(
+        include_context: bool,
+        quant_prog_vals: Vec<ironrdp_pdu::codecs::rfx::progressive::ProgressiveCodecQuant>,
+        tile: ironrdp_pdu::codecs::rfx::progressive::ProgressiveTile<'_>,
+    ) -> Vec<u8> {
+        use ironrdp_pdu::codecs::rfx::progressive::*;
+
+        let mut blocks = vec![ProgressiveBlock::Sync(ProgressiveSyncPdu)];
+        if include_context {
+            blocks.push(ProgressiveBlock::Context(ProgressiveContextPdu {
+                context_id: 0,
+                tile_size: 0x0040,
+                flags: 0,
+            }));
+        }
+        blocks.extend([
+            ProgressiveBlock::FrameBegin(ProgressiveFrameBeginPdu {
+                frame_index: 0,
+                region_count: 1,
+            }),
+            ProgressiveBlock::Region(ProgressiveRegion {
+                tile_size: 0x40,
+                rects: vec![RfxRectangle {
+                    x: 0,
+                    y: 0,
+                    width: 64,
+                    height: 64,
+                }],
+                quant_vals: vec![ComponentCodecQuant::LOSSLESS],
+                quant_prog_vals,
+                flags: 0,
+                tiles: vec![tile],
+            }),
+            ProgressiveBlock::FrameEnd(ProgressiveFrameEndPdu),
+        ]);
+        encode_progressive_stream(&blocks).expect("合成流应可编码")
+    }
+
     #[test]
-    fn progressive_ctx_rotation_frees_old_context() {
-        // 同 surface 连续两个 codec_context_id：第二次写入前应释放第一个 context。
+    fn progressive_state_is_per_surface_not_per_codec_context() {
+        // 对齐 FreeRDP：codecContextId 不参与 tile 状态的键。先用 ctx=7 发 FIRST 建立
+        // tile 状态，再用 ctx=8 发 UPGRADE——若按 (surface, ctx) 分存，UPGRADE 会命中
+        // fork 的 pass == 0 分支被静默丢弃（无脏区）；固定 ctx 下应正常升级并出脏区。
+        use ironrdp_pdu::codecs::rfx::progressive::{
+            ComponentCodecQuant, ProgressiveCodecQuant, ProgressiveTile, TileFirst, TileUpgrade,
+        };
+
         let mut c = Compositor::new();
         c.surfaces.insert(1, Surface::new(64, 64));
-        let pdu = |ctx: u32| WireToSurface2Pdu {
+        let pdu = |ctx: u32, data: Vec<u8>| WireToSurface2Pdu {
             surface_id: 1,
             codec_id: ironrdp_egfx::pdu::Codec2Type::RemoteFxProgressive,
             codec_context_id: ctx,
             pixel_format: ironrdp_egfx::pdu::PixelFormat::XRgb,
-            bitmap_data: Vec::new(),
+            bitmap_data: data,
         };
-        c.write_progressive(&pdu(7), Some(1));
-        assert_eq!(c.prog_ctx_freed(), 0, "首个 context 不该被释放");
-        c.write_progressive(&pdu(7), Some(2));
-        assert_eq!(c.prog_ctx_freed(), 0, "同一 context 复用不释放");
-        c.write_progressive(&pdu(8), Some(3));
-        assert_eq!(c.prog_ctx_freed(), 1, "旧 context 7 应被释放");
-        assert_eq!(c.progressive_ctx.get(&1), Some(&8), "活跃 ctx 应更新为 8");
-        // DEC 针对当前活跃 ctx 仍 no-op（保住 tile 系数），针对旧 ctx 才释放；计数分开。
-        c.delete_encoding_context(1, 8);
-        assert_eq!(c.dec_freed(), 0);
+        let prog_quant = |quality: u8| ProgressiveCodecQuant {
+            quality,
+            y_quant: ComponentCodecQuant::LOSSLESS,
+            cb_quant: ComponentCodecQuant::LOSSLESS,
+            cr_quant: ComponentCodecQuant::LOSSLESS,
+        };
+
+        // RLGR 流内容无关紧要（只要非空可解），本测试只关心 tile 状态是否跨 ctx 存活。
+        let comp = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let first = progressive_stream(
+            true,
+            vec![prog_quant(0)],
+            ProgressiveTile::First(TileFirst {
+                quant_idx_y: 0,
+                quant_idx_cb: 0,
+                quant_idx_cr: 0,
+                x_idx: 0,
+                y_idx: 0,
+                flags: 0,
+                quality: 0,
+                y_data: &comp,
+                cb_data: &comp,
+                cr_data: &comp,
+                tail_data: &[],
+            }),
+        );
+        let (rects, failed) = c.write_progressive(&pdu(7, first), Some(1));
+        assert!(!failed, "FIRST tile 应解码成功");
+        assert!(!rects.is_empty(), "FIRST tile 应产出脏区");
+
+        // 换 ctx（真机每帧都换）后发 UPGRADE：状态必须还在。
+        let raw = vec![0u8; 64 * 64 / 8];
+        let upgrade = progressive_stream(
+            false,
+            vec![prog_quant(0), prog_quant(1)],
+            ProgressiveTile::Upgrade(TileUpgrade {
+                quant_idx_y: 0,
+                quant_idx_cb: 0,
+                quant_idx_cr: 0,
+                x_idx: 0,
+                y_idx: 0,
+                quality: 1,
+                y_srl_data: &[],
+                y_raw_data: &raw,
+                cb_srl_data: &[],
+                cb_raw_data: &raw,
+                cr_srl_data: &[],
+                cr_raw_data: &raw,
+            }),
+        );
+        let (rects, failed) = c.write_progressive(&pdu(8, upgrade), Some(2));
+        assert!(!failed, "换 ctx 后 UPGRADE 不应解码失败");
+        assert!(
+            !rects.is_empty(),
+            "换 ctx 后 UPGRADE 应仍能升级出脏区（状态按 surface 存）"
+        );
+
+        // DEC 是 no-op，只计数。
         c.delete_encoding_context(1, 7);
-        assert_eq!(c.dec_freed(), 1);
-        assert_eq!(c.prog_ctx_freed(), 1, "DEC 不该计入轮换计数");
-        // 活跃 ctx 表随 surface 删除 / reset 清空。
+        assert_eq!(c.dec_count(), 1);
+
+        // delete_surface 后 surface 与帧状态干净；写入不存在的 surface 直接空返回。
         c.delete_surface(1);
-        assert!(c.progressive_ctx.is_empty(), "delete_surface 应清活跃 ctx");
-        c.surfaces.insert(2, Surface::new(64, 64));
-        let mut pdu2 = pdu(9);
-        pdu2.surface_id = 2;
-        c.write_progressive(&pdu2, Some(4));
-        assert_eq!(c.progressive_ctx.get(&2), Some(&9));
-        c.reset();
-        assert!(c.progressive_ctx.is_empty(), "reset 应清活跃 ctx");
+        assert!(c.surfaces.is_empty());
+        assert!(c.progressive_frames.is_empty());
+        let (rects, failed) = c.write_progressive(&pdu(9, Vec::new()), Some(3));
+        assert!(rects.is_empty() && !failed);
     }
 
     #[test]

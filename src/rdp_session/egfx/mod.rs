@@ -575,10 +575,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
 
     fn on_frame_complete(&mut self, _frame_id: u32) {
         self.frames += 1;
-        self.diag.set_prog_ctx_freed(
-            self.compositor.prog_ctx_freed(),
-            self.compositor.dec_freed(),
-        );
+        self.diag.set_dec_count(self.compositor.dec_count());
         self.diag.on_end_frame();
         self.publish();
         // 覆盖掩码/surface 原始像素定期覆写（probe 到点直接退出时 on_close 不一定触发）。
