@@ -7,7 +7,8 @@
 use std::sync::{Arc, Mutex};
 
 use crate::file_panel_view_helpers::{
-    file_panel_message, file_panel_name_tooltip, file_panel_reconnect_message, format_remote_mtime,
+    file_panel_blank_context_menu, file_panel_fill_slot, file_panel_message,
+    file_panel_name_tooltip, file_panel_reconnect_message, format_remote_mtime,
     render_file_panel_icon_button,
 };
 use crate::terminal_grid_element::TerminalGridAction;
@@ -150,14 +151,23 @@ impl RootView {
     ) -> Box<dyn Element> {
         let state = &tab.file_panel_state;
         if let Some(err) = state.error.as_ref() {
-            return file_panel_message(err, self.ui_font, colors.warning);
+            return file_panel_fill_slot(file_panel_message(err, self.ui_font, colors.warning));
         }
         let rows = flatten_file_panel_tree(state);
         if state.loading && rows.is_empty() {
-            return file_panel_message("加载中...", self.ui_font, colors.text_muted);
+            return file_panel_fill_slot(file_panel_message(
+                "加载中...",
+                self.ui_font,
+                colors.text_muted,
+            ));
         }
         if rows.is_empty() {
-            return file_panel_message("（空目录）", self.ui_font, colors.text_muted);
+            // 空目录也要能右键新建。
+            return file_panel_blank_context_menu(file_panel_fill_slot(file_panel_message(
+                "（空目录）",
+                self.ui_font,
+                colors.text_muted,
+            )));
         }
 
         // 淘汰已不可见行（折叠/切目录）的 hover 状态；本地树 key = row.path。
@@ -184,17 +194,7 @@ impl RootView {
         )
         .with_overlayed_scrollbar()
         .finish();
-        let with_blank_ctx = EventHandler::new(scrollable)
-            .on_right_mouse_down(|ctx, _app, position, _modifiers| {
-                ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
-                    name: None,
-                    is_dir: false,
-                    position,
-                });
-                DispatchEventResult::StopPropagation
-            })
-            .finish();
-        Container::new(with_blank_ctx)
+        Container::new(file_panel_blank_context_menu(scrollable))
             .with_padding_top(8.0)
             .finish()
     }
@@ -400,22 +400,40 @@ impl RootView {
     ) -> Box<dyn Element> {
         let state = &tab.file_panel_state;
         if !matches!(tab.kind, TerminalSessionKind::Local) && tab.ssh_handle.is_none() {
-            return file_panel_message("等待 SSH 连接...", self.ui_font, colors.text_muted);
+            return file_panel_fill_slot(file_panel_message(
+                "等待 SSH 连接...",
+                self.ui_font,
+                colors.text_muted,
+            ));
         }
         if let Some(err) = state.error.as_ref() {
             // 断线 → 可点击重连；其它错误保持纯文本。
             if !Self::terminal_tab_is_connected(tab) {
                 if let Some(index) = self.terminal_tabs.iter().position(|t| t.id == tab.id) {
-                    return file_panel_reconnect_message(err, self.ui_font, colors.warning, index);
+                    return file_panel_fill_slot(file_panel_reconnect_message(
+                        err,
+                        self.ui_font,
+                        colors.warning,
+                        index,
+                    ));
                 }
             }
-            return file_panel_message(err, self.ui_font, colors.warning);
+            return file_panel_fill_slot(file_panel_message(err, self.ui_font, colors.warning));
         }
         if state.loading && state.entries.is_empty() {
-            return file_panel_message("加载中...", self.ui_font, colors.text_muted);
+            return file_panel_fill_slot(file_panel_message(
+                "加载中...",
+                self.ui_font,
+                colors.text_muted,
+            ));
         }
         if state.entries.is_empty() {
-            return file_panel_message("（空目录）", self.ui_font, colors.text_muted);
+            // 空目录也要能右键新建 / 上传。
+            return file_panel_blank_context_menu(file_panel_fill_slot(file_panel_message(
+                "（空目录）",
+                self.ui_font,
+                colors.text_muted,
+            )));
         }
 
         // 淘汰已不在列表里的 hover 状态（同 host_monitor 进程行 retain 模式）。
@@ -443,18 +461,7 @@ impl RootView {
         )
         .with_overlayed_scrollbar()
         .finish();
-        // 空白区域右键 → 不带 name 的 context menu（entry 自己 StopPropagation，不会冒泡到这里）
-        let with_blank_ctx = EventHandler::new(scrollable)
-            .on_right_mouse_down(|ctx, _app, position, _modifiers| {
-                ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
-                    name: None,
-                    is_dir: false,
-                    position,
-                });
-                DispatchEventResult::StopPropagation
-            })
-            .finish();
-        Container::new(with_blank_ctx)
+        Container::new(file_panel_blank_context_menu(scrollable))
             .with_padding_top(8.0)
             .finish()
     }
