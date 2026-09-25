@@ -216,17 +216,35 @@ pub fn local_temp_sibling(path: &Path) -> PathBuf {
     }
 }
 
+/// 只带权限位的 SETSTAT 属性。必须从 `empty()` 起：russh-sftp 的 `Default` 是 dummy 包用的，
+/// 带 size=0 / uid=gid=0 / mtime=0，发出去会把文件截成 0 字节、时间归零。
+fn permission_only_attrs(perm: u32) -> russh_sftp::protocol::FileAttributes {
+    russh_sftp::protocol::FileAttributes {
+        permissions: Some(perm & 0o7777),
+        ..russh_sftp::protocol::FileAttributes::empty()
+    }
+}
+
+/// 只带属主的 SETSTAT 属性（同样从 `empty()` 起）。
+fn owner_only_attrs(uid: u32, gid: u32) -> russh_sftp::protocol::FileAttributes {
+    russh_sftp::protocol::FileAttributes {
+        uid: Some(uid),
+        gid: Some(gid),
+        ..russh_sftp::protocol::FileAttributes::empty()
+    }
+}
+
 /// 把临时文件原子改名成目标。russh-sftp 没有 posix-rename 扩展，
 /// 而 SFTP v3 的 rename 是否允许覆盖各服务端不一：先直接试，失败再删目标重试。
-/// 目标已有的权限位先搬到临时文件上，避免覆盖后丢掉可执行位。
+/// 目标已有的属主、权限位先搬到临时文件上，避免覆盖后属主变成登录用户、丢掉可执行位。
+/// 属主尽力而为（非 root 通常无权 chown，忽略失败）；先 chown 再 chmod，chown 会清 setuid/setgid。
 async fn rename_overwrite(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
     if let Ok(meta) = sftp.metadata(to).await {
+        if let (Some(uid), Some(gid)) = (meta.uid, meta.gid) {
+            let _ = sftp.set_metadata(from, owner_only_attrs(uid, gid)).await;
+        }
         if let Some(perm) = meta.permissions {
-            let attrs = russh_sftp::protocol::FileAttributes {
-                permissions: Some(perm & 0o7777),
-                ..Default::default()
-            };
-            let _ = sftp.set_metadata(from, attrs).await;
+            let _ = sftp.set_metadata(from, permission_only_attrs(perm)).await;
         }
     }
     if sftp.rename(from, to).await.is_ok() {
@@ -741,6 +759,28 @@ mod tests {
             local_temp_sibling(Path::new("a.txt")),
             PathBuf::from(".a.txt.nexshell-tmp")
         );
+    }
+
+    #[test]
+    fn permission_only_attrs_carries_nothing_but_mode_bits() {
+        let attrs = permission_only_attrs(0o100755);
+        assert_eq!(attrs.permissions, Some(0o755));
+        assert_eq!(attrs.size, None);
+        assert_eq!(attrs.uid, None);
+        assert_eq!(attrs.gid, None);
+        assert_eq!(attrs.atime, None);
+        assert_eq!(attrs.mtime, None);
+    }
+
+    #[test]
+    fn owner_only_attrs_carries_nothing_but_uid_gid() {
+        let attrs = owner_only_attrs(1000, 1001);
+        assert_eq!(attrs.uid, Some(1000));
+        assert_eq!(attrs.gid, Some(1001));
+        assert_eq!(attrs.size, None);
+        assert_eq!(attrs.permissions, None);
+        assert_eq!(attrs.atime, None);
+        assert_eq!(attrs.mtime, None);
     }
 
     #[test]
