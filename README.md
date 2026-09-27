@@ -2,7 +2,7 @@
 
 NexShell 的**唯一架构**：纯 Rust + GPUI/warpui 原生终端 app，自带全套 UI（标题栏/标签/活动栏/终端/底部工具/主机库/监控）。旧的 Tauri + React 外壳已于 2026-06 废弃并删除（见仓库历史）。
 
-模块组织与开发约定见 [`CLAUDE.md`](./CLAUDE.md)：RootView 面板拆分、行数阈值、命名与可见性、主机相关三层、rustfmt 约定等。
+模块组织与开发约定见 [`docs/conventions.md`](./docs/conventions.md)：RootView 面板拆分、行数阈值、命名与可见性、主机相关三层、rustfmt 约定等。
 
 ## 命令
 

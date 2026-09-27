@@ -11,6 +11,7 @@
 
 # AI 指令文档（本地保留，不发布）
 CLAUDE.md
+AGENTS.md
 .claude/
 docs/code-review-*.md
 
