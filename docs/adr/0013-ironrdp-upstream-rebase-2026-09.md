@@ -32,13 +32,22 @@ ADR 0011 基线（上游 `872845c` + 12 个 fork 补丁，rev `d9ee675`）之后
 | bcf7df26 AVC420 按 regionRect 拷贝、exclusive 语义 | `43236749` | 上游 #1788 已把类型改成 `ExclusiveRectangle`，"把 Inclusive 类型当 exclusive 解读"部分退役；只保留逐 regionRect 拷贝，`extract_region_rgba` 改收 `ExclusiveRectangle` |
 | 21d61edb `with_builtin_compositing` | `3d19a658` | 与上游 #1874 ResetGraphics 校验冲突。关闭内置合成时：不 reset compositor、不置 `pending_output_reset`（ActiveStage 不因此重置 session image）、不按 compositor 上限拒绝 reset（输出缓冲归 handler）；补单测 |
 
+### 追加补丁：macOS 无声（上游 #1648 回归）
+
+`c25806d9` fix(rdpsnd-native)：macOS 上不按采样格式过滤 PCM。
+
+- 现象：Mac 上 RDP 完全无声。服务端发来格式列表后不再发 Training，与 TCP / UDP 无关。
+- 原因：上游 #1648（2026-08-13，ADR 0011 基线已含）按默认输出设备配置过滤 PCM 候选，要求采样格式一致。cpal 的 CoreAudio 后端对所有设备只报 F32，16 位 PCM 候选全被滤掉，客户端回了空格式表。
+- 处理：CoreAudio 输出 AudioUnit 会转换整数 PCM。实测 MacBook 扬声器只报 F32，按 I16 / 44.1 kHz 建流正常。故 macOS 上只比较声道数与采样率。
+- 影响：NexShell 自 v0.6.0（ADR 0011）起 Mac 无声，本补丁修复。
+
 ## 基线
 
-- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。ADR 0014 在其上追加两个补丁，当前 rev `03e51ba6`。
+- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。其上追加 ADR 0014 的两个补丁与上面的音频补丁，当前 rev `c25806d9`。
 - IronRDP 验证：`ironrdp-egfx` 单测 62 通过；`ironrdp-testsuite-core` 1684 通过（含上游 #1848 Haven 真机 Progressive fixtures）；改动 crate clippy 无新告警。
 - NexShell 验证：`cargo check --all-targets`（aarch64 / x86_64 macOS）、lib 测试 480、bin 测试 195 通过。Windows（x86_64-pc-windows-gnu）交叉检查中 ironrdp 全部依赖编译通过，仅 `src/osc7.rs` 的 `libc::gethostname` 报错——main 上 `f47bfb5` 引入的既有问题，与本次无关，不混入。
 - 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧），`egfx_replay` 新旧逐帧 hash 完全一致、0 解码失败。该 dump 以 Progressive 为主，AVC420 路径的改写仅由单测覆盖（语义不变，只换类型）。
-- 真机回归：待做（EGFX 画面、剪贴板、共享盘拷文件、音频、重连）。
+- 真机回归：EGFX 画面、音频已验证（Win11，2026-09-28）；剪贴板、共享盘拷文件、重连待做。
 
 ## 回退
 

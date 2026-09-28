@@ -34,7 +34,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
    - UDP 的 TLS 与 TCP 同策略：平台根严格校验 + 同一 `host:port` 的 TOFU 指纹回调。
 5. **缩放改走 `prepare_resize` 并按通道分流**。`encode_resize` 固定走 TCP，Soft-Sync 后 Display Control 已在 UDP 上。
 6. **开关与观测**：UDP 默认开启，`NEXSHELL_RDP_DISABLE_UDP=1` 退回纯 TCP；`NEXSHELL_RDP_AUTODETECT=1` 改报自动探测；`NEXSHELL_RDP_NET_TRACE=1` 打印服务端测得的网络特征。有通道迁到 UDP 后，统计面板"传输"显示 `TCP + UDP`，UDP 收包计入接收码率。
-7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）两个补丁，当前 rev `03e51ba6`。
+7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）两个补丁；当前 rev 见 ADR 0013 基线。
 8. **fork 补丁：Soft-Sync 按服务端清单路由**（`ironrdp-dvc` client）。Windows 的 Soft-Sync 请求会列出客户端拒绝过或尚未打开的通道 ID（实测 `[2, 6, 7, 8, 9, 10, 11, 12]`，客户端只开了 7 号 Graphics）。上游见到未知 ID 就跳过整条隧道，而服务端发出请求时已经改走隧道（MS-RDPEDYC 3.2.5.3.1），结果画面停在"正在连接"。补丁：
    - 列出的 ID 全部按服务端路由记下，应答里带上该隧道。
    - 隧道上除 Data 外也接受 Create / Close，应答原路回隧道。实测 Windows 在 Soft-Sync 之后经隧道新建 Video::Control / Video::Data / Geometry（清单内 ID），以及清单外的 `AUDIO_PLAYBACK_DVC`（ID 16）。
@@ -68,9 +68,9 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
 ## 验证
 
 - 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 44、`ironrdp-rdpeudp-tokio` 55 项通过。
-- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开。
+- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常。
 - 真机待做：
-  - 缩放、剪贴板、共享盘、音频在 UDP 下逐项回归。
+  - 缩放、剪贴板、共享盘在 UDP 下逐项回归。
   - UDP 被挡：连接回落 TCP，额外等待不超过约 3s。
   - 隧道内 5% 丢包：与 `NEXSHELL_RDP_DISABLE_UDP=1` 对比流畅度与接收码率。
   - 连接异常时分别设两个开关复现，区分是 UDP 还是自动探测引起。

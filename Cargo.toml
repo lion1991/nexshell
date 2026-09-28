@@ -197,7 +197,7 @@ objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9
 yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
 
 # IronRDP fork（docs/adr/0013）：分支 nexshell-2026-09，基于上游 9b151c4c（2026-09-22）+ 自有补丁。
-# 暂指本地工作树；fork 分支推送后改回钉 git rev 03e51ba6（含 ADR 0014 的两个补丁），否则 CI 与其他机器无法构建。
+# 暂指本地工作树；fork 分支推送后改回钉 git rev c25806d9（含 ADR 0014 的两个补丁与音频补丁），否则 CI 与其他机器无法构建。
 # git workspace 内部是同一组 crate，只 patch 单个 crate 会与 crates.io 拉的其余 ironrdp crate
 # 出现同名两份导致类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到同一 fork rev。
 ironrdp-async = { path = "../IronRDP-2026-09/crates/ironrdp-async" }
