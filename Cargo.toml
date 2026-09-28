@@ -191,30 +191,31 @@ core-text = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844c
 objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9f863ef0eb22e444a3fedac009e78a" }
 yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
 
-# IronRDP fork（docs/adr/0011）：分支 nexshell-2026-08，基于上游 2026-08-31 master + 少量自有补丁。
+# IronRDP fork（docs/adr/0013）：分支 nexshell-2026-09，基于上游 9b151c4c（2026-09-22）+ 自有补丁。
+# 暂指本地工作树；fork 分支推送后改回钉 git rev 65cb3a93，否则 CI 与其他机器无法构建。
 # git workspace 内部是同一组 crate，只 patch 单个 crate 会与 crates.io 拉的其余 ironrdp crate
 # 出现同名两份导致类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到同一 fork rev。
-ironrdp-async = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-bulk = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-cliprdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-connector = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-core = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-displaycontrol = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-dvc = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-egfx = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-error = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-graphics = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-pdu = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpsnd = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpsnd-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpdr = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpdr-native = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-session = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-svc = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-tls = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-tokio = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpei = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
-ironrdp-rdpeai = { git = "https://github.com/lion1991/IronRDP.git", rev = "d9ee67594adf02634805ae5f2d4b4db42785e8a6" }
+ironrdp-async = { path = "../IronRDP-2026-09/crates/ironrdp-async" }
+ironrdp-bulk = { path = "../IronRDP-2026-09/crates/ironrdp-bulk" }
+ironrdp-cliprdr = { path = "../IronRDP-2026-09/crates/ironrdp-cliprdr" }
+ironrdp-connector = { path = "../IronRDP-2026-09/crates/ironrdp-connector" }
+ironrdp-core = { path = "../IronRDP-2026-09/crates/ironrdp-core" }
+ironrdp-displaycontrol = { path = "../IronRDP-2026-09/crates/ironrdp-displaycontrol" }
+ironrdp-dvc = { path = "../IronRDP-2026-09/crates/ironrdp-dvc" }
+ironrdp-egfx = { path = "../IronRDP-2026-09/crates/ironrdp-egfx" }
+ironrdp-error = { path = "../IronRDP-2026-09/crates/ironrdp-error" }
+ironrdp-graphics = { path = "../IronRDP-2026-09/crates/ironrdp-graphics" }
+ironrdp-pdu = { path = "../IronRDP-2026-09/crates/ironrdp-pdu" }
+ironrdp-rdpsnd = { path = "../IronRDP-2026-09/crates/ironrdp-rdpsnd" }
+ironrdp-rdpsnd-native = { path = "../IronRDP-2026-09/crates/ironrdp-rdpsnd-native" }
+ironrdp-rdpdr = { path = "../IronRDP-2026-09/crates/ironrdp-rdpdr" }
+ironrdp-rdpdr-native = { path = "../IronRDP-2026-09/crates/ironrdp-rdpdr-native" }
+ironrdp-session = { path = "../IronRDP-2026-09/crates/ironrdp-session" }
+ironrdp-svc = { path = "../IronRDP-2026-09/crates/ironrdp-svc" }
+ironrdp-tls = { path = "../IronRDP-2026-09/crates/ironrdp-tls" }
+ironrdp-tokio = { path = "../IronRDP-2026-09/crates/ironrdp-tokio" }
+ironrdp-rdpei = { path = "../IronRDP-2026-09/crates/ironrdp-rdpei" }
+ironrdp-rdpeai = { path = "../IronRDP-2026-09/crates/ironrdp-rdpeai" }
 
 # debug 构建只优化依赖（本 crate 保持 debug 可断点）：RDP 视频软解热点（RLGR/IDWT）
 # 在 fork ironrdp-graphics 里，无优化时慢 20-50 倍致 cargo run 下视频卡帧。

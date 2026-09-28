@@ -162,6 +162,26 @@ pub(crate) fn file_panel_message(
     .finish()
 }
 
+/// 文件面板列表区占位（加载中/空目录/错误）：撑满 Expanded 槽位。
+/// Container 不吃 min 约束，不包的话占位只有一行高，底部任务区会顶上来。
+pub(crate) fn file_panel_fill_slot(child: Box<dyn Element>) -> Box<dyn Element> {
+    Align::new(child).top_left().finish()
+}
+
+/// 列表区空白处右键 → 不带 name 的 context menu（行自身 StopPropagation，不会冒泡到这里）。
+pub(crate) fn file_panel_blank_context_menu(child: Box<dyn Element>) -> Box<dyn Element> {
+    EventHandler::new(child)
+        .on_right_mouse_down(|ctx, _app, position, _modifiers| {
+            ctx.dispatch_typed_action(TerminalGridAction::FilePanelShowContextMenu {
+                name: None,
+                is_dir: false,
+                position,
+            });
+            DispatchEventResult::StopPropagation
+        })
+        .finish()
+}
+
 pub(crate) fn file_panel_reveal_label() -> &'static str {
     if cfg!(target_os = "macos") {
         "file_panel_ctx_reveal_finder"

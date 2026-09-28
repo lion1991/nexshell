@@ -1,6 +1,6 @@
 # IronRDP 依赖追平上游并收缩 fork 补丁
 
-Status: accepted (2026-09-10)；openspec change `upgrade-upstream-warp-ironrdp`
+Status: accepted (2026-09-10)；openspec change `upgrade-upstream-warp-ironrdp`；基线已由 ADR 0013 更新
 
 ## 背景
 
