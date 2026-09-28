@@ -14,7 +14,7 @@ RDP 7.1 级图形（ADR 0007 已知短板）撞到天花板：现代 Windows 对
 2. **H.264 解码直接用 VideoToolbox 硬解**（实现 `H264Decoder` trait：Annex-B→AVCC + `VTDecompressionSession`），不走库内置 openh264 软解。理由：系统框架零专利负担（openh264 源码自编译不在 Cisco 授权范围）；Apple Silicon 硬解近零 CPU；objc2 生态已随 GPUI 在树（补 `objc2-video-toolbox` 系仅同生态加包）。
 3. **connector 以 GitHub fork + `[patch.crates-io]` 钉 rev 打补丁**，仅加 `SUPPORT_DYN_VC_GFX_PROTOCOL` 开关（等价上游 PR #1237，38 行）。退出条件：#1237 合并发版后删 patch 回归发布版。
 4. **保留 RDP 7.1 管线为自动回退**：服务端不支持 EGFX 时走现有 RemoteFX/位图路径，零回归。
-5. **AVC444 暂缓**（上游无解码路径，色度重组需全自研，收益为视频模式文字锐度）；UDP 传输（MS-RDPEUDP）不做。
+5. **AVC444 暂缓**（上游无解码路径，色度重组需全自研，收益为视频模式文字锐度）；UDP 传输（MS-RDPEUDP）不做（已由 ADR 0014 引入可靠 UDP 旁路）。
 
 ## 接受的代价
 

@@ -44,6 +44,7 @@ fn audio_static_channels_include_rdpdr_dependency() {
         enable_audio: true,
         enable_drive: false,
         desktop_scale_factor: 100,
+        enable_udp: false,
     };
     let connector = ClientConnector::new(
         build_connector_config(&config),
@@ -64,6 +65,54 @@ fn audio_static_channels_include_rdpdr_dependency() {
         names.iter().any(|name| name == "rdpdr"),
         "FreeRDP enables rdpdr when rdpsnd is present; got {names:?}"
     );
+}
+
+#[test]
+fn connection_type_is_lan_unless_autodetect_requested() {
+    use ironrdp_pdu::gcc::ConnectionType;
+    assert_eq!(connection_type_from_env(None), ConnectionType::Lan);
+    assert_eq!(
+        connection_type_from_env(Some("1".into())),
+        ConnectionType::Autodetect
+    );
+}
+
+#[test]
+fn connector_config_follows_udp_gate_and_requires_egfx() {
+    let mut config = RdpSessionConfig {
+        host: "127.0.0.1".to_string(),
+        port: 3389,
+        username: "alice".to_string(),
+        password: "secret".to_string(),
+        width: 1024,
+        height: 768,
+        enable_egfx: true,
+        enable_audio: false,
+        enable_drive: false,
+        desktop_scale_factor: 100,
+        enable_udp: true,
+    };
+    let built = build_connector_config(&config);
+    assert_eq!(
+        built.connection_type,
+        connection_type_from_env(std::env::var_os("NEXSHELL_RDP_AUTODETECT"))
+    );
+    let flags = built
+        .multitransport_flags
+        .expect("UDP on advertises multitransport");
+    assert!(flags.contains(ironrdp_pdu::gcc::MultiTransportFlags::SOFT_SYNC_TCP_TO_UDP));
+
+    // 关 EGFX 就没有 DRDYNVC，不能声明 UDP。
+    config.enable_egfx = false;
+    assert!(build_connector_config(&config)
+        .multitransport_flags
+        .is_none());
+
+    config.enable_egfx = true;
+    config.enable_udp = false;
+    assert!(build_connector_config(&config)
+        .multitransport_flags
+        .is_none());
 }
 
 #[test]
@@ -89,6 +138,7 @@ fn drive_only_advertises_rdpsnd_and_rdpdr() {
         enable_audio: false,
         enable_drive: true,
         desktop_scale_factor: 100,
+        enable_udp: false,
     };
     let mut connector = ClientConnector::new(
         build_connector_config(&config),

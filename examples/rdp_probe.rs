@@ -7,7 +7,9 @@
 
 use std::time::{Duration, Instant};
 
-use nexshell::rdp_session::{default_enable_egfx, spawn_rdp_session, RdpEvent, RdpSessionConfig};
+use nexshell::rdp_session::{
+    default_enable_egfx, default_enable_udp, spawn_rdp_session, RdpEvent, RdpSessionConfig,
+};
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
     std::env::var(key)
@@ -42,6 +44,8 @@ fn main() {
         // rdpdr 驱动器重定向（~/NexShell RDP → \\tsclient\NexShell）：默认开，RDP_DRIVE=0 可关。
         enable_drive: std::env::var("RDP_DRIVE").map(|v| v != "0").unwrap_or(true),
         desktop_scale_factor,
+        // 可靠 UDP 旁路：默认开，NEXSHELL_RDP_DISABLE_UDP=1 可关闭对照。
+        enable_udp: default_enable_udp(),
     });
 
     // RDP_DURATION：采集秒数，缺省 5（长跑抓 EGFX dump 用）。

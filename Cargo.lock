@@ -5030,6 +5030,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-rdpemt"
+version = "0.1.0"
+dependencies = [
+ "ironrdp-core",
+ "ironrdp-error",
+ "subtle",
+]
+
+[[package]]
+name = "ironrdp-rdpeudp"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.13.0",
+ "ironrdp-core",
+ "ironrdp-error",
+]
+
+[[package]]
+name = "ironrdp-rdpeudp-tokio"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "ironrdp-async",
+ "ironrdp-core",
+ "ironrdp-error",
+ "ironrdp-pdu",
+ "ironrdp-rdpemt",
+ "ironrdp-rdpeudp",
+ "ironrdp-tls",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
 name = "ironrdp-rdpsnd"
 version = "0.9.0"
 dependencies = [
@@ -6118,6 +6154,9 @@ dependencies = [
  "ironrdp-pdu",
  "ironrdp-rdpdr",
  "ironrdp-rdpdr-native",
+ "ironrdp-rdpemt",
+ "ironrdp-rdpeudp",
+ "ironrdp-rdpeudp-tokio",
  "ironrdp-rdpsnd",
  "ironrdp-rdpsnd-native",
  "ironrdp-session",

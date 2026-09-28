@@ -20,7 +20,7 @@ ADR 0011 基线（上游 `872845c` + 12 个 fork 补丁，rev `d9ee675`）之后
 
 - 新分支 `nexshell-2026-09` 从 `upstream/master 9b151c4c`（2026-09-22）出发，按 ADR 0011 同法重放补丁；`nexshell-2026-08` 保留作回退。
 - NexShell 源码零改动：`ActiveStage` 公开 API 只有新增（DVC tunnel、multitransport 编码等），用到的签名未变；crate 版本号均未变。
-- 不引入新功能：reliable UDP / multitransport（#1869/#1858/#1836）等留待单独评估。
+- 不引入新功能：reliable UDP / multitransport（#1869/#1858/#1836）等留待单独评估（结论见 ADR 0014）。
 - #1923（AVC420 按 full-range BT.709 转色）只改库内 openh264 路径；NexShell 走 VideoToolbox + 自有转色（`decoder_vt.rs`，当前 BT.601），是否跟进另行真机核实，不混入本次。
 
 ## 补丁台账变化
@@ -34,7 +34,7 @@ ADR 0011 基线（上游 `872845c` + 12 个 fork 补丁，rev `d9ee675`）之后
 
 ## 基线
 
-- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。
+- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。ADR 0014 在其上追加两个补丁，当前 rev `03e51ba6`。
 - IronRDP 验证：`ironrdp-egfx` 单测 62 通过；`ironrdp-testsuite-core` 1684 通过（含上游 #1848 Haven 真机 Progressive fixtures）；改动 crate clippy 无新告警。
 - NexShell 验证：`cargo check --all-targets`（aarch64 / x86_64 macOS）、lib 测试 480、bin 测试 195 通过。Windows（x86_64-pc-windows-gnu）交叉检查中 ironrdp 全部依赖编译通过，仅 `src/osc7.rs` 的 `libc::gethostname` 报错——main 上 `f47bfb5` 引入的既有问题，与本次无关，不混入。
 - 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧），`egfx_replay` 新旧逐帧 hash 完全一致、0 解码失败。该 dump 以 Progressive 为主，AVC420 路径的改写仅由单测覆盖（语义不变，只换类型）。

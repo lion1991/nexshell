@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 /// Arc 共享给 UI 的统计集。
 pub struct RdpStats {
-    /// read_pdu 成功累加的 payload 字节数（含 drain 循环）。
+    /// read_pdu 与 UDP 隧道收到的 payload 字节数（含 drain 循环）。
     bytes_received: AtomicU64,
     /// publish_frame 实发一帧 +1。
     frames_published: AtomicU64,
@@ -19,6 +19,8 @@ pub struct RdpStats {
     marker_mode: AtomicBool,
     /// 渲染管线：0=legacy 位图，1=RemoteFX 帧边界，2=EGFX 图形管线。UI 面板据此显示。
     pipeline: AtomicU8,
+    /// 已有动态通道经 Soft-Sync 迁到可靠 UDP 隧道（docs/adr/0014）。
+    udp_active: AtomicBool,
     /// 连接建立时刻，算会话时长。
     connected_at: Instant,
     /// TLS 升级前对 TcpStream dup 的 fd，仅供 getsockopt 读 srtt；Drop 时 close。-1=无。
@@ -33,6 +35,7 @@ impl RdpStats {
             frames_published: AtomicU64::new(0),
             marker_mode: AtomicBool::new(false),
             pipeline: AtomicU8::new(0),
+            udp_active: AtomicBool::new(false),
             connected_at: Instant::now(),
             #[cfg(target_os = "macos")]
             raw_fd: AtomicI32::new(-1),
@@ -59,6 +62,13 @@ impl RdpStats {
     /// 渲染管线：0=legacy 位图，1=RemoteFX 帧边界，2=EGFX。
     pub fn pipeline(&self) -> u8 {
         self.pipeline.load(Ordering::Relaxed)
+    }
+
+    pub fn set_udp_active(&self) {
+        self.udp_active.store(true, Ordering::Relaxed);
+    }
+    pub fn udp_active(&self) -> bool {
+        self.udp_active.load(Ordering::Relaxed)
     }
 
     pub fn bytes(&self) -> u64 {

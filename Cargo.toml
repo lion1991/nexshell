@@ -85,6 +85,11 @@ ironrdp-rdpsnd-native = "0.7"
 ironrdp-rdpdr = "0.7"
 # rdpdr-native：macOS 驱动器重定向后端（NixRdpdrBackend，完整读写文件系统），文件互拷。
 ironrdp-rdpdr-native = "0.7"
+# 可靠 UDP 旁路（MS-RDPEUDP2 + MS-RDPEMT，见 docs/adr/0014）：图形等动态通道经 Soft-Sync 迁到 UDP，
+# 高丢包链路比 TCP 流畅。rustls provider 由会话启动时统一安装。
+ironrdp-rdpeudp = "0.1"
+ironrdp-rdpeudp-tokio = "0.1"
+ironrdp-rdpemt = "0.1"
 # Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
 # macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
 # 只在单一 RDP 线程访问 NSPasteboard，无并发。
@@ -192,7 +197,7 @@ objc = { git = "https://github.com/warpdotdev/rust-objc.git", rev = "5b656827fa9
 yaml-rust = { git = "https://github.com/warpdotdev/yaml-rust.git", rev = "51684719d0102ca85ff4b21cec39877a0c669e19" }
 
 # IronRDP fork（docs/adr/0013）：分支 nexshell-2026-09，基于上游 9b151c4c（2026-09-22）+ 自有补丁。
-# 暂指本地工作树；fork 分支推送后改回钉 git rev 65cb3a93，否则 CI 与其他机器无法构建。
+# 暂指本地工作树；fork 分支推送后改回钉 git rev 03e51ba6（含 ADR 0014 的两个补丁），否则 CI 与其他机器无法构建。
 # git workspace 内部是同一组 crate，只 patch 单个 crate 会与 crates.io 拉的其余 ironrdp crate
 # 出现同名两份导致类型不匹配。故把树内用到的全部 ironrdp crate 统一钉到同一 fork rev。
 ironrdp-async = { path = "../IronRDP-2026-09/crates/ironrdp-async" }
@@ -216,6 +221,9 @@ ironrdp-tls = { path = "../IronRDP-2026-09/crates/ironrdp-tls" }
 ironrdp-tokio = { path = "../IronRDP-2026-09/crates/ironrdp-tokio" }
 ironrdp-rdpei = { path = "../IronRDP-2026-09/crates/ironrdp-rdpei" }
 ironrdp-rdpeai = { path = "../IronRDP-2026-09/crates/ironrdp-rdpeai" }
+ironrdp-rdpeudp = { path = "../IronRDP-2026-09/crates/ironrdp-rdpeudp" }
+ironrdp-rdpeudp-tokio = { path = "../IronRDP-2026-09/crates/ironrdp-rdpeudp-tokio" }
+ironrdp-rdpemt = { path = "../IronRDP-2026-09/crates/ironrdp-rdpemt" }
 
 # debug 构建只优化依赖（本 crate 保持 debug 可断点）：RDP 视频软解热点（RLGR/IDWT）
 # 在 fork ironrdp-graphics 里，无优化时慢 20-50 倍致 cargo run 下视频卡帧。

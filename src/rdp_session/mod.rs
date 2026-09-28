@@ -10,6 +10,7 @@ mod egfx;
 mod frame_marker;
 mod rdpdr;
 mod stats;
+mod udp;
 
 pub use egfx::{
     inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points, replay_wire_dump, vt_replay_dir,
@@ -17,6 +18,7 @@ pub use egfx::{
     WireReplayFrame, WireReplayOptions, WireReplaySummary,
 };
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
+pub use udp::default_enable_udp;
 
 use std::net::SocketAddr;
 #[cfg(target_os = "macos")]
@@ -67,6 +69,8 @@ pub struct RdpSessionConfig {
     pub enable_drive: bool,
     /// 远端 DPI 缩放百分比（[100,500] 有效，0=不请求，HiDPI 下=物理/逻辑×100）。
     pub desktop_scale_factor: u32,
+    /// 可靠 UDP 旁路（docs/adr/0014）：服务端提供时把图形等动态通道迁到 UDP，失败自动留在 TCP。
+    pub enable_udp: bool,
 }
 
 fn default_enable_egfx_from_env(disable_egfx: Option<std::ffi::OsString>) -> bool {
@@ -76,6 +80,25 @@ fn default_enable_egfx_from_env(disable_egfx: Option<std::ffi::OsString>) -> boo
 /// EGFX is the default graphics pipeline; set NEXSHELL_RDP_DISABLE_EGFX=1 for legacy fallback.
 pub fn default_enable_egfx() -> bool {
     default_enable_egfx_from_env(std::env::var_os("NEXSHELL_RDP_DISABLE_EGFX"))
+}
+
+/// 连接类型默认固定 LAN；NEXSHELL_RDP_AUTODETECT=1 改报自动探测。服务端关了网络探测时
+/// Autodetect 会被按最小带宽处理（帧率掉到个位数），见 docs/adr/0014。
+fn connection_type_from_env(
+    autodetect: Option<std::ffi::OsString>,
+) -> ironrdp_pdu::gcc::ConnectionType {
+    if autodetect.is_some() {
+        ironrdp_pdu::gcc::ConnectionType::Autodetect
+    } else {
+        ironrdp_pdu::gcc::ConnectionType::Lan
+    }
+}
+
+impl RdpSessionConfig {
+    /// UDP 只迁动态通道，DRDYNVC 随 EGFX 注册；关 EGFX 时不声明 UDP，否则隧道建成后无通道可迁。
+    fn udp_effective(&self) -> bool {
+        self.enable_udp && self.enable_egfx
+    }
 }
 
 /// 脏矩形（左上原点，像素）。本步图形更新统一按整帧上报。
@@ -507,7 +530,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         request_data: None,
         // false=accelerated：产出非预乘 RGBA 的 PointerBitmap，用系统光标绘制。
         pointer_software_rendering: false,
-        multitransport_flags: None,
+        multitransport_flags: udp::multitransport_flags(config.udp_effective()),
         compression_type: None,
         performance_flags: ironrdp_pdu::rdp::client_info::PerformanceFlags::default(),
         timezone_info: ironrdp_pdu::rdp::client_info::TimezoneInfo::default(),
@@ -516,8 +539,9 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         // EGFX 早期能力标志（fork patch，docs/adr/0008）：只在门控开时广告，
         // 让服务端可协商 Microsoft::Windows::RDS::Graphics 通道。
         support_dyn_vc_gfx_protocol: config.enable_egfx,
-        // 上游 2026-08 新增字段，全取与旧行为等价的默认：LAN、不开标准 RDP 安全、无音频采集、无 RAIL。
-        connection_type: ironrdp_pdu::gcc::ConnectionType::Lan,
+        // 自动探测（mstsc 默认）：服务端实测 RTT/带宽后调整画质与帧率，弱网不再按局域网画质硬推。
+        connection_type: connection_type_from_env(std::env::var_os("NEXSHELL_RDP_AUTODETECT")),
+        // 其余取与旧行为等价的默认：不开标准 RDP 安全、无音频采集、无 RAIL。
         enable_standard_rdp_security: false,
         enable_audio_capture: false,
         monitor_layout: None,
@@ -597,6 +621,14 @@ async fn connect_and_run(
     let client_addr: SocketAddr = tcp
         .local_addr()
         .map_err(|e| format!("local_addr failed: {e}"))?;
+    let udp_peer = if config.udp_effective() {
+        Some(
+            tcp.peer_addr()
+                .map_err(|e| format!("peer_addr failed: {e}"))?,
+        )
+    } else {
+        None
+    };
     // TLS 升级前 dup 一份底层 fd 供 RTT 探测（原 stream 随后被 TLS 吃掉）。
     #[cfg(target_os = "macos")]
     stats.capture_fd(tcp.as_raw_fd());
@@ -685,6 +717,19 @@ async fn connect_and_run(
             }
         })
     };
+    // UDP 旁路的 TLS 与 TCP 同策略：平台根校验 + 同一 endpoint 的 TOFU 指纹。
+    let mut udp = udp_peer.map(|peer| {
+        udp::UdpSideband::new(
+            peer,
+            config.host.clone(),
+            ironrdp_rdpeudp_tokio::UdpTlsConfig {
+                certificate_validation: ironrdp_tls::CertificateValidation::Strict,
+                certificate_validation_callback: Some(Arc::clone(&callback)),
+                certificate_validation_endpoint: endpoint.clone(),
+            },
+            Arc::clone(stats),
+        )
+    });
     let (upgraded_stream, server_cert) =
         ironrdp_tls::upgrade_with_certificate_validation_callback_for_endpoint(
             initial_stream,
@@ -707,18 +752,38 @@ async fn connect_and_run(
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = ironrdp_tokio::TokioFramed::new(upgraded_stream);
     let mut network_client = NoopNetworkClient;
-    let connection_result = ironrdp_tokio::connect_finalize(
-        upgraded,
-        connector,
-        &mut upgraded_framed,
-        &mut network_client,
-        ServerName::new(config.host.clone()),
-        server_public_key,
-        None,
-    )
-    .await
+    let server_name = ServerName::new(config.host.clone());
+    let connection_result = match udp.as_mut() {
+        // 连接期的多传输请求在此内联建隧道（握手超时已压短，见 udp 模块）。
+        Some(sideband) => {
+            ironrdp_tokio::connect_finalize_with_multitransport(
+                upgraded,
+                connector,
+                &mut upgraded_framed,
+                &mut network_client,
+                server_name,
+                server_public_key,
+                None,
+                async |request, soft_sync| Ok(sideband.handle_request(&request, soft_sync).await.0),
+            )
+            .await
+        }
+        None => {
+            ironrdp_tokio::connect_finalize(
+                upgraded,
+                connector,
+                &mut upgraded_framed,
+                &mut network_client,
+                server_name,
+                server_public_key,
+                None,
+            )
+            .await
+        }
+    }
     .map_err(|e| format!("connect_finalize (NLA) failed: {e}"))?;
     audio_diag::log_negotiated_rdpsnd_channel(&connection_result.static_channels);
+    let soft_sync = connection_result.multitransport_soft_sync();
 
     // 激活分辨率可能被服务端改；据此重建 framebuffer + DecodedImage。
     let desktop = connection_result.desktop_size;
@@ -743,6 +808,12 @@ async fn connect_and_run(
     }
     .build();
     active_stage.set_window_support_level(connection_result.window_support_level);
+    // 隧道已建：等服务端 Soft-Sync 把动态通道迁过来。
+    if udp.as_ref().is_some_and(udp::UdpSideband::has_transport) {
+        active_stage
+            .enable_reliable_udp_dvc_tunnel()
+            .map_err(|e| format!("enable UDP tunnel failed: {e}"))?;
+    }
     let _ = event_tx.try_send(RdpEvent::Connected);
     // Mac 剪贴板轮询挪出帧循环：独立 OS 线程 1s tick 同步读 NSPasteboard，有变化经 channel 回递。
     // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程 ~1s 内自退。
@@ -790,6 +861,7 @@ async fn connect_and_run(
             );
             dbg_last = std::time::Instant::now();
         }
+        udp::drain_pending(&mut udp, &mut active_stage, &mut upgraded_framed).await?;
         // 有在途累积且未武装截止时武装：单一武装点覆盖帧/输入两路（输入路 continue 后由此处补武装）。
         if acc.is_some() && frame_deadline.is_none() {
             frame_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(50));
@@ -832,8 +904,8 @@ async fn connect_and_run(
                     .process_fastpath_input(&mut image, &events)
                     .map_err(|e| format!("encode input failed: {e}"))?;
                 // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
-                let mut reactivate = false;
-                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key, &mut reactivate).await? {
+                let mut signals = OutputSignals::default();
+                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key, &mut signals).await? {
                     return Ok(());
                 }
                 continue;
@@ -848,12 +920,11 @@ async fn connect_and_run(
                 let (aw, ah) =
                     MonitorLayoutEntry::adjust_display_size(u32::from(req.width), u32::from(req.height));
                 let scale = (req.scale_factor > 0).then_some(req.scale_factor);
-                match active_stage.encode_resize(aw, ah, scale, None) {
-                    Some(Ok(frame)) => {
-                        upgraded_framed
-                            .write_all(&frame)
-                            .await
-                            .map_err(|e| format!("write resize failed: {e}"))?;
+                // Soft-Sync 后 Display Control 在 UDP 上，须按通道分流，不能固定走 TCP。
+                match active_stage.prepare_resize(aw, ah, scale, None) {
+                    Some(Ok(batch)) => {
+                        udp::route_dvc_batch(udp.as_ref(), &mut active_stage, &mut upgraded_framed, batch)
+                            .await?;
                         last_requested_size = (req.width, req.height);
                     }
                     Some(Err(e)) => eprintln!("[rdp] encode_resize failed: {e}"),
@@ -867,6 +938,10 @@ async fn connect_and_run(
             {
                 publish_frame(framebuffer, &image, &mut acc, stats, event_tx);
                 frame_deadline = None;
+                continue;
+            }
+            payload = udp::recv(&mut udp) => {
+                udp::handle_recv(&mut udp, &mut active_stage, &mut upgraded_framed, payload).await?;
                 continue;
             }
             frame = upgraded_framed.read_pdu() => {
@@ -896,8 +971,8 @@ async fn connect_and_run(
             }
         }
 
-        // 本轮捕获的 Deactivation-Reactivation 序列（服务端换分辨率的兜底路径，见 drain_outputs）。
-        let mut pending_reactivation = false;
+        // 本轮捕获的重激活 / 多传输请求（见 drain_outputs）。
+        let mut signals = OutputSignals::default();
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
@@ -909,13 +984,21 @@ async fn connect_and_run(
             dh,
             event_tx,
             &mut last_pointer_key,
-            &mut pending_reactivation,
+            &mut signals,
         )
         .await?
         {
             return Ok(());
         }
-        if std::mem::take(&mut pending_reactivation) {
+        udp::answer_requests(
+            &mut udp,
+            &mut active_stage,
+            &mut upgraded_framed,
+            std::mem::take(&mut signals.multitransport),
+            soft_sync,
+        )
+        .await?;
+        if std::mem::take(&mut signals.reactivate) {
             let seq = activation_factory.create();
             let (nw, nh) =
                 run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image).await?;
@@ -961,13 +1044,21 @@ async fn connect_and_run(
                             dh,
                             event_tx,
                             &mut last_pointer_key,
-                            &mut pending_reactivation,
+                            &mut signals,
                         )
                         .await?
                         {
                             return Ok(());
                         }
-                        if pending_reactivation {
+                        udp::answer_requests(
+                            &mut udp,
+                            &mut active_stage,
+                            &mut upgraded_framed,
+                            std::mem::take(&mut signals.multitransport),
+                            soft_sync,
+                        )
+                        .await?;
+                        if signals.reactivate {
                             break; // 收到 DeactivateAll：跳出 drain，下方走重激活。
                         }
                         drained += 1;
@@ -982,7 +1073,7 @@ async fn connect_and_run(
                     }
                 }
             }
-            if std::mem::take(&mut pending_reactivation) {
+            if std::mem::take(&mut signals.reactivate) {
                 let seq = activation_factory.create();
                 let (nw, nh) =
                     run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image)
@@ -1137,6 +1228,15 @@ fn union_dirty(a: DirtyRect, b: DirtyRect) -> DirtyRect {
 
 /// 处理一批 outputs：ResponseFrame 立即写回；GraphicsUpdate 转脏区并入 acc（不拷贝像素）；
 /// Terminate 发 Disconnected 并返回 true（需退出）。
+/// drain_outputs 交回主循环处理的事件（需要 ActiveStage / UDP 状态，drain 内拿不到）。
+#[derive(Default)]
+struct OutputSignals {
+    /// 服务端要求 Deactivation-Reactivation。
+    reactivate: bool,
+    /// 会话期到达的 Initiate Multitransport Request。
+    multitransport: Vec<ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu>,
+}
+
 async fn drain_outputs<W: FramedWrite>(
     framed: &mut W,
     outputs: Vec<ActiveStageOutput>,
@@ -1145,7 +1245,7 @@ async fn drain_outputs<W: FramedWrite>(
     desktop_h: u16,
     event_tx: &async_channel::Sender<RdpEvent>,
     last_pointer_key: &mut Option<u64>,
-    reactivation: &mut bool,
+    signals: &mut OutputSignals,
 ) -> Result<bool, String> {
     for out in outputs {
         match out {
@@ -1199,13 +1299,28 @@ async fn drain_outputs<W: FramedWrite>(
             }
             // 动态分辨率兜底：服务端以重激活换分辨率时回传序列，交主循环 run_reactivation 走完。
             ActiveStageOutput::DeactivateAll => {
-                *reactivation = true;
+                signals.reactivate = true;
+            }
+            ActiveStageOutput::MultitransportRequest(request) => {
+                signals.multitransport.push(request);
+            }
+            // 服务端实测的网络特征（连接类型自动探测的结果），诊断用。
+            ActiveStageOutput::AutoDetect(request) => {
+                if net_trace() {
+                    eprintln!("[rdp-net] {request:?}");
+                }
             }
             // PointerPosition（本地光标本就跟手）等忽略。
             _ => {}
         }
     }
     Ok(false)
+}
+
+/// 网络探测结果追踪开关（NEXSHELL_RDP_NET_TRACE=1）。
+fn net_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_NET_TRACE").is_ok_and(|v| v == "1"))
 }
 
 /// 指针链路追踪开关（NEXSHELL_RDP_PTR_TRACE=1）。

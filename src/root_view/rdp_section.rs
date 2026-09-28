@@ -30,7 +30,8 @@ use crate::{
 use nexshell::generation::{accepts_generation, Generation};
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
 use nexshell::rdp_session::{
-    default_enable_egfx, spawn_rdp_session, RdpEvent, RdpResizeRequest, RdpSessionConfig,
+    default_enable_egfx, default_enable_udp, spawn_rdp_session, RdpEvent, RdpResizeRequest,
+    RdpSessionConfig,
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
@@ -67,6 +68,8 @@ impl RootView {
             enable_drive: true,
             // HiDPI 下请求远端 DPI 缩放（对齐 Windows App）；标准画质=0 不请求。
             desktop_scale_factor: rdp_desktop_scale_factor(scale, hidpi),
+            // 可靠 UDP 旁路默认开启；NEXSHELL_RDP_DISABLE_UDP=1 退回纯 TCP。
+            enable_udp: default_enable_udp(),
         };
 
         let handle = spawn_rdp_session(rdp_config.clone());
@@ -577,7 +580,12 @@ impl RootView {
                 vec![
                     (
                         rust_i18n::t!("rdp_info_transport").to_string(),
-                        "TCP".to_string(),
+                        if rdp.stats.udp_active() {
+                            "TCP + UDP"
+                        } else {
+                            "TCP"
+                        }
+                        .to_string(),
                     ),
                     (rust_i18n::t!("rdp_info_rtt").to_string(), rtt),
                     (rust_i18n::t!("rdp_info_recv_rate").to_string(), recv),
