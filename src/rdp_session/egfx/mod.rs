@@ -1,5 +1,5 @@
 //! EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第②步）：合成层 + macOS VideoToolbox H.264 硬解。
-//! 挂 EGFX DVC 通道，默认广告 V8.1+V8（AVC444 开发期开关见 advertised_capabilities）；
+//! 挂 EGFX DVC 通道，macOS 默认广告 V10.7+V8.1+V8（开关见 avc444_enabled）；
 //! AVC420/Uncompressed/ClearCodec 均由库解好经 on_bitmap_updated（RGBA）落 surface（ClearCodec
 //! 连接级单例解码器，上游 #1175）；Progressive(WireToSurface2) 由本层调库解码器写 tile；
 //! AVC444 库不解，经 on_unhandled_pdu 由 avc444_stream 解码合成（docs/adr/0015）。
@@ -268,6 +268,13 @@ impl EgfxHandler {
     }
 }
 
+/// macOS 默认声明 V10.7（ADR 0015），设 NEXSHELL_RDP_EGFX_AVC444=0 回到只报 V8.1 + V8。
+/// 其他平台没有 H.264 解码器，混合模式的 AVC420 区域也解不了，不声明。
+fn avc444_enabled() -> bool {
+    cfg!(target_os = "macos")
+        && std::env::var_os("NEXSHELL_RDP_EGFX_AVC444").is_none_or(|v| v != "0")
+}
+
 fn advertised_capabilities(small_cache: bool, avc444: bool) -> Vec<CapabilitySet> {
     let mut caps = Vec::with_capacity(3);
     if avc444 {
@@ -298,14 +305,13 @@ fn advertised_capabilities(small_cache: bool, avc444: bool) -> Vec<CapabilitySet
 }
 
 impl GraphicsPipelineHandler for EgfxHandler {
-    /// 默认只广告 V8.1(AVC420) + V8：V10.x 未置 AVC_DISABLED 即表示支持 AVC444。
-    /// AVC444 真机验证前（ADR 0015）设 NEXSHELL_RDP_EGFX_AVC444=1 才把 V10.7 排在最前。
+    /// V10.x 未置 AVC_DISABLED 即表示支持 AVC444，只在能解时把 V10.7 排在最前。
     /// 默认声明 SMALL_CACHE，避免 Windows 服务端走长生命周期 surface-cache 复用路径。
     /// 需要回到旧 large-cache 行为做 A/B 时，设置 NEXSHELL_RDP_EGFX_LARGE_CACHE=1。
     fn capabilities(&self) -> Vec<CapabilitySet> {
         advertised_capabilities(
             std::env::var_os("NEXSHELL_RDP_EGFX_LARGE_CACHE").is_none(),
-            std::env::var_os("NEXSHELL_RDP_EGFX_AVC444").is_some_and(|v| v == "1"),
+            avc444_enabled(),
         )
     }
 
@@ -705,7 +711,7 @@ mod tests {
 
     /// 开关关闭时不得广告 V10.x（库据此判定 AVC444 可用）。
     #[test]
-    fn advertised_capabilities_exclude_avc444_by_default() {
+    fn avc444_off_excludes_v10() {
         let caps = advertised_capabilities(true, false);
         assert!(!caps.is_empty());
         for cap in &caps {
