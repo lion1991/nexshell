@@ -1,6 +1,6 @@
 # RDP 剪贴板对齐 Windows App 实施计划
 
-Status: in progress — 第 0、1、5 步完成
+Status: in progress — 第 0、1、3、5 步完成
 
 Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 
@@ -53,12 +53,24 @@ Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 - 在开着 Alfred 的机器上，远端每复制一次，NexShell 界面都不卡：看 `[rdp-ui]` 帧率诊断。
 - 远端截图工具复制，Mac 预览选"从剪贴板新建"；Word 富文本粘进 Pages 或 TextEdit。
 
-## 第 3 步：Mac 文件 → 远端
+## 第 3 步：Mac 文件 → 远端（完成）
 
-- 声明文件剪贴板能力，Finder 复制多个文件或目录时调用 `initiate_file_copy`，目录递归展开。
-- 事件循环周期调用 `drive_timeouts`，回收过期的锁。
-- FileContents：SIZE 请求按 `lstat` 应答；RANGE 请求在工作线程 `pread`，快照按锁（`clipDataId`）保存。
-- 单个文件的大小上限不在客户端设；只挡符号链接循环和不可读的文件。
+- 能力：本端声明 `STREAM_FILECLIP_ENABLED | FILECLIP_NO_FILE_PATHS | CAN_LOCK_CLIPDATA | HUGE_FILE_SUPPORT_ENABLED`。服务端不同意文件流时，Finder 复制的文件仍按文本（文件名）广播。
+- 展开（`files.rs`，在轮询线程）：
+  - Finder 给的 file URL 多为 `file:///.file/id=…`，经 `filePathURL` 转成路径；
+  - 目录在前、内容随后，相对路径用 `\`；
+  - 跳过 `.DS_Store`、读不到元数据的条目、特殊文件，以及拼上路径后超过 259 个 UTF-16 单元的条目；
+  - 文件名里 Windows 不允许的字符（含 `\`、`/`、`:`）换成 `_`；
+  - 目录按规范化路径去重，挡住符号链接成环；
+  - 超过协议上限 100000 条时整份放弃，退回按文本广播。
+- 清单对应：fork 回调只给序号和锁 ID。backend 记下最近一次广播的路径清单，收到 Lock 时另存快照，Unlock 时丢掉，带锁 ID 的请求按快照取文件。事件循环先把清单交给 backend，再调 `initiate_file_copy`。本端预先过滤，fork 的校验不会再删条目，序号保持一致。
+- 应答：SIZE 请求现取文件大小；RANGE 请求在应答线程读取，单次最多 32 MB，连续读同一文件时复用句柄。
+- 锁回收：事件循环每 5 秒调一次 `drive_timeouts`。
+- 去重：Finder 复制一次会分几批写剪贴板，变化标记跟着变好几次。记下远端剪贴板里是哪批顶层路径，同一批不重发；远端复制、拒收，或本端改发别的格式时清掉记录。
+- 时序细节：
+  - 连接时剪贴板里已有文件：初始化阶段发不了文件清单，先按文本广播，通道就绪后由轮询补发；
+  - 展开大目录时不持锁，展开完发现远端已写入新内容，就丢掉这份清单。
+- cliprdr 协议层报错改为只记日志，不再断开会话；网络写失败照旧断开。
 
 验证：
 - 单个文件、多个文件、嵌套目录、中文文件名，逐个核对 hash；

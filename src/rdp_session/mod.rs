@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use ironrdp_async::FramedWrite;
 use ironrdp_cliprdr::backend::ClipboardMessage;
-use ironrdp_cliprdr::CliprdrClient;
+use ironrdp_cliprdr::{Client as CliprdrRole, CliprdrClient, CliprdrSvcMessages};
 use ironrdp_connector::connection_activation::{
     ConnectionActivationSequence, ConnectionActivationState,
 };
@@ -817,8 +817,7 @@ async fn connect_and_run(
     let _ = event_tx.try_send(RdpEvent::Connected);
     // 本地剪贴板轮询挪出帧循环：独立 OS 线程按 POLL_INTERVAL 查变化，有变化经 channel 回递。
     // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程下个 tick 自退。
-    let (clip_poll_tx, clip_poll_rx) =
-        async_channel::unbounded::<Vec<ironrdp_cliprdr::pdu::ClipboardFormat>>();
+    let (clip_poll_tx, clip_poll_rx) = async_channel::unbounded::<clipboard::LocalOffer>();
     {
         let clip_shared = clip_shared.clone();
         thread::spawn(move || loop {
@@ -826,13 +825,16 @@ async fn connect_and_run(
             if clip_poll_tx.is_closed() {
                 break;
             }
-            if let Some(formats) = clipboard::poll_local_change(&clip_shared) {
-                if clip_poll_tx.send_blocking(formats).is_err() {
+            if let Some(offer) = clipboard::poll_local_change(&clip_shared) {
+                if clip_poll_tx.send_blocking(offer).is_err() {
                     break;
                 }
             }
         });
     }
+    // 回收远端已换内容、又久未使用的剪贴板锁（fork 按 60 秒无活动判定）。
+    let mut clip_timeouts = tokio::time::interval(Duration::from_secs(5));
+    clip_timeouts.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // 阶段四：收图形更新解码合成 + 并发消费键鼠输入，编码成 FastPath 发回。
     // dw/dh 为可变权威桌面尺寸（Deactivation-Reactivation 后更新）。
@@ -866,7 +868,7 @@ async fn connect_and_run(
         if acc.is_some() && frame_deadline.is_none() {
             frame_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(50));
         }
-        // select：关闭 / cliprdr 回递 / 剪贴板轮询 / 输入 / 截止兜底 / 帧。前几路自成闭环 continue。
+        // select：关闭 / cliprdr 回递 / 剪贴板轮询与锁回收 / 输入 / 截止兜底 / 帧。前几路自成闭环 continue。
         let (action, payload) = tokio::select! {
             _ = close_rx.recv() => return Ok(()),
             msg = clip_rx.recv() => {
@@ -874,19 +876,18 @@ async fn connect_and_run(
                 send_clipboard_pdu(&mut active_stage, &mut upgraded_framed, msg).await?;
                 continue;
             }
-            formats = clip_poll_rx.recv() => {
-                let Ok(formats) = formats else { continue; };
+            offer = clip_poll_rx.recv() => {
+                let Ok(offer) = offer else { continue; };
                 if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
-                    let msgs = cliprdr
-                        .initiate_copy(&formats)
-                        .map_err(|e| format!("cliprdr initiate_copy failed: {e}"))?;
-                    let data = active_stage
-                        .process_svc_processor_messages(msgs)
-                        .map_err(|e| format!("cliprdr encode failed: {e}"))?;
-                    upgraded_framed
-                        .write_all(&data)
-                        .await
-                        .map_err(|e| format!("write cliprdr failed: {e}"))?;
+                    let messages = clipboard::initiate_offer(cliprdr, offer);
+                    write_cliprdr(&mut active_stage, &mut upgraded_framed, messages).await?;
+                }
+                continue;
+            }
+            _ = clip_timeouts.tick() => {
+                if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
+                    let messages = cliprdr.drive_timeouts();
+                    write_cliprdr(&mut active_stage, &mut upgraded_framed, messages).await?;
                 }
                 continue;
             }
@@ -1161,7 +1162,6 @@ fn reset_after_resize(
 }
 
 /// 把 backend 回递的 cliprdr 消息编码成 SVC 帧写回服务端。
-/// initiate_copy/paste 需 &mut、submit_format_data 需 &self，get_svc_processor_mut 皆可。
 async fn send_clipboard_pdu<W: FramedWrite>(
     active_stage: &mut ActiveStage,
     framed: &mut W,
@@ -1174,13 +1174,34 @@ async fn send_clipboard_pdu<W: FramedWrite>(
         ClipboardMessage::SendInitiateCopy(formats) => cliprdr.initiate_copy(&formats),
         ClipboardMessage::SendInitiatePaste(format_id) => cliprdr.initiate_paste(format_id),
         ClipboardMessage::SendFormatData(response) => cliprdr.submit_format_data(response),
-        // 文件/错误等 v1 不产出。
+        ClipboardMessage::SendFileContentsResponse(response) => {
+            cliprdr.submit_file_contents(response)
+        }
+        // 远端文件下载（第 4 步）之前不产出其余消息。
         _ => return Ok(()),
-    }
-    .map_err(|e| format!("cliprdr encode failed: {e}"))?;
+    };
+    write_cliprdr(active_stage, framed, messages).await
+}
+
+/// 编码并写出 cliprdr 消息。通道状态不对等协议层错误只记日志，剪贴板出错不断开会话。
+async fn write_cliprdr<W: FramedWrite>(
+    active_stage: &mut ActiveStage,
+    framed: &mut W,
+    messages: ironrdp_pdu::PduResult<CliprdrSvcMessages<CliprdrRole>>,
+) -> Result<(), String> {
+    let messages = match messages {
+        Ok(messages) => messages,
+        Err(e) => {
+            eprintln!("[rdp] cliprdr: {e}");
+            return Ok(());
+        }
+    };
     let data = active_stage
         .process_svc_processor_messages(messages)
         .map_err(|e| format!("cliprdr svc encode failed: {e}"))?;
+    if data.is_empty() {
+        return Ok(());
+    }
     framed
         .write_all(&data)
         .await

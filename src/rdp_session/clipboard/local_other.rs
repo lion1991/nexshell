@@ -2,6 +2,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use arboard::Clipboard;
@@ -32,6 +33,10 @@ pub(super) fn write_text(text: &str) -> bool {
     Clipboard::new()
         .and_then(|mut c| c.set_text(text.to_owned()))
         .is_ok()
+}
+
+pub(super) fn file_paths() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 pub(super) fn read_rtf() -> Option<Vec<u8>> {

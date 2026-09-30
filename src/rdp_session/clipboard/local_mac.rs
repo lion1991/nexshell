@@ -3,6 +3,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use objc2::rc::{autoreleasepool, Retained};
@@ -17,7 +18,7 @@ use objc2_core_graphics::{
     kCGColorSpaceSRGB, CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
     CGImageByteOrderInfo,
 };
-use objc2_foundation::{NSData, NSDictionary, NSString};
+use objc2_foundation::{NSData, NSDictionary, NSString, NSURL};
 
 use super::{Available, Bitmap};
 
@@ -64,11 +65,13 @@ pub(super) fn available() -> Available {
             return Available::default();
         };
         let has = |t: &NSPasteboardType| types.containsObject(t);
+        let files = has(file_url_type());
         Available {
             text: has(string_type()),
             rtf: has(rtf_type()),
             // Finder 复制文件时附带图标 TIFF，不当图片广播。
-            image: !has(file_url_type()) && (has(png_type()) || has(tiff_type())),
+            image: !files && (has(png_type()) || has(tiff_type())),
+            files,
         }
     })
 }
@@ -86,6 +89,23 @@ pub(super) fn write_text(text: &str) -> bool {
         let pb = pasteboard();
         pb.clearContents();
         pb.setString_forType(&NSString::from_str(text), string_type())
+    })
+}
+
+/// Finder 复制的每个条目各带一个 file URL，多为 `file:///.file/id=…` 引用形式，需转成路径。
+pub(super) fn file_paths() -> Vec<PathBuf> {
+    autoreleasepool(|_| {
+        let Some(items) = pasteboard().pasteboardItems() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter_map(|item| {
+                let string = item.stringForType(file_url_type())?;
+                let url = NSURL::URLWithString(&string)?;
+                Some(PathBuf::from(url.filePathURL()?.path()?.to_string()))
+            })
+            .collect()
     })
 }
 

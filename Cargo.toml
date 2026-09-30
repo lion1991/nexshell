@@ -129,9 +129,9 @@ objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFCGTypes", "C
 objc2-core-media = { version = "0.3", features = ["std", "CMBase", "CMTime", "CMFormatDescription", "CMBlockBuffer", "CMSampleBuffer"] }
 objc2-core-video = { version = "0.3", features = ["std", "CVBase", "CVReturn", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-video-toolbox = { version = "0.3", features = ["std", "objc2", "objc2-core-media", "objc2-core-video", "VTDecompressionSession", "VTDecompressionProperties", "VTSession", "VTErrors"] }
-# RDP 剪贴板（docs/adr/0016）：直接读写 NSPasteboard 多格式，图片经 NSBitmapImageRep + CGBitmapContext 转换。
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "NSPasteboard", "NSImageRep", "NSBitmapImageRep"] }
+# RDP 剪贴板（docs/adr/0016）：直接读写 NSPasteboard 多格式和 file URL，图片经 NSBitmapImageRep + CGBitmapContext 转换。
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "NSPasteboard", "NSPasteboardItem", "NSImageRep", "NSBitmapImageRep"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
