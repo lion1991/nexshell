@@ -2,8 +2,6 @@
 // 本文件只含 impl RootView，无自由函数（几何/纯逻辑在 rdp_view，渲染 Element 在 rdp_view）。
 // 面板 section 间禁互 use；跨 section 复用走 self.xxx() 方法调用。
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -115,6 +113,7 @@ impl RootView {
                 conn_info_open: false,
                 conn_info_offset: Vector2F::zero(),
                 conn_info_drag: Default::default(),
+                conn_info_drag_origin: Default::default(),
                 conn_info_last_sample: None,
                 conn_info_mbps: 0.0,
                 conn_info_fps: 0.0,
@@ -423,7 +422,7 @@ impl RootView {
         }
         // 按住面板任意处拖动；松手时把位移记进 conn_info_offset。
         let index = self.active_tab_index;
-        let drag_origin = Rc::new(Cell::new(None::<Vector2F>));
+        let drag_origin = rdp.conn_info_drag_origin.clone();
         let drop_origin = drag_origin.clone();
         let card = Draggable::new(
             rdp.conn_info_drag.clone(),

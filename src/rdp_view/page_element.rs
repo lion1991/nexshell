@@ -100,6 +100,13 @@ impl RdpPageElement {
         ctx.set_cursor(cursor, z_index);
     }
 
+    /// 该位置是否被更高层（如连接信息面板）盖住。盖住时按下 / 拖拽 / 滚轮不发往远端，
+    /// 抬起照常发：在画面上按下、到面板上才松手时，远端不能留着按下态。
+    fn covered(&self, position: Vector2F, ctx: &EventContext) -> bool {
+        self.origin
+            .is_some_and(|o| ctx.is_covered(Point::from_vec2f(position, o.z_index())))
+    }
+
     /// 鼠标绝对坐标 → 远端桌面像素；画面外（黑边）或无 viewport 返回 None。
     fn device_coords(&self, position: Vector2F) -> Option<(u16, u16)> {
         let vp = (*self.viewport_out.lock().ok()?)?;
@@ -432,6 +439,9 @@ impl Element for RdpPageElement {
                 if warpui_core::event::is_synthetic_drag() {
                     return true;
                 }
+                if self.covered(*position, ctx) {
+                    return false;
+                }
                 self.reconcile_modifiers(mods_flags(*modifiers));
                 self.send_mouse_move(*position)
             }
@@ -440,6 +450,9 @@ impl Element for RdpPageElement {
                 modifiers,
                 ..
             } => {
+                if self.covered(*position, ctx) {
+                    return false;
+                }
                 self.reconcile_modifiers(mods_flags(*modifiers));
                 let Some((x, y)) = self.device_coords(*position) else {
                     return false;
@@ -474,6 +487,9 @@ impl Element for RdpPageElement {
                 shift,
                 ..
             } => {
+                if self.covered(*position, ctx) {
+                    return false;
+                }
                 self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
                 self.send_synthetic_click(*position, RdpButton::Right)
             }
@@ -483,6 +499,9 @@ impl Element for RdpPageElement {
                 shift,
                 ..
             } => {
+                if self.covered(*position, ctx) {
+                    return false;
+                }
                 self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
                 self.send_synthetic_click(*position, RdpButton::Middle)
             }
@@ -492,6 +511,9 @@ impl Element for RdpPageElement {
                 precise,
                 modifiers,
             } => {
+                if self.covered(*position, ctx) {
+                    return false;
+                }
                 self.reconcile_modifiers(mods_flags(*modifiers));
                 self.send_wheel(*position, *delta, *precise)
             }
