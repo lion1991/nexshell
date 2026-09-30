@@ -8,10 +8,13 @@ use std::path::PathBuf;
 use std::ptr;
 use std::ptr::NonNull;
 use std::slice;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use ironrdp_egfx::decode::{DecodedFrame, DecoderError, DecoderResult, H264Decoder};
 
-use super::avc444::{yuv_to_rgb, Nv12Frame};
+use super::avc444::Nv12Frame;
+use super::vimage;
 use objc2_core_foundation::{kCFAllocatorNull, kCFBooleanTrue, CFRetained, CFType};
 use objc2_core_media::{
     CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMTime,
@@ -29,6 +32,15 @@ use objc2_video_toolbox::{
     kVTDecompressionPropertyKey_RealTime, VTDecodeFrameFlags, VTDecodeInfoFlags,
     VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTSessionSetProperty,
 };
+
+/// AVC420 计时累加（帧数、VT 解码 µs、转 RGBA µs）。解码器归库所有，diag 按窗口取走清零。
+static AVC420_TIMING: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+pub fn take_avc420_timing() -> [u64; 3] {
+    AVC420_TIMING
+        .each_ref()
+        .map(|a| a.swap(0, Ordering::Relaxed))
+}
 
 /// 已就绪的解码会话：格式描述 + 解压会话，随 SPS/PPS 一起持有以便比对。
 struct VtSession {
@@ -254,11 +266,15 @@ impl VtH264Decoder {
 
 impl H264Decoder for VtH264Decoder {
     fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
+        let started = Instant::now();
         let pixel_buffer = self.decode_pixel_buffer(data)?;
+        let decoded = Instant::now();
         // SAFETY: pixel_buffer 存活；读平面前锁定基址、读后解锁。
-        let frame = unsafe { read_pixel_buffer(&pixel_buffer) }.map_err(|status| {
-            DecoderError::msg(format!("VT pixel buffer read failed: {status}"))
-        })?;
+        let frame = unsafe { read_pixel_buffer(&pixel_buffer) }.map_err(DecoderError::msg)?;
+        let [n, dec_us, cvt_us] = &AVC420_TIMING;
+        n.fetch_add(1, Ordering::Relaxed);
+        dec_us.fetch_add((decoded - started).as_micros() as u64, Ordering::Relaxed);
+        cvt_us.fetch_add(decoded.elapsed().as_micros() as u64, Ordering::Relaxed);
         self.log_first_frame(frame.width() as usize, frame.height() as usize);
         Ok(frame)
     }
@@ -520,23 +536,19 @@ unsafe fn with_locked_nv12<R>(
     result
 }
 
-/// 锁定像素缓冲、按平面 stride 逐行读 NV12、转 RGBA。
-unsafe fn read_pixel_buffer(pb: &CVPixelBuffer) -> Result<DecodedFrame, i32> {
+/// 锁定像素缓冲，NV12 → RGBA（vImage，BT.709 full/video range）。
+unsafe fn read_pixel_buffer(pb: &CVPixelBuffer) -> Result<DecodedFrame, String> {
     // SAFETY: 由调用方保证 pb 存活。
-    unsafe {
+    let result = unsafe {
         with_locked_nv12(pb, |p| {
-            let rgba = nv12_to_rgba(
-                p.y,
-                p.y_stride,
-                p.uv,
-                p.uv_stride,
-                p.width,
-                p.height,
-                p.full_range,
-            );
-            DecodedFrame::new(rgba, p.width as u32, p.height as u32)
+            let frame = Nv12Frame::new(p.width, p.height, p.y, p.y_stride, p.uv, p.uv_stride)
+                .ok_or_else(|| "VT NV12 planes shorter than frame size".to_owned())?;
+            let mut rgba = vec![0u8; p.width * p.height * 4];
+            vimage::nv12_to_rgba(&frame, p.full_range, &mut rgba)?;
+            Ok(DecodedFrame::new(rgba, p.width as u32, p.height as u32))
         })
-    }
+    };
+    result.map_err(|status| format!("VT pixel buffer read failed: {status}"))?
 }
 
 /// data 是否以 Annex B start code（00 00 01 或 00 00 00 01）开头。
@@ -692,58 +704,6 @@ fn write_ppm(path: &std::path::Path, rgba: &[u8], w: u32, h: u32) -> std::io::Re
     std::fs::write(path, &buf)
 }
 
-/// NV12（Y 平面 + 交错 CbCr 平面）→ RGBA8888。逐行按 stride 取（容忍 padding），
-/// 按 BT.709 转色（full/video range，ADR 0015 决策 4）。纯函数，供单测覆盖 stride padding 情形。
-fn nv12_to_rgba(
-    y: &[u8],
-    y_stride: usize,
-    uv: &[u8],
-    uv_stride: usize,
-    width: usize,
-    height: usize,
-    full_range: bool,
-) -> Vec<u8> {
-    let mut out = vec![0u8; width * height * 4];
-    for row in 0..height {
-        let y_row = row * y_stride;
-        let uv_row = (row / 2) * uv_stride;
-        for col in 0..width {
-            let yb = y.get(y_row + col).copied().unwrap_or(0);
-            let uv_col = (col & !1) + uv_row; // 每 2 像素共享一组 CbCr
-            let cb = uv.get(uv_col).copied().unwrap_or(128);
-            let cr = uv.get(uv_col + 1).copied().unwrap_or(128);
-            let (r, g, b) = ycbcr_to_rgb(yb, cb, cr, full_range);
-            let o = (row * width + col) * 4;
-            out[o] = r;
-            out[o + 1] = g;
-            out[o + 2] = b;
-            out[o + 3] = 0xFF;
-        }
-    }
-    out
-}
-
-/// BT.709 YCbCr → RGB。全范围与 AVC444 合成同一套整数系数（FreeRDP），video range 按标准系数展开。
-#[inline]
-fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8, full_range: bool) -> (u8, u8, u8) {
-    if full_range {
-        let [r, g, b] = yuv_to_rgb(y, cb, cr);
-        return (r, g, b);
-    }
-    let (cbf, crf) = (cb as f32 - 128.0, cr as f32 - 128.0);
-    let yl = 1.164 * (y as f32 - 16.0);
-    (
-        clamp_u8(yl + 1.793 * crf),
-        clamp_u8(yl - 0.213 * cbf - 0.533 * crf),
-        clamp_u8(yl + 2.112 * cbf),
-    )
-}
-
-#[inline]
-fn clamp_u8(v: f32) -> u8 {
-    v.round().clamp(0.0, 255.0) as u8
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -835,65 +795,5 @@ mod tests {
             0, 0, 0, 1, 0x68, // PPS
         ];
         assert!(filter_nals_for_decode(&data).is_empty());
-    }
-
-    #[test]
-    fn nv12_gray_full_range_is_neutral() {
-        // Y=128, Cb=Cr=128 → 灰(128,128,128)（full range）。
-        let w = 2;
-        let h = 2;
-        let y = vec![128u8; w * h];
-        let uv = vec![128u8; w]; // 1 行 CbCr（h/2=1），2 字节/组
-        let rgba = nv12_to_rgba(&y, w, &uv, w, w, h, true);
-        for px in rgba.chunks_exact(4) {
-            assert_eq!(px[0], 128);
-            assert_eq!(px[1], 128);
-            assert_eq!(px[2], 128);
-            assert_eq!(px[3], 255);
-        }
-    }
-
-    #[test]
-    fn nv12_honors_stride_padding() {
-        // Y/UV 平面每行尾部有 padding；正确实现应跳过 padding 只读前 width 列。
-        let w = 2;
-        let h = 2;
-        let y_stride = 5; // 2 有效 + 3 padding
-        let uv_stride = 6;
-        let mut y = vec![0u8; y_stride * h];
-        // 行 0/1 前两列都填 128（有效），padding 填 0xFF（应被忽略）。
-        for row in 0..h {
-            y[row * y_stride] = 128;
-            y[row * y_stride + 1] = 128;
-            y[row * y_stride + 2] = 0xFF;
-            y[row * y_stride + 3] = 0xFF;
-            y[row * y_stride + 4] = 0xFF;
-        }
-        let mut uv = vec![0xFFu8; uv_stride]; // 1 行
-        uv[0] = 128;
-        uv[1] = 128;
-        uv[2] = 128;
-        uv[3] = 128;
-        let rgba = nv12_to_rgba(&y, y_stride, &uv, uv_stride, w, h, true);
-        // 全部应为中性灰，证明 padding 的 0xFF 未被误读。
-        for px in rgba.chunks_exact(4) {
-            assert_eq!((px[0], px[1], px[2]), (128, 128, 128));
-        }
-    }
-
-    #[test]
-    fn nv12_red_video_range() {
-        // video-range 红：Y≈81, Cb≈90, Cr≈240。转换应偏红。
-        let w = 2;
-        let h = 2;
-        let y = vec![81u8; w * h];
-        let mut uv = vec![0u8; w];
-        uv[0] = 90;
-        uv[1] = 240;
-        let rgba = nv12_to_rgba(&y, w, &uv, w, w, h, false);
-        let px = &rgba[..4];
-        assert!(px[0] > 200, "R should be high, got {}", px[0]);
-        assert!(px[1] < 80, "G should be low, got {}", px[1]);
-        assert!(px[2] < 80, "B should be low, got {}", px[2]);
     }
 }

@@ -16,6 +16,9 @@ struct Counts {
     // wire1 AVC444（本层解码成功）及累计耗时
     avc444_ok: u64,
     avc444_us: u64,
+    // EndFrame 合成进 framebuffer（含等锁）
+    compose: u64,
+    compose_us: u64,
     // wire1（库未解码 → on_unhandled_pdu，=丢弃）
     avc444: u64,
     other_wire1: u64,
@@ -69,6 +72,14 @@ impl EgfxDiag {
             Codec1Type::Uncompressed => self.cur.uncompressed += 1,
             _ => self.cur.other_wire1 += 1,
         }
+    }
+
+    pub fn on_compose(&mut self, elapsed: Duration) {
+        if !self.enabled {
+            return;
+        }
+        self.cur.compose += 1;
+        self.cur.compose_us += elapsed.as_micros() as u64;
     }
 
     /// AVC444 解码合成成功（含解码 + 合成 + 转 RGBA 耗时）。
@@ -176,10 +187,29 @@ impl EgfxDiag {
         } else {
             String::new()
         };
+        #[cfg(target_os = "macos")]
+        let avc420_timing = match super::decoder_vt::take_avc420_timing() {
+            [0, ..] => String::new(),
+            [n, dec, cvt] => format!(
+                "(dec {:.1}+cvt {:.1}ms)",
+                dec as f64 / n as f64 / 1000.0,
+                cvt as f64 / n as f64 / 1000.0
+            ),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let avc420_timing = "";
+        let compose = if c.compose > 0 {
+            format!(
+                " compose={:.1}ms",
+                c.compose_us as f64 / c.compose as f64 / 1000.0
+            )
+        } else {
+            String::new()
+        };
         eprintln!(
-            "[egfx-diag] {dt:.1}s wire1{{avc420={} clear={} uncomp={}{avc444}}} \
+            "[egfx-diag] {dt:.1}s wire1{{avc420={}{avc420_timing} clear={} uncomp={}{avc444}}} \
 prog={}(empty={}) fill={} s2s={} s2c={} c2s={} evict={} \
-surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}) err={} dec={}{drop}",
+surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}){compose} err={} dec={}{drop}",
             c.avc420,
             c.clearcodec,
             c.uncompressed,

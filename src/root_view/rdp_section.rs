@@ -35,6 +35,46 @@ use nexshell::rdp_session::{
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
+thread_local! {
+    /// NEXSHELL_RDP_EGFX_DIAG：UI 线程每 ~3s 打一行整帧拷贝上传的次数与耗时（不含 GPU 纹理上传）。
+    static UPLOAD_DIAG: std::cell::RefCell<Option<UploadDiag>> = std::cell::RefCell::new(
+        std::env::var_os("NEXSHELL_RDP_EGFX_DIAG").map(|_| UploadDiag::new()),
+    );
+}
+
+struct UploadDiag {
+    since: Instant,
+    frames: u32,
+    busy: Duration,
+}
+
+impl UploadDiag {
+    fn new() -> Self {
+        Self {
+            since: Instant::now(),
+            frames: 0,
+            busy: Duration::ZERO,
+        }
+    }
+
+    fn record(&mut self, elapsed: Duration, bytes: usize) {
+        self.frames += 1;
+        self.busy += elapsed;
+        let window = self.since.elapsed();
+        if window >= Duration::from_secs(3) {
+            eprintln!(
+                "[rdp-ui] {:.1}s uploads={} ({:.1} fps) copy={:.1}ms/frame {:.1}MB",
+                window.as_secs_f64(),
+                self.frames,
+                f64::from(self.frames) / window.as_secs_f64(),
+                self.busy.as_secs_f64() * 1000.0 / f64::from(self.frames),
+                bytes as f64 / 1_048_576.0
+            );
+            *self = Self::new();
+        }
+    }
+}
+
 /// 连接信息面板默认贴页面右上角的内缩距离。
 const CONN_INFO_MARGIN: f32 = 16.0;
 
@@ -258,6 +298,7 @@ impl RootView {
                 ctx.notify();
             }
             RdpEvent::FrameUpdated { .. } => {
+                let started = Instant::now();
                 // 取最新帧：仅当 generation 前进时打包带自定义头的 RGBA。
                 let upload = self
                     .terminal_tabs
@@ -292,6 +333,11 @@ impl RootView {
                 // 稳定 key 覆盖同一条目：单会话仅一条 raw asset，逐帧替换，不堆积。
                 AssetCache::handle(ctx).update(ctx, |cache, ctx| {
                     cache.insert_raw_asset_bytes::<ImageType>(asset_id, &bytes, ctx);
+                });
+                UPLOAD_DIAG.with_borrow_mut(|d| {
+                    if let Some(d) = d {
+                        d.record(started.elapsed(), bytes.len());
+                    }
                 });
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
                     rdp.last_uploaded_generation = generation;

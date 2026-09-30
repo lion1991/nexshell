@@ -12,6 +12,7 @@ use ironrdp_egfx::pdu::{Avc444BitmapStream, Codec1Type, Encoding, WireToSurface1
 use super::avc444::{ChromaLayout, Yuv444Planes};
 use super::decoder_vt::VtH264Decoder;
 use super::surfaces::{Compositor, SurfaceRect};
+use super::vimage;
 
 pub struct Avc444Stream {
     decoder: VtH264Decoder,
@@ -85,7 +86,9 @@ impl Avc444Stream {
                 .map_err(|e| format!("AVC444 aux: {e}"))?;
             rects.extend_from_slice(&aux.rectangles);
         }
-        planes.write_rgba(&rects, &mut surface.pixels);
+        planes
+            .write_rgba(&rects, &mut surface.pixels, vimage::ayuv_to_rgba)
+            .map_err(|e| format!("AVC444 convert: {e}"))?;
 
         Ok(rects
             .iter()

@@ -17,6 +17,8 @@ mod avc444_stream;
 mod decoder_vt;
 mod diag;
 mod surfaces;
+#[cfg(target_os = "macos")]
+mod vimage;
 mod wire_dump;
 
 use std::sync::Arc;
@@ -256,6 +258,7 @@ impl EgfxHandler {
         } else {
             dirty
         };
+        let started = std::time::Instant::now();
         {
             let mut fb = self.framebuffer.lock();
             for (ox, oy, surf) in self.compositor.mapped_surfaces() {
@@ -263,6 +266,7 @@ impl EgfxHandler {
             }
             fb.bump_generation();
         }
+        self.diag.on_compose(started.elapsed());
         self.stats.inc_frame();
         let _ = self.event_tx.try_send(RdpEvent::FrameUpdated { dirty });
     }

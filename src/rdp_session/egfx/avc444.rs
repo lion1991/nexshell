@@ -1,6 +1,6 @@
 //! AVC444 合成（MS-RDPEGFX 3.3.8.3.2 / 3.3.8.3.3，docs/adr/0015）：主流 YUV420 与辅流
-//! Chroma420 合成 surface 级 YUV444，再反滤波、按 BT.709 全范围转 RGBA。
-//! 纯 CPU，只处理区域矩形内的像素；坐标一律按 surface 绝对坐标（解出的帧与 surface 对齐）。
+//! Chroma420 合成 surface 级 YUV444，再反滤波、交给调用方按 BT.709 全范围转 RGBA（macOS 用 vImage）。
+//! 只处理区域矩形内的像素；坐标一律按 surface 绝对坐标（解出的帧与 surface 对齐）。
 //! 对照实现：FreeRDP `prim_YUV.c` 的 LumaToYUV444 / ChromaV1ToYUV444 / ChromaV2ToYUV444 /
 //! YUV444ToRGB_DOUBLE_ROW。
 
@@ -8,12 +8,12 @@ use ironrdp_pdu::geometry::ExclusiveRectangle;
 
 /// 解码器输出的一帧 NV12：Y 平面 + 交错 UV 平面，保留行距。
 pub struct Nv12Frame<'a> {
-    width: usize,
-    height: usize,
-    y: &'a [u8],
-    y_stride: usize,
-    uv: &'a [u8],
-    uv_stride: usize,
+    pub(super) width: usize,
+    pub(super) height: usize,
+    pub(super) y: &'a [u8],
+    pub(super) y_stride: usize,
+    pub(super) uv: &'a [u8],
+    pub(super) uv_stride: usize,
 }
 
 impl<'a> Nv12Frame<'a> {
@@ -70,6 +70,8 @@ pub struct Yuv444Planes {
     y: Vec<u8>,
     u: Vec<u8>,
     v: Vec<u8>,
+    /// write_rgba 的 AYpCbCr8 交错暂存，按区域复用。
+    ayuv: Vec<u8>,
 }
 
 impl Yuv444Planes {
@@ -82,6 +84,7 @@ impl Yuv444Planes {
             y: vec![0; n],
             u: vec![128; n],
             v: vec![128; n],
+            ayuv: Vec::new(),
         }
     }
 
@@ -204,30 +207,55 @@ impl Yuv444Planes {
 
     /// 区域内 YUV444 → RGBA 写进 surface 像素（行距 = surface 宽 × 4）。
     /// (2x, 2y) 位置存的是 2×2 平均值，按 `4·均值 − 另外三个` 还原，差值 < 30 时保留均值。
-    pub fn write_rgba(&self, rects: &[ExclusiveRectangle], dst: &mut [u8]) {
-        if dst.len() < self.width * self.height * 4 {
-            return;
+    /// 每个区域先交错成 AYpCbCr8 块，再由 `convert(块, 宽, 高, 目标起点, 目标行距)` 转色。
+    pub fn write_rgba<E>(
+        &mut self,
+        rects: &[ExclusiveRectangle],
+        dst: &mut [u8],
+        mut convert: impl FnMut(&[u8], usize, usize, &mut [u8], usize) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let Self {
+            width,
+            height,
+            y,
+            u,
+            v,
+            ayuv,
+        } = self;
+        let (width, height) = (*width, *height);
+        if dst.len() < width * height * 4 {
+            return Ok(());
         }
         for rect in rects {
-            let right = usize::from(rect.right).min(self.width);
-            let bottom = usize::from(rect.bottom).min(self.height);
+            let right = usize::from(rect.right).min(width);
+            let bottom = usize::from(rect.bottom).min(height);
             let (left, top) = (usize::from(rect.left), usize::from(rect.top));
-            for row in top..bottom {
-                let base = row * self.width;
-                let filter_row = row % 2 == 0 && row + 1 < self.height;
-                for col in left..right {
-                    let i = base + col;
-                    let (mut u, mut v) = (self.u[i], self.v[i]);
-                    if filter_row && col % 2 == 0 && col + 1 < self.width {
-                        let below = i + self.width;
-                        u = unfilter(u, self.u[i + 1], self.u[below], self.u[below + 1]);
-                        v = unfilter(v, self.v[i + 1], self.v[below], self.v[below + 1]);
-                    }
-                    let [r, g, b] = yuv_to_rgb(self.y[i], u, v);
-                    dst[i * 4..i * 4 + 4].copy_from_slice(&[r, g, b, 255]);
+            if left >= right || top >= bottom {
+                continue;
+            }
+            let w = right - left;
+            ayuv.resize(w * (bottom - top) * 4, 0);
+            for (row, out) in (top..bottom).zip(ayuv.chunks_exact_mut(w * 4)) {
+                let src = row * width + left..row * width + right;
+                let planes = y[src.clone()].iter().zip(&u[src.clone()]).zip(&v[src]);
+                for (px, ((&y, &u), &v)) in out.chunks_exact_mut(4).zip(planes) {
+                    px.copy_from_slice(&[255, y, u, v]);
+                }
+                if row % 2 != 0 || row + 1 >= height {
+                    continue;
+                }
+                for col in (left.next_multiple_of(2)..right.min(width - 1)).step_by(2) {
+                    let i = row * width + col;
+                    let below = i + width;
+                    let o = (col - left) * 4;
+                    out[o + 2] = unfilter(u[i], u[i + 1], u[below], u[below + 1]);
+                    out[o + 3] = unfilter(v[i], v[i + 1], v[below], v[below + 1]);
                 }
             }
+            let start = (top * width + left) * 4;
+            convert(ayuv, w, bottom - top, &mut dst[start..], width * 4)?;
         }
+        Ok(())
     }
 }
 
@@ -241,7 +269,8 @@ fn unfilter(avg: u8, a: u8, b: u8, c: u8) -> u8 {
     }
 }
 
-/// YUV → RGB，BT.709 全范围，系数同 FreeRDP（403 / −48 / −120 / 475，除以 256）。
+/// YUV → RGB 标量参考实现，BT.709 全范围，系数同 FreeRDP（403 / −48 / −120 / 475，除以 256）。
+#[cfg(test)]
 pub fn yuv_to_rgb(y: u8, u: u8, v: u8) -> [u8; 3] {
     let c = 256 * i32::from(y);
     let d = i32::from(u) - 128;
@@ -375,6 +404,24 @@ mod tests {
         (main, aux)
     }
 
+    /// 标量参考转色，对应 vimage::ayuv_to_rgba。
+    fn scalar_convert(
+        src: &[u8],
+        w: usize,
+        h: usize,
+        dst: &mut [u8],
+        stride: usize,
+    ) -> Result<(), ()> {
+        for row in 0..h {
+            for col in 0..w {
+                let s = &src[(row * w + col) * 4..][..4];
+                let [r, g, b] = yuv_to_rgb(s[1], s[2], s[3]);
+                dst[row * stride + col * 4..][..4].copy_from_slice(&[r, g, b, s[0]]);
+            }
+        }
+        Ok(())
+    }
+
     fn full(w: usize, h: usize) -> ExclusiveRectangle {
         ExclusiveRectangle {
             left: 0,
@@ -428,7 +475,7 @@ mod tests {
             }
         }
         let mut rgba = vec![0; w * h * 4];
-        planes.write_rgba(&rect, &mut rgba);
+        planes.write_rgba(&rect, &mut rgba, scalar_convert).unwrap();
         assert!(rgba == expected_rgba(&src), "{layout:?} RGBA mismatch");
     }
 
@@ -514,7 +561,7 @@ mod tests {
 
     #[test]
     fn write_rgba_only_touches_rects() {
-        let planes = Yuv444Planes::new(8, 8);
+        let mut planes = Yuv444Planes::new(8, 8);
         let mut rgba = vec![9; 8 * 8 * 4];
         let rect = ExclusiveRectangle {
             left: 2,
@@ -522,7 +569,9 @@ mod tests {
             right: 4,
             bottom: 4,
         };
-        planes.write_rgba(&[rect], &mut rgba);
+        planes
+            .write_rgba(&[rect], &mut rgba, scalar_convert)
+            .unwrap();
         assert_eq!(&rgba[(2 * 8 + 2) * 4..(2 * 8 + 2) * 4 + 4], &[0, 0, 0, 255]);
         assert_eq!(&rgba[0..4], &[9, 9, 9, 9]);
         assert_eq!(&rgba[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 4], &[9, 9, 9, 9]);
