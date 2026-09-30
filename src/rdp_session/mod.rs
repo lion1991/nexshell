@@ -633,11 +633,11 @@ async fn connect_and_run(
     #[cfg(target_os = "macos")]
     stats.capture_fd(tcp.as_raw_fd());
 
-    // cliprdr：注册文本剪贴板静态通道。backend 经 clip_tx 回递要发的 PDU，
+    // cliprdr：注册剪贴板静态通道。backend 经 clip_tx 回递要发的 PDU，
     // 轮询/回调经 shared 桥接（见 clipboard 模块）。
     let clip_shared = clipboard::ClipboardShared::new();
     let (clip_tx, clip_rx) = async_channel::unbounded::<ClipboardMessage>();
-    let clip_backend = clipboard::TextCliprdrBackend::new(clip_tx, &clip_shared);
+    let clip_backend = clipboard::RdpCliprdrBackend::new(clip_tx, &clip_shared);
 
     let connector_config = build_connector_config(config);
     if audio_diag::enabled() {
@@ -815,14 +815,14 @@ async fn connect_and_run(
             .map_err(|e| format!("enable UDP tunnel failed: {e}"))?;
     }
     let _ = event_tx.try_send(RdpEvent::Connected);
-    // Mac 剪贴板轮询挪出帧循环：独立 OS 线程 1s tick 同步读 NSPasteboard，有变化经 channel 回递。
-    // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程 ~1s 内自退。
+    // 本地剪贴板轮询挪出帧循环：独立 OS 线程按 POLL_INTERVAL 查变化，有变化经 channel 回递。
+    // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程下个 tick 自退。
     let (clip_poll_tx, clip_poll_rx) =
         async_channel::unbounded::<Vec<ironrdp_cliprdr::pdu::ClipboardFormat>>();
     {
         let clip_shared = clip_shared.clone();
         thread::spawn(move || loop {
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(clipboard::POLL_INTERVAL);
             if clip_poll_tx.is_closed() {
                 break;
             }

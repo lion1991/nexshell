@@ -90,10 +90,6 @@ ironrdp-rdpdr-native = "0.7"
 ironrdp-rdpeudp = "0.1"
 ironrdp-rdpeudp-tokio = "0.1"
 ironrdp-rdpemt = "0.1"
-# Mac/跨平台剪贴板文本读写。default-features=false 去掉 image-data（不引 image crate）；
-# macOS 走 objc2-app-kit NSPasteboard，与 warp 的 objc 0.2/cocoa 栈相互独立、无冲突。
-# 只在单一 RDP 线程访问 NSPasteboard，无并发。
-arboard = { version = "3.6", default-features = false }
 # 只为在 RDP 连接前显式 install_default crypto provider（树内两 provider 共存，
 # 不指定 rustls builder 会 panic）。ring 已在树，零新增编译量。
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
@@ -129,10 +125,18 @@ core-text = "21.0.0"
 # EGFX H.264 硬解（docs/adr/0008 第②步）：VideoToolbox 纯系统框架，objc2 0.6 生态已在树
 # （app-kit/foundation 皆 0.3.x 系）。framework crate 高度 feature-gated，按用到的类型开。
 objc2 = "0.6"
-objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFCGTypes", "CFNumber"] }
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFCGTypes", "CFNumber", "CFString"] }
 objc2-core-media = { version = "0.3", features = ["std", "CMBase", "CMTime", "CMFormatDescription", "CMBlockBuffer", "CMSampleBuffer"] }
 objc2-core-video = { version = "0.3", features = ["std", "CVBase", "CVReturn", "CVBuffer", "CVImageBuffer", "CVPixelBuffer"] }
 objc2-video-toolbox = { version = "0.3", features = ["std", "objc2", "objc2-core-media", "objc2-core-video", "VTDecompressionSession", "VTDecompressionProperties", "VTSession", "VTErrors"] }
+# RDP 剪贴板（docs/adr/0016）：直接读写 NSPasteboard 多格式，图片经 NSBitmapImageRep + CGBitmapContext 转换。
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-graphics", "NSPasteboard", "NSImageRep", "NSBitmapImageRep"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# 非 macOS 的 RDP 剪贴板只同步文本。default-features=false 去掉 image-data（不引 image crate）。
+arboard = { version = "3.6", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # ShellExecuteW：文件面板「打开」走系统关联程序，替代会被元字符注入的 `cmd /C start`。
