@@ -496,6 +496,9 @@ struct RdpTabState {
     stats: Arc<nexshell::rdp_session::RdpStats>,
     /// 连接信息浮层开关。
     conn_info_open: bool,
+    /// 连接信息面板相对默认位置（页面右上角内缩 16）的拖动偏移。
+    conn_info_offset: pathfinder_geometry::vector::Vector2F,
+    conn_info_drag: warpui::elements::DraggableState,
     /// 上次采样 (bytes, frames, 时刻)，与下一 tick 差分算率。
     conn_info_last_sample: Option<(u64, u64, std::time::Instant)>,
     /// 最近算出的接收码率 Mbps / 发布帧率 fps（渲染直接用）。

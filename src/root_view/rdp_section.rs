@@ -2,6 +2,8 @@
 // 本文件只含 impl RootView，无自由函数（几何/纯逻辑在 rdp_view，渲染 Element 在 rdp_view）。
 // 面板 section 间禁互 use；跨 section 复用走 self.xxx() 方法调用。
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,9 +12,9 @@ use pathfinder_geometry::vector::{vec2f, Vector2F, Vector2I};
 use warpui::assets::asset_cache::AssetCache;
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
-    DispatchEventResult, Empty, EventHandler, Flex, MainAxisAlignment, MainAxisSize, ParentElement,
-    Radius, Stack, Text,
+    Align, Border, ChildAnchor, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    DispatchEventResult, Draggable, Empty, EventHandler, Flex, MainAxisAlignment, MainAxisSize,
+    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack, Text,
 };
 use warpui::image_cache::{CustomImageFormat, CustomImageHeader, ImageType};
 use warpui::r#async::Timer;
@@ -34,6 +36,9 @@ use nexshell::rdp_session::{
     RdpSessionConfig,
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
+
+/// 连接信息面板默认贴页面右上角的内缩距离。
+const CONN_INFO_MARGIN: f32 = 16.0;
 
 impl RootView {
     /// 主机库点 RDP 主机：算分辨率 → spawn 协议会话 → 开整页 tab → 起帧事件消费。
@@ -108,6 +113,8 @@ impl RootView {
                 fixed_resolution: fixed.is_some(),
                 stats,
                 conn_info_open: false,
+                conn_info_offset: Vector2F::zero(),
+                conn_info_drag: Default::default(),
                 conn_info_last_sample: None,
                 conn_info_mbps: 0.0,
                 conn_info_fps: 0.0,
@@ -414,19 +421,63 @@ impl RootView {
         if !rdp.conn_info_open {
             return body;
         }
+        // 按住面板任意处拖动；松手时把位移记进 conn_info_offset。
+        let index = self.active_tab_index;
+        let drag_origin = Rc::new(Cell::new(None::<Vector2F>));
+        let drop_origin = drag_origin.clone();
+        let card = Draggable::new(
+            rdp.conn_info_drag.clone(),
+            self.render_rdp_conn_info_card(rdp, &colors),
+        )
+        .on_drag_start(move |_, _, rect| drag_origin.set(Some(rect.origin())))
+        .on_drop(move |ctx, _, rect, _| {
+            if let Some(origin) = drop_origin.take() {
+                ctx.dispatch_typed_action(TerminalGridAction::MoveRdpConnectionInfo {
+                    index,
+                    delta: rect.origin() - origin,
+                    card: rect.size(),
+                });
+            }
+        })
+        .finish();
         let mut stack = Stack::new();
         stack.add_child(body);
-        stack.add_overlay_child(
-            Container::new(
-                Align::new(self.render_rdp_conn_info_card(rdp, &colors))
-                    .top_right()
-                    .finish(),
-            )
-            .with_margin_top(16.0)
-            .with_margin_right(16.0)
-            .finish(),
+        stack.add_positioned_overlay_child(
+            card,
+            OffsetPositioning::offset_from_parent(
+                vec2f(-CONN_INFO_MARGIN, CONN_INFO_MARGIN) + rdp.conn_info_offset,
+                ParentOffsetBounds::ParentByPosition,
+                ParentAnchor::TopRight,
+                ChildAnchor::TopRight,
+            ),
         );
         stack.finish()
+    }
+
+    /// 连接信息面板拖动结束：累加位移，并夹在内容区内（窗口缩小后也能拖回来）。
+    pub(in crate::root_view) fn handle_move_rdp_connection_info(
+        &mut self,
+        index: usize,
+        delta: Vector2F,
+        card: Vector2F,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let (area, _) = self.rdp_content_area(ctx);
+        let Some(rdp) = self
+            .terminal_tabs
+            .get_mut(index)
+            .and_then(|t| t.rdp.as_mut())
+        else {
+            return;
+        };
+        let max_left = (area.x() - card.x() - 2.0 * CONN_INFO_MARGIN).max(0.0);
+        let max_down = (area.y() - card.y() - 2.0 * CONN_INFO_MARGIN).max(0.0);
+        let next = rdp.conn_info_offset + delta;
+        rdp.conn_info_offset = vec2f(
+            next.x().clamp(-max_left, 0.0),
+            next.y().clamp(0.0, max_down),
+        );
+        ctx.notify();
     }
 
     /// 切换连接信息浮层。打开时建采样基线并起 1s 差分定时器（已在跑则复用）。
@@ -646,6 +697,7 @@ impl RootView {
         })
         .finish();
         Flex::row()
+            .with_main_axis_size(MainAxisSize::Max)
             .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
             .with_child(title)
             .with_child(close)
@@ -686,6 +738,7 @@ impl RootView {
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
         Flex::row()
+            .with_main_axis_size(MainAxisSize::Max)
             .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
             .with_child(
                 Text::new_inline(key, self.ui_font, 12.0)
