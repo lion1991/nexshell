@@ -227,6 +227,11 @@ impl Compositor {
 
     // ---- 写入 ----
 
+    /// 直接改 surface 像素（AVC444 合成写回用）。
+    pub fn surface_mut(&mut self, surface_id: u16) -> Option<&mut Surface> {
+        self.surfaces.get_mut(&surface_id)
+    }
+
     /// lib 已解好的 Uncompressed/AVC420 输出（RGBA）→ 写入 surface。
     pub fn write_bitmap(&mut self, update: &BitmapUpdate) -> Option<SurfaceRect> {
         let surface = self.surfaces.get_mut(&update.surface_id)?;

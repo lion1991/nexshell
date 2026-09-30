@@ -363,6 +363,41 @@ where
     Ok(summary)
 }
 
+/// 按线上顺序逐个交出 dump 里的 GfxPdu（离线分析用，如 examples/avc444_probe）。
+pub fn for_each_wire_gfx_pdu<F>(dump_path: &Path, mut on_pdu: F) -> io::Result<()>
+where
+    F: FnMut(u64, &GfxPdu),
+{
+    let mut decompressor = Decompressor::new();
+    let mut decompressed = Vec::new();
+    for rec in WireDumpReader::open(dump_path)? {
+        let rec = rec?;
+        if rec.direction != DIRECTION_S2C {
+            continue;
+        }
+        decompressed.clear();
+        decompressor
+            .decompress(&rec.payload, &mut decompressed)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("record {}: ZGFX decompress failed: {e}", rec.seq),
+                )
+            })?;
+        let mut cursor = ReadCursor::new(decompressed.as_slice());
+        while !cursor.is_empty() {
+            let pdu = decode_cursor::<GfxPdu>(&mut cursor).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("record {}: GfxPdu decode failed: {e}", rec.seq),
+                )
+            })?;
+            on_pdu(rec.seq, &pdu);
+        }
+    }
+    Ok(())
+}
+
 pub fn inspect_wire_dump_pdus(
     dump_path: &Path,
     record_seqs: &[u64],

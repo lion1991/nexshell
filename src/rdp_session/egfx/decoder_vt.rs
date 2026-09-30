@@ -1,6 +1,7 @@
 //! VideoToolbox H.264 硬解，实现 ironrdp_egfx 的 `H264Decoder`（docs/adr/0008 第②步）。
-//! 输入 AVCC（4 字节大端长度前缀 NAL），输出 RGBA `DecodedFrame`；同步解码、SPS/PPS
-//! 变化时重建会话。本文件集中全部 unsafe（VideoToolbox FFI），每处配安全性注释。
+//! 输入 AVCC（4 字节大端长度前缀 NAL），输出 RGBA `DecodedFrame`，或把 NV12 平面借给调用方
+//! （AVC444 合成用，docs/adr/0015）；同步解码、SPS/PPS 变化时重建会话。
+//! 本文件集中全部 unsafe（VideoToolbox FFI），每处配安全性注释。
 
 use std::ffi::c_void;
 use std::path::PathBuf;
@@ -9,6 +10,8 @@ use std::ptr::NonNull;
 use std::slice;
 
 use ironrdp_egfx::decode::{DecodedFrame, DecoderError, DecoderResult, H264Decoder};
+
+use super::avc444::{yuv_to_rgb, Nv12Frame};
 use objc2_core_foundation::{kCFAllocatorNull, kCFBooleanTrue, CFRetained, CFType};
 use objc2_core_media::{
     CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMTime,
@@ -35,6 +38,8 @@ struct VtSession {
 
 /// VideoToolbox H.264 硬解器。持久保存最近 SPS/PPS，仅在参数集变化时重建会话。
 pub struct VtH264Decoder {
+    /// 日志与 dump 文件名里的流名（AVC420 / AVC444 主流、辅流）。
+    label: &'static str,
     sps: Vec<u8>,
     pps: Vec<u8>,
     session: Option<VtSession>,
@@ -55,6 +60,10 @@ unsafe impl Send for VtH264Decoder {}
 
 impl VtH264Decoder {
     pub fn new() -> Self {
+        Self::with_label("AVC420")
+    }
+
+    pub fn with_label(label: &'static str) -> Self {
         let dump_dir = std::env::var_os("NEXSHELL_RDP_EGFX_DUMP")
             .map(PathBuf::from)
             .filter(|d| !d.as_os_str().is_empty());
@@ -63,6 +72,7 @@ impl VtH264Decoder {
             eprintln!("[egfx] AVC dump enabled → {}", dir.display());
         }
         Self {
+            label,
             sps: Vec::new(),
             pps: Vec::new(),
             session: None,
@@ -74,13 +84,18 @@ impl VtH264Decoder {
         }
     }
 
-    /// 把原始 Annex B 输入落盘（前 DUMP_MAX 个 AU），命名 `<seq>_avc420_<bytes>B.bin`。
+    /// 把原始 Annex B 输入落盘（前 DUMP_MAX 个 AU），命名 `<seq>_<label>_<bytes>B.bin`。
     fn maybe_dump(&mut self, raw: &[u8]) {
         let Some(dir) = &self.dump_dir else { return };
         if self.dump_seq >= DUMP_MAX {
             return;
         }
-        let path = dir.join(format!("{:04}_avc420_{}B.bin", self.dump_seq, raw.len()));
+        let path = dir.join(format!(
+            "{:04}_{}_{}B.bin",
+            self.dump_seq,
+            self.label.to_ascii_lowercase(),
+            raw.len()
+        ));
         if let Err(e) = std::fs::write(&path, raw) {
             eprintln!("[egfx] AVC dump write failed {}: {e}", path.display());
         }
@@ -131,8 +146,9 @@ impl VtH264Decoder {
     }
 }
 
-impl H264Decoder for VtH264Decoder {
-    fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
+impl VtH264Decoder {
+    /// 解一个 AU，交出 VT 的输出像素缓冲（仍是 NV12）。
+    fn decode_pixel_buffer(&mut self, data: &[u8]) -> DecoderResult<CFRetained<CVPixelBuffer>> {
         // MS-RDPEGFX 2.2.4.4：AVC420 载荷是 Annex B 字节流（start code 分隔），而
         // VideoToolbox 只吃 AVCC（4 字节大端长度前缀），故先归一化到 AVCC；已是 AVCC 的原样透传。
         // 上游 H264Decoder 契约误标为 AVCC，真机实为 Annex B，此处兼容两者。
@@ -146,7 +162,8 @@ impl H264Decoder for VtH264Decoder {
             let kind = if is_annex_b(data) { "AnnexB" } else { "AVCC" };
             let head: Vec<String> = data.iter().take(8).map(|b| format!("{b:02x}")).collect();
             eprintln!(
-                "[egfx] AVC420 wire format={kind} first_bytes=[{}] in={}B avcc={}B vcl={}B",
+                "[egfx] {} wire format={kind} first_bytes=[{}] in={}B avcc={}B vcl={}B",
+                self.label,
                 head.join(" "),
                 data.len(),
                 avcc.len(),
@@ -161,7 +178,10 @@ impl H264Decoder for VtH264Decoder {
             ));
         }
         if vcl.is_empty() {
-            return Err(DecoderError::msg("AVC420 AU has no VCL NAL to decode"));
+            return Err(DecoderError::msg(format!(
+                "{} AU has no VCL NAL to decode",
+                self.label
+            )));
         }
 
         // 首次尝试。SAFETY: vcl 在本调用期间存活；block buffer 用 kCFAllocatorNull 零拷贝
@@ -183,29 +203,64 @@ impl H264Decoder for VtH264Decoder {
             }
         }
 
-        match result {
-            Ok(f) => {
-                if !self.first_frame_logged {
-                    self.first_frame_logged = true;
-                    eprintln!(
-                        "[egfx] first AVC420 frame decoded {}x{}",
-                        f.width(),
-                        f.height()
-                    );
-                }
-                Ok(f)
-            }
-            Err(status) => {
-                eprintln!(
-                    "[egfx] VT decode failed: OSStatus {status}, in={}B vcl={}B",
-                    data.len(),
-                    vcl.len()
-                );
-                Err(DecoderError::msg(format!(
-                    "VT decode failed: OSStatus {status}"
-                )))
-            }
+        result.map_err(|status| {
+            eprintln!(
+                "[egfx] VT decode failed: OSStatus {status}, in={}B vcl={}B",
+                data.len(),
+                vcl.len()
+            );
+            DecoderError::msg(format!("VT decode failed: OSStatus {status}"))
+        })
+    }
+
+    fn log_first_frame(&mut self, width: usize, height: usize) {
+        if !self.first_frame_logged {
+            self.first_frame_logged = true;
+            eprintln!("[egfx] first {} frame decoded {width}x{height}", self.label);
         }
+    }
+
+    /// 解一个 AU，把 NV12 平面借给 `f`（像素缓冲锁定期间有效，不拷贝）。
+    /// AVC444 合成按全范围 YUV 处理，VT 给出 video range 时报错。
+    pub fn decode_nv12<R>(
+        &mut self,
+        data: &[u8],
+        f: impl FnOnce(&Nv12Frame<'_>) -> R,
+    ) -> DecoderResult<R> {
+        let pixel_buffer = self.decode_pixel_buffer(data)?;
+        // SAFETY: pixel_buffer 存活；with_locked_nv12 锁定期间借出平面、结束前解锁。
+        let result = unsafe {
+            with_locked_nv12(&pixel_buffer, |p| {
+                if !p.full_range {
+                    return Err("VT output is video range, AVC444 expects full range");
+                }
+                Nv12Frame::new(p.width, p.height, p.y, p.y_stride, p.uv, p.uv_stride)
+                    .map(|frame| (p.width, p.height, f(&frame)))
+                    .ok_or("VT NV12 planes shorter than frame size")
+            })
+        };
+        match result {
+            Ok(Ok((width, height, r))) => {
+                self.log_first_frame(width, height);
+                Ok(r)
+            }
+            Ok(Err(msg)) => Err(DecoderError::msg(msg)),
+            Err(status) => Err(DecoderError::msg(format!(
+                "VT pixel buffer read failed: {status}"
+            ))),
+        }
+    }
+}
+
+impl H264Decoder for VtH264Decoder {
+    fn decode(&mut self, data: &[u8]) -> DecoderResult<DecodedFrame> {
+        let pixel_buffer = self.decode_pixel_buffer(data)?;
+        // SAFETY: pixel_buffer 存活；读平面前锁定基址、读后解锁。
+        let frame = unsafe { read_pixel_buffer(&pixel_buffer) }.map_err(|status| {
+            DecoderError::msg(format!("VT pixel buffer read failed: {status}"))
+        })?;
+        self.log_first_frame(frame.width() as usize, frame.height() as usize);
+        Ok(frame)
     }
 
     fn reset(&mut self) {
@@ -312,8 +367,8 @@ unsafe fn build_session(sps: &[u8], pps: &[u8]) -> Result<VtSession, i32> {
     Ok(VtSession { format, session })
 }
 
-/// 同步解码单个 AU（AVCC 长度前缀流，仅 VCL±SEI）→ RGBA `DecodedFrame`。失败返回 OSStatus。
-unsafe fn decode_sync(vt: &VtSession, data: &[u8]) -> Result<DecodedFrame, i32> {
+/// 同步解码单个 AU（AVCC 长度前缀流，仅 VCL±SEI）→ VT 输出像素缓冲。失败返回 OSStatus。
+unsafe fn decode_sync(vt: &VtSession, data: &[u8]) -> Result<CFRetained<CVPixelBuffer>, i32> {
     let session = &vt.session;
     // 1) block buffer 零拷贝引用 data（kCFAllocatorNull → 不释放我方内存）。
     let mut block_out: *mut CMBlockBuffer = ptr::null_mut();
@@ -389,15 +444,26 @@ unsafe fn decode_sync(vt: &VtSession, data: &[u8]) -> Result<DecodedFrame, i32> 
         return Err(output.status);
     }
     let image = NonNull::new(output.image).ok_or(-1)?;
-    // SAFETY: 回调 retain 的 +1，from_raw 接管，函数结束释放。
-    let pixel_buffer = unsafe { CFRetained::<CVPixelBuffer>::from_raw(image) };
-
-    // SAFETY: pixel_buffer 存活；读平面前锁定基址、读后解锁。
-    unsafe { read_pixel_buffer(&pixel_buffer) }
+    // SAFETY: 回调 retain 的 +1，from_raw 接管，调用方用完释放。
+    Ok(unsafe { CFRetained::<CVPixelBuffer>::from_raw(image) })
 }
 
-/// 锁定像素缓冲、按平面 stride 逐行读 NV12、转 RGBA。
-unsafe fn read_pixel_buffer(pb: &CVPixelBuffer) -> Result<DecodedFrame, i32> {
+/// 锁定期间借出的 NV12 平面。
+struct LockedNv12<'a> {
+    width: usize,
+    height: usize,
+    full_range: bool,
+    y: &'a [u8],
+    y_stride: usize,
+    uv: &'a [u8],
+    uv_stride: usize,
+}
+
+/// 锁定像素缓冲，把 NV12 平面借给 `f`，返回前解锁。失败返回负数错误码或 CVReturn。
+unsafe fn with_locked_nv12<R>(
+    pb: &CVPixelBuffer,
+    f: impl FnOnce(LockedNv12<'_>) -> R,
+) -> Result<R, i32> {
     let fmt = CVPixelBufferGetPixelFormatType(pb);
     let full_range = if fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
         true
@@ -424,31 +490,53 @@ unsafe fn read_pixel_buffer(pb: &CVPixelBuffer) -> Result<DecodedFrame, i32> {
         return Err(lock);
     }
 
-    // SAFETY: 已锁定，基址/stride 在解锁前有效；逐行按 stride 取，行内取 width。
+    // SAFETY: 已锁定，基址/stride 在解锁前有效；平面切片只在 f 内使用，不逃逸出锁定区间。
     let result = unsafe {
         let y_base = CVPixelBufferGetBaseAddressOfPlane(pb, 0);
         let uv_base = CVPixelBufferGetBaseAddressOfPlane(pb, 1);
         if y_base.is_null() || uv_base.is_null() {
-            CVPixelBufferUnlockBaseAddress(pb, CVPixelBufferLockFlags(0));
-            return Err(-5);
+            Err(-5)
+        } else {
+            let y_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
+            let uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
+            let y_h = CVPixelBufferGetHeightOfPlane(pb, 0);
+            let uv_h = CVPixelBufferGetHeightOfPlane(pb, 1);
+            Ok(f(LockedNv12 {
+                width,
+                height,
+                full_range,
+                y: slice::from_raw_parts(y_base as *const u8, y_stride.saturating_mul(y_h)),
+                y_stride,
+                uv: slice::from_raw_parts(uv_base as *const u8, uv_stride.saturating_mul(uv_h)),
+                uv_stride,
+            }))
         }
-        let y_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 0);
-        let uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pb, 1);
-        let y_h = CVPixelBufferGetHeightOfPlane(pb, 0);
-        let uv_h = CVPixelBufferGetHeightOfPlane(pb, 1);
-        let y_plane = slice::from_raw_parts(y_base as *const u8, y_stride.saturating_mul(y_h));
-        let uv_plane = slice::from_raw_parts(uv_base as *const u8, uv_stride.saturating_mul(uv_h));
-        nv12_to_rgba(
-            y_plane, y_stride, uv_plane, uv_stride, width, height, full_range,
-        )
     };
 
     // SAFETY: 与上面的 lock 配对解锁。
     unsafe {
         CVPixelBufferUnlockBaseAddress(pb, CVPixelBufferLockFlags(0));
     }
+    result
+}
 
-    Ok(DecodedFrame::new(result, width as u32, height as u32))
+/// 锁定像素缓冲、按平面 stride 逐行读 NV12、转 RGBA。
+unsafe fn read_pixel_buffer(pb: &CVPixelBuffer) -> Result<DecodedFrame, i32> {
+    // SAFETY: 由调用方保证 pb 存活。
+    unsafe {
+        with_locked_nv12(pb, |p| {
+            let rgba = nv12_to_rgba(
+                p.y,
+                p.y_stride,
+                p.uv,
+                p.uv_stride,
+                p.width,
+                p.height,
+                p.full_range,
+            );
+            DecodedFrame::new(rgba, p.width as u32, p.height as u32)
+        })
+    }
 }
 
 /// data 是否以 Annex B start code（00 00 01 或 00 00 00 01）开头。
@@ -605,7 +693,7 @@ fn write_ppm(path: &std::path::Path, rgba: &[u8], w: u32, h: u32) -> std::io::Re
 }
 
 /// NV12（Y 平面 + 交错 CbCr 平面）→ RGBA8888。逐行按 stride 取（容忍 padding），
-/// 按 BT.601 转色（full/video range）。纯函数，供单测覆盖 stride padding 情形。
+/// 按 BT.709 转色（full/video range，ADR 0015 决策 4）。纯函数，供单测覆盖 stride padding 情形。
 fn nv12_to_rgba(
     y: &[u8],
     y_stride: usize,
@@ -635,25 +723,20 @@ fn nv12_to_rgba(
     out
 }
 
-/// BT.601 YCbCr → RGB，输出 clamp 到 0..=255。
+/// BT.709 YCbCr → RGB。全范围与 AVC444 合成同一套整数系数（FreeRDP），video range 按标准系数展开。
 #[inline]
 fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8, full_range: bool) -> (u8, u8, u8) {
-    let (yf, cbf, crf) = (y as f32, cb as f32 - 128.0, cr as f32 - 128.0);
-    let (r, g, b) = if full_range {
-        (
-            yf + 1.402 * crf,
-            yf - 0.344136 * cbf - 0.714136 * crf,
-            yf + 1.772 * cbf,
-        )
-    } else {
-        let yl = 1.164 * (yf - 16.0);
-        (
-            yl + 1.596 * crf,
-            yl - 0.391 * cbf - 0.813 * crf,
-            yl + 2.018 * cbf,
-        )
-    };
-    (clamp_u8(r), clamp_u8(g), clamp_u8(b))
+    if full_range {
+        let [r, g, b] = yuv_to_rgb(y, cb, cr);
+        return (r, g, b);
+    }
+    let (cbf, crf) = (cb as f32 - 128.0, cr as f32 - 128.0);
+    let yl = 1.164 * (y as f32 - 16.0);
+    (
+        clamp_u8(yl + 1.793 * crf),
+        clamp_u8(yl - 0.213 * cbf - 0.533 * crf),
+        clamp_u8(yl + 2.112 * cbf),
+    )
 }
 
 #[inline]
@@ -800,7 +883,7 @@ mod tests {
 
     #[test]
     fn nv12_red_video_range() {
-        // video-range 红：Y≈81, Cb≈90, Cr≈240（BT.601 limited）。转换应偏红。
+        // video-range 红：Y≈81, Cb≈90, Cr≈240。转换应偏红。
         let w = 2;
         let h = 2;
         let y = vec![81u8; w * h];

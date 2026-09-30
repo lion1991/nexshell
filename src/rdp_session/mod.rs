@@ -13,9 +13,9 @@ mod stats;
 mod udp;
 
 pub use egfx::{
-    inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points, replay_wire_dump, vt_replay_dir,
-    ChecksumRect, WatchEvent, WatchPoint, WirePduInfo, WirePduRecord, WirePipelineError,
-    WireReplayFrame, WireReplayOptions, WireReplaySummary,
+    for_each_wire_gfx_pdu, inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points,
+    replay_wire_dump, vt_replay_dir, ChecksumRect, WatchEvent, WatchPoint, WirePduInfo,
+    WirePduRecord, WirePipelineError, WireReplayFrame, WireReplayOptions, WireReplaySummary,
 };
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 pub use udp::default_enable_udp;

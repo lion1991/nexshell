@@ -13,6 +13,9 @@ struct Counts {
     avc420: u64,
     clearcodec: u64,
     uncompressed: u64,
+    // wire1 AVC444（本层解码成功）及累计耗时
+    avc444_ok: u64,
+    avc444_us: u64,
     // wire1（库未解码 → on_unhandled_pdu，=丢弃）
     avc444: u64,
     other_wire1: u64,
@@ -68,7 +71,16 @@ impl EgfxDiag {
         }
     }
 
-    /// 库未内部解码的 wire1（丢弃）。
+    /// AVC444 解码合成成功（含解码 + 合成 + 转 RGBA 耗时）。
+    pub fn on_avc444(&mut self, elapsed: Duration) {
+        if !self.enabled {
+            return;
+        }
+        self.cur.avc444_ok += 1;
+        self.cur.avc444_us += elapsed.as_micros() as u64;
+    }
+
+    /// 库未内部解码或解码失败的 wire1（丢弃）。
     pub fn on_unhandled_wire1(&mut self, codec: Codec1Type) {
         if !self.enabled {
             return;
@@ -155,8 +167,17 @@ impl EgfxDiag {
         } else {
             String::new()
         };
+        let avc444 = if c.avc444_ok > 0 {
+            format!(
+                " avc444={}({:.1}ms)",
+                c.avc444_ok,
+                c.avc444_us as f64 / c.avc444_ok as f64 / 1000.0
+            )
+        } else {
+            String::new()
+        };
         eprintln!(
-            "[egfx-diag] {dt:.1}s wire1{{avc420={} clear={} uncomp={}}} \
+            "[egfx-diag] {dt:.1}s wire1{{avc420={} clear={} uncomp={}{avc444}}} \
 prog={}(empty={}) fill={} s2s={} s2c={} c2s={} evict={} \
 surf{{+{} -{}}} map={}(scaled={}) endframe/ack={}(tot={}) err={} dec={}{drop}",
             c.avc420,

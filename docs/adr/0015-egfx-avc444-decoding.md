@@ -7,7 +7,8 @@ Plan: [实施计划](../plans/2026-09-29-egfx-avc444.md)
 ## 背景
 
 - Win11 对只报 V8.1 的客户端不给 H.264：服务端事件 162 在 15 次连接里全是 `version 0x80105 … AVC available: 0`（见 ADR 0008 "真机更正"）。画面全走 Progressive / ClearCodec 等 CPU 解码，VideoToolbox 闲置，服务端的 H.264 硬件编码也用不上。
-- 报 V10.x 且不置 `AVC_DISABLED`，服务端就给 H.264；但这等于声明支持 AVC444，Win11 不配任何策略也会选 AVC444（IronRDP #1563）。库没有 AVC444 解码，这类 PDU 只会落到 `on_unhandled_pdu`，画面全黑。
+- 报 V10.x 且不置 `AVC_DISABLED`，服务端就给 H.264，但这等于声明支持 AVC444。库没有 AVC444 解码，这类 PDU 只会落到 `on_unhandled_pdu`，画面全黑（IronRDP #1563）。
+- 真机更正（第 0 步）：本机 Win11 不配策略时，协商到 V10.7 也只走混合模式，视频区域发 AVC420，其余仍是 ClearCodec / Progressive；只有开了 `AVC444ModePreferred`，才整屏发 AVC444。所以一旦声明 V10.7，遇到开了这条策略的服务端（以及部分 Windows Server / AVD），不会 AVC444 就会黑屏。
 - 同机对照（DWMFRAMEINTERVAL = 15）：Windows App 报 V10.7 拿到 H.264，3456×2168 下 60–66 fps，因客户端资源不足跳帧接近 0；NexShell 在 1080p 下同样 60–66 fps，但每秒跳帧 1–2 帧。
 - 预期收益：
   - 运动画面流量更小，弱网下重传更少。
@@ -36,9 +37,7 @@ Plan: [实施计划](../plans/2026-09-29-egfx-avc444.md)
 
 1. **在 NexShell 的 EGFX handler 里实现，不改 fork 的解码路径**：在 `on_unhandled_pdu` 里接住 0x000E / 0x000F，解析复用 fork 的 `Avc444BitmapStream`。
    - 理由：库的 `H264Decoder` 只交出 RGBA，AVC444 合成需要原始 YUV。在 fork 里改接口会扩大 fork 补丁，和 ADR 0011 收缩 fork 的方向相反。
-2. **VideoToolbox 解码器增加"输出 YUV 平面"模式**。主辅两路用两个解码实例还是共用一个，由计划第 0 步抓真实数据后决定：
-   - Windows App 的二进制字符串显示每个会话建两个解码器。
-   - FreeRDP 两路共用一个解码上下文（`h264.c` 的 `log_decompress`）。
+2. **VideoToolbox 解码器增加"输出 NV12 平面"模式（`decode_nv12`），主辅两路共用一个解码实例，按线上顺序送入**（LC=0 先主后辅）。第 0 步实测两路是同一条码流，分开解必错（见下方"第 0 步实测"），与 FreeRDP 共用解码上下文（`h264.c` 的 `log_decompress`）一致。
 3. **按 surface 保存 YUV444 平面**：
    - LC=1 只更新亮度和主色度，LC=2 只补辅色度。
    - 只处理区域矩形内的像素，区域外不动。
@@ -50,6 +49,17 @@ Plan: [实施计划](../plans/2026-09-29-egfx-avc444.md)
 6. **先用 CPU 实现**，1080p 下估计每帧 7–8ms。Retina 原生分辨率需要的 Metal 合成另立后续。
 7. **ADR 0008 决策 5（AVC444 暂缓）由本 ADR 取代。**
 
+## 第 0 步实测（2026-09-29，192.168.254.2，1920×1080）
+
+服务端开 `AVC444ModePreferred` 后录制约 2000 个 AVC444 PDU（`examples/avc444_probe.rs` 分析）：
+- **编码**：全部是 v2（0x000F），整屏只发 AVC444，不混其它编码。
+- **LC 分布**：放视频时 LC=1（只有主流）1788 次、LC=0 217 次、LC=2 7 次。LC=1 的区域矩形大多只覆盖视频那一块；同一个 LC=0 PDU 里主辅两路的区域矩形可以不同。
+- **尺寸与坐标**：解出的帧 1920×1088，`destRect` 始终是整个 surface，区域矩形是 surface 坐标（与 IronRDP #2042 一致）。
+- **码流结构**：主辅两路 SPS/PPS 字节相同，`frame_num` 共用一个计数（主 1–4、辅 5、主 6…），主帧引用并标记长期参考 0，辅帧引用并标记长期参考 1，辅流也会带 IDR（清空整个参考帧缓冲）。ffmpeg 验证：按线上顺序合在一起解 2229 帧全部成功；主流单独解只出 1313 帧，辅流单独解报参考帧错误。
+- **默认策略（混合模式）**：全屏视频走 AVC420 1920×1088、约 60 fps、只有开头一个 IDR；SPS 在 23 / 25 字节两个版本间切换，VT 会话随之重建。
+
+真机初测（AVC444 模式，release 版）：服务端出帧 59.4、因客户端跳帧 0（V8.1 时 1–2 帧/秒）、编码 4.4 ms，出现事件 170（NVIDIA H.264 Encoder MFT 显卡编码）；客户端每帧解码 + 合成 + 转色 4–6 ms，无 DROP。
+
 ## 影响与风险
 
 - **容易出错的地方**：
@@ -59,7 +69,8 @@ Plan: [实施计划](../plans/2026-09-29-egfx-avc444.md)
 
   应对：第 0 步抓真实数据做离线回放，加上拆分—合成往返单测。
 - **服务端负担**：服务端用软件编码 H.264 时，负担比 Progressive 高。Windows App 那组实测编码平均 7ms、最高 23ms。要用显卡编码，得同时开 `AVCHardwareEncodePreferred` 和 `AVC444ModePreferred`。
-- **服务端选 AVC420 的情况**（比如策略关了 AVC444）：走库现有的 AVC420 路径和 VideoToolbox 解码。
+- **服务端选 AVC420 的情况**（默认策略下的视频区域）：走库现有的 AVC420 路径和 VideoToolbox 解码。
+- **v2 半区划分宽度**：按 FreeRDP 取 surface 宽。本次 surface 宽 1920 与编码宽相同，区分不出；宽度不是 16 的倍数时还要实测。
 - **客户端负担**：合成和颜色转换都跑在会话线程上，1080p 以上会挤占帧预算，要靠后续的 Metal 合成来解决。
 
 ## 回退

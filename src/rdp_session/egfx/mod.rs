@@ -1,13 +1,18 @@
 //! EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第②步）：合成层 + macOS VideoToolbox H.264 硬解。
-//! 挂 EGFX DVC 通道，广告 V8.1+V8（接上 decoder 后服务端自动选 AVC420）；
+//! 挂 EGFX DVC 通道，默认广告 V8.1+V8（AVC444 开发期开关见 advertised_capabilities）；
 //! AVC420/Uncompressed/ClearCodec 均由库解好经 on_bitmap_updated（RGBA）落 surface（ClearCodec
-//! 连接级单例解码器，上游 #1175）；Progressive(WireToSurface2) 由本层调库解码器写 tile。
+//! 连接级单例解码器，上游 #1175）；Progressive(WireToSurface2) 由本层调库解码器写 tile；
+//! AVC444 库不解，经 on_unhandled_pdu 由 avc444_stream 解码合成（docs/adr/0015）。
 //! EndFrame 时把已映射 surface 的脏区合成进共享 RdpFramebuffer，对齐现有 publish 语义。
 //!
 //! 与 legacy fastpath 路径写同一个 framebuffer：同一会话只走其中一条管线（EGFX 激活后
 //! legacy 图形流停），靠此保证不打架。
 //! 非 macOS 目标不广告 H.264 解码器，但仍保留 Uncompressed/ClearCodec/Progressive 路径。
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod avc444;
+#[cfg(target_os = "macos")]
+mod avc444_stream;
 #[cfg(target_os = "macos")]
 mod decoder_vt;
 mod diag;
@@ -23,9 +28,10 @@ use ironrdp_egfx::client::{
 };
 use ironrdp_egfx::decode::H264Decoder;
 use ironrdp_egfx::pdu::{
-    CacheToSurfacePdu, CapabilitiesV81Flags, CapabilitiesV8Flags, CapabilitySet,
-    DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu, MapSurfaceToScaledOutputPdu,
-    SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu, WireToSurface2Pdu,
+    CacheToSurfacePdu, CapabilitiesV107Flags, CapabilitiesV81Flags, CapabilitiesV8Flags,
+    CapabilitySet, Codec1Type, DeleteEncodingContextPdu, EvictCacheEntryPdu, GfxPdu,
+    MapSurfaceToScaledOutputPdu, SolidFillPdu, SurfaceToCachePdu, SurfaceToSurfacePdu,
+    WireToSurface2Pdu,
 };
 use parking_lot::Mutex;
 
@@ -52,9 +58,9 @@ use self::diag::EgfxDiag;
 use self::surfaces::{Compositor, SurfaceRect};
 #[doc(hidden)]
 pub use self::wire_dump::{
-    inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points, replay_wire_dump, ChecksumRect,
-    WatchEvent, WatchPoint, WirePduInfo, WirePduRecord, WirePipelineError, WireReplayFrame,
-    WireReplayOptions, WireReplaySummary,
+    for_each_wire_gfx_pdu, inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points,
+    replay_wire_dump, ChecksumRect, WatchEvent, WatchPoint, WirePduInfo, WirePduRecord,
+    WirePipelineError, WireReplayFrame, WireReplayOptions, WireReplaySummary,
 };
 use super::{DirtyRect, RdpEvent, RdpFramebuffer, RdpStats};
 
@@ -106,6 +112,9 @@ struct EgfxHandler {
     frames: u64,
     /// 库未内部解码的编码（AVC444 等）累计，供频控日志。
     unsupported_count: u64,
+    #[cfg(target_os = "macos")]
+    avc444: avc444_stream::Avc444Stream,
+    avc444_fail_count: u64,
     prog_count: u64,
     /// 被库降级跳过的 PDU/解码错误累计（非致命），供频控诊断日志。
     error_count: u64,
@@ -137,6 +146,9 @@ impl EgfxHandler {
             acc: None,
             frames: 0,
             unsupported_count: 0,
+            #[cfg(target_os = "macos")]
+            avc444: avc444_stream::Avc444Stream::new(),
+            avc444_fail_count: 0,
             prog_count: 0,
             error_count: 0,
             diag: EgfxDiag::new(),
@@ -256,31 +268,45 @@ impl EgfxHandler {
     }
 }
 
+fn advertised_capabilities(small_cache: bool, avc444: bool) -> Vec<CapabilitySet> {
+    let mut caps = Vec::with_capacity(3);
+    if avc444 {
+        caps.push(CapabilitySet::V10_7 {
+            flags: if small_cache {
+                CapabilitiesV107Flags::SMALL_CACHE
+            } else {
+                CapabilitiesV107Flags::empty()
+            },
+        });
+    }
+    caps.push(CapabilitySet::V8_1 {
+        flags: CapabilitiesV81Flags::AVC420_ENABLED
+            | if small_cache {
+                CapabilitiesV81Flags::SMALL_CACHE
+            } else {
+                CapabilitiesV81Flags::empty()
+            },
+    });
+    caps.push(CapabilitySet::V8 {
+        flags: if small_cache {
+            CapabilitiesV8Flags::SMALL_CACHE
+        } else {
+            CapabilitiesV8Flags::empty()
+        },
+    });
+    caps
+}
+
 impl GraphicsPipelineHandler for EgfxHandler {
-    /// 只广告 V8.1(AVC420) + V8 兜底：V10.x 未置 AVC_DISABLED 即表示支持 AVC444，而本 handler
-    /// 无 AVC444 解码（收到只丢弃），服务端择优选中后会黑屏——照库 client.rs 的
-    /// capabilities() 文档去掉 V10.x，SMALL_CACHE 语义由 V8.1/V8 保留。
+    /// 默认只广告 V8.1(AVC420) + V8：V10.x 未置 AVC_DISABLED 即表示支持 AVC444。
+    /// AVC444 真机验证前（ADR 0015）设 NEXSHELL_RDP_EGFX_AVC444=1 才把 V10.7 排在最前。
     /// 默认声明 SMALL_CACHE，避免 Windows 服务端走长生命周期 surface-cache 复用路径。
     /// 需要回到旧 large-cache 行为做 A/B 时，设置 NEXSHELL_RDP_EGFX_LARGE_CACHE=1。
     fn capabilities(&self) -> Vec<CapabilitySet> {
-        let small_cache = std::env::var_os("NEXSHELL_RDP_EGFX_LARGE_CACHE").is_none();
-        vec![
-            CapabilitySet::V8_1 {
-                flags: CapabilitiesV81Flags::AVC420_ENABLED
-                    | if small_cache {
-                        CapabilitiesV81Flags::SMALL_CACHE
-                    } else {
-                        CapabilitiesV81Flags::empty()
-                    },
-            },
-            CapabilitySet::V8 {
-                flags: if small_cache {
-                    CapabilitiesV8Flags::SMALL_CACHE
-                } else {
-                    CapabilitiesV8Flags::empty()
-                },
-            },
-        ]
+        advertised_capabilities(
+            std::env::var_os("NEXSHELL_RDP_EGFX_LARGE_CACHE").is_none(),
+            std::env::var_os("NEXSHELL_RDP_EGFX_AVC444").is_some_and(|v| v == "1"),
+        )
     }
 
     fn on_capabilities_confirmed(&mut self, caps: &CapabilitySet) {
@@ -295,6 +321,8 @@ impl GraphicsPipelineHandler for EgfxHandler {
             eprintln!("[egfx] reset_graphics {width}x{height}");
         }
         self.compositor.reset();
+        #[cfg(target_os = "macos")]
+        self.avc444.reset();
         let (w, h) = (
             width.min(u16::MAX as u32) as u16,
             height.min(u16::MAX as u32) as u16,
@@ -338,6 +366,8 @@ impl GraphicsPipelineHandler for EgfxHandler {
     fn on_surface_deleted(&mut self, surface_id: u16) {
         self.diag.on_surf_delete();
         self.compositor.delete_surface(surface_id);
+        #[cfg(target_os = "macos")]
+        self.avc444.remove_surface(surface_id);
     }
 
     fn on_surface_mapped(&mut self, surface_id: u16, origin_x: u32, origin_y: u32) {
@@ -626,10 +656,36 @@ impl GraphicsPipelineHandler for EgfxHandler {
         }
     }
 
-    /// 库未内部解码的 WireToSurface1 编码（AVC444 等）走这里：v1 暂不支持，频控记日志。
+    /// 库未内部解码的 WireToSurface1 编码走这里：AVC444 由本层解码合成（macOS），其余频控记日志。
     /// ClearCodec/AVC420/Uncompressed 已由库解好经 on_bitmap_updated 落盘，不到这里。
     fn on_unhandled_pdu(&mut self, pdu: &GfxPdu) {
         if let GfxPdu::WireToSurface1(w) = pdu {
+            #[cfg(target_os = "macos")]
+            if matches!(w.codec_id, Codec1Type::Avc444 | Codec1Type::Avc444v2) {
+                let started = std::time::Instant::now();
+                match self.avc444.apply(&mut self.compositor, w) {
+                    Ok(rects) => {
+                        self.diag.on_avc444(started.elapsed());
+                        self.mark_coverage(&rects, 1);
+                        wire_dump::probe_surface_write(
+                            &self.compositor,
+                            "avc444",
+                            format!("codec={:?} surf={}", w.codec_id, w.surface_id),
+                            &rects,
+                        );
+                        self.accumulate(&rects);
+                    }
+                    Err(e) => {
+                        self.diag.on_unhandled_wire1(w.codec_id);
+                        self.avc444_fail_count += 1;
+                        let n = self.avc444_fail_count;
+                        if n <= 5 || n.is_multiple_of(300) {
+                            eprintln!("[egfx] AVC444 decode failed (#{n}): {e}");
+                        }
+                    }
+                }
+                return;
+            }
             self.diag.on_unhandled_wire1(w.codec_id);
             self.unsupported_count += 1;
             let n = self.unsupported_count;
@@ -647,18 +703,10 @@ impl GraphicsPipelineHandler for EgfxHandler {
 mod tests {
     use super::*;
 
-    /// 未实现 AVC444 解码前不得广告 V10.x（库据此判定 AVC444 可用）。
+    /// 开关关闭时不得广告 V10.x（库据此判定 AVC444 可用）。
     #[test]
-    fn advertised_capabilities_exclude_avc444() {
-        let (tx, _rx) = async_channel::unbounded();
-        let handler = EgfxHandler::new(
-            Arc::new(Mutex::new(RdpFramebuffer::new(64, 64))),
-            tx,
-            Arc::new(RdpStats::new()),
-            64,
-            64,
-        );
-        let caps = handler.capabilities();
+    fn advertised_capabilities_exclude_avc444_by_default() {
+        let caps = advertised_capabilities(true, false);
         assert!(!caps.is_empty());
         for cap in &caps {
             assert!(
@@ -666,5 +714,18 @@ mod tests {
                 "不应广告支持 AVC444 的能力集: {cap:?}"
             );
         }
+    }
+
+    #[test]
+    fn avc444_switch_puts_v10_7_first() {
+        let caps = advertised_capabilities(true, true);
+        assert_eq!(
+            caps[0],
+            CapabilitySet::V10_7 {
+                flags: CapabilitiesV107Flags::SMALL_CACHE
+            }
+        );
+        assert!(matches!(caps[1], CapabilitySet::V8_1 { .. }));
+        assert!(matches!(caps[2], CapabilitySet::V8 { .. }));
     }
 }
