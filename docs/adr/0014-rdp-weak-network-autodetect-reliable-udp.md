@@ -23,7 +23,14 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
 
 ## 决策
 
-1. **连接类型保持 LAN，Autodetect 仅供试验**（`NEXSHELL_RDP_AUTODETECT=1`）。原计划跟 mstsc 一样默认 Autodetect，真机否决：服务端若关了网络探测（RDP-Tcp `SelectNetworkDetect = 1`，事件 101 "Reason Code 2"），会回给客户端默认特征（RTT 400 ms、512 kbps），RemoteFX 自适应图形随即"按最小网络带宽优化"（事件 166），发布帧率掉到 6 以下；改回 LAN 后同链路 30 fps 以上。另外 IronRDP 会话期只应答 RTT，不做带宽测量，服务端拿不到持续的带宽数据。
+1. **连接类型保持 LAN，Autodetect 仅供试验**（`NEXSHELL_RDP_AUTODETECT=1`）。服务端估的带宽取决于它做不做连接时探测，与客户端报哪种连接类型无关：客户端声明了 `SUPPORT_NET_CHAR_AUTODETECT`，服务端开着探测就会测。真机（Win11，服务端计数器 `RemoteFX Network\Current TCP/UDP Bandwidth`）：
+
+   | 服务端连接时探测（RDP-Tcp `SelectNetworkDetect`） | 报 LAN | 报 Autodetect |
+   |---|---|---|
+   | 开（0，Windows 默认） | 实测 102400 kbps | 实测 102400 kbps |
+   | 关（1，事件 101 "Reason Code 2"） | 恒为 10000 kbps（LAN 类型的下限 10 Mbps） | 默认特征 RTT 400 ms、512 kbps；RemoteFX 自适应图形"按最小网络带宽优化"（事件 166），帧率掉到 6 以下 |
+
+   报 LAN 在两种配置下都能用，Autodetect 在关了连接时探测的服务端上不可用，所以默认 LAN。关了连接时探测后，服务端靠会话中的持续探测修正估值：Windows App 应答会话期带宽测量，同配置下测到 95–103 Mbps；IronRDP 只在连接时应答带宽测量，会话期只应答 RTT，估值停在初值。10 Mbps 的估值看起来压住了服务端的发送量：同样拖窗口，估值 10 Mbps 时流量平均 9.6 Mbps、最高 18 Mbps；100 Mbps 时平均 13.7、最高 37（两次操作不完全相同）。服务端建议保持默认（`SelectNetworkDetect` 为 0 或不配置）。
 2. **声明 `TRANSPORT_TYPE_UDP_FECR | SOFT_SYNC_TCP_TO_UDP`**。服务端请求可靠 UDP 时建隧道，EGFX 图形、Display Control 等动态通道经 Soft-Sync 迁入后双向走 UDP。静态通道（剪贴板、rdpsnd 音频、rdpdr）与快速路径键鼠输入仍走 TCP。DRDYNVC 随 EGFX 注册，关 EGFX 时不声明 UDP，否则隧道建成后无通道可迁、启用隧道会报错断开。
 3. **只做可靠 UDP**。有损 UDP（FEC + DTLS）上游未实现，服务端请求时回 E_ABORT。EGFX 依赖参考帧与帧确认，mstsc 也走可靠通道；NexShell 音频走 rdpsnd 静态通道，不受影响。
 4. **与参考客户端的差异**（`src/rdp_session/udp.rs`）：
@@ -61,14 +68,17 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
 | 隧道建成但画面不出 | 事件 132 显示 Graphics 在隧道 1；客户端日志 Soft-Sync 清单含未打开的 ID；UDP 收到约 5 KB 后停止 | 客户端未切换 → 决策 8 的 fork 补丁 |
 | Autodetect 下帧率 < 6 | 事件 101（探测被服务器配置关闭）、166（自适应图形按最小带宽优化）；服务端回 RTT 400 ms / 512 kbps | 连接类型改回 LAN，30 fps 以上 |
 | 图形复位后断开 | 隧道包 `1c 10 "AUDIO_PLAYBACK_DVC"`：清单外 ID 16 的 Create | 路由改为跟随 Create 到达的传输 |
+| 报 LAN 时服务端估带宽恒为 10 Mbps，Windows App 为 95–103 Mbps | `RemoteFX Network` 计数器；RDP-Tcp `SelectNetworkDetect = 1`（关连接时探测） | LAN 取类型下限，IronRDP 不应答会话期带宽测量，估值不更新 → 服务端改 0 后报 LAN 与 Autodetect 均测到 102400 kbps，Autodetect 下 62 fps、帧质量 100% → 决策 1 |
 | 运行 1–6 分钟后 "reliable UDP tunnel closed" | 抓包：客户端先停止发包，服务端指数退避重传约 21s 后放弃（事件 226 UdpEventErrorOnSend）；客户端报 `TLS error, caused by: RDPEUDP2 transport error`，即驱动出错退出，只可能来自 socket 收发 | 补丁后日志：`send` 返回 ENOBUFS（os error 55），7 次集中在同一毫秒，都是 12 字节的纯 ACK；按丢包处理后连续运行 10 分钟以上不断开 → 决策 9 |
 
 Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational` 事件 130/131/132/135，客户端设 `RUST_LOG=ironrdp_dvc=debug` 看 Soft-Sync 清单与建通道顺序，`ironrdp_rdpeudp_tokio=debug` 看驱动退出原因与被丢弃的收发错误。
 
+服务端性能计数器用 `typeperf` 采样：`RemoteFX Graphics(*)` 看出帧、帧质量、编码耗时，以及按客户端 / 网络 / 服务端资源不足分类的跳帧；`RemoteFX Network(*)` 看带宽估值、RTT、TCP 与 UDP 各自的发送速率。`typeperf` 只跟踪采样开始时已有的会话实例，客户端重连后要重新采。
+
 ## 验证
 
 - 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 44、`ironrdp-rdpeudp-tokio` 55 项通过。
-- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常。
+- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常；服务端开连接时探测后，报 LAN 与 Autodetect 的带宽估值都是实测值（决策 1）。
 - 真机待做：
   - 缩放、剪贴板、共享盘在 UDP 下逐项回归。
   - UDP 被挡：连接回落 TCP，额外等待不超过约 3s。

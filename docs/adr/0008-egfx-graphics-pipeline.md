@@ -180,3 +180,25 @@ tile 会命中上一代遗留的参考系数 → 画错（表现同绿块/脏内
 顺带（同批）：帧内 `updated_tiles` 改 HashSet 去重（原先同 frame_id 跨多 PDU 只增不减 + 线性
 `contains`，O(n²)）；`fail_session` 的 Disconnected 只发一次（日志仍每次打），避免致命错误
 每 PDU 往 unbounded channel 重复灌事件。
+
+## 真机更正：只报 V8.1 拿不到 H.264（2026-09-29）
+
+背景里"服务端见到 EGFX 能力即走视频管线"对当前 Windows 不成立。服务端每次连接记事件 162
+（RdpCoreTS/Operational）：NexShell 只报 V8.1 + V8，Win11 上 15 次连接全是
+`version 0x80105 … AVC available: 0`；同机 Windows App 报 `0xA0701`（V10.7），得到
+`AVC available: 1`。IronRDP #2042 在 Server 2022 上测到同样行为。也就是说画面全走
+Progressive / ClearCodec 等 CPU 解码，VideoToolbox 路径实际闲置。
+
+不能直接加回 V10.x：V10 未置 `AVC_DISABLED` 即声明支持 AVC444，Win11 不配任何策略也会选
+AVC444（上游 #1563 实测），库没有 AVC444 解码，画面全黑。要用上 H.264 须先实现 AVC444
+（两路 AVC420 各自解码后合成 YUV444，可参考 FreeRDP `prim_YUV.c` / `h264.c`），决策 5 的
+"暂缓"因此不只关乎文字锐度。
+
+服务端配套（同机实测）：
+- `WinStations\DWMFRAMEINTERVAL = 15`（重启生效）把会话帧率上限从 30 提到约 66（1000/15）。
+  NexShell 拖窗口实测 60–66 fps，因客户端资源不足跳帧 1–2 帧/秒；Windows App（3456×2168）
+  同样 60–66 fps，客户端跳帧接近 0。
+- `AVCHardwareEncodePreferred = 1` 只作用于 H.264。默认混合编码下未出现事件 170（硬件编码器
+  启用），按微软 AVD 文档须与 `AVC444ModePreferred = 1` 一起开。
+
+实现 AVC444 的决策与计划见 ADR 0015。
