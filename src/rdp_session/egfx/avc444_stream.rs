@@ -80,7 +80,7 @@ impl Avc444Stream {
         if let Some(aux) = aux {
             decoder
                 .decode_nv12(aux.data, |frame| {
-                    planes.apply_aux(frame, layout, usize::from(width), &aux.rectangles)
+                    planes.apply_aux(frame, layout, &aux.rectangles)
                 })
                 .map_err(|e| format!("AVC444 aux: {e}"))?;
             rects.extend_from_slice(&aux.rectangles);

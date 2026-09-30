@@ -121,12 +121,10 @@ impl Yuv444Planes {
     }
 
     /// 辅流（Chroma420）：写入主流缺的 3/4 色度采样。
-    /// `total_width` 是 v2 左右半区 / 四分之一区的划分宽度（FreeRDP 取 surface 宽）。
     pub fn apply_aux(
         &mut self,
         frame: &Nv12Frame<'_>,
         layout: ChromaLayout,
-        total_width: usize,
         rects: &[ExclusiveRectangle],
     ) {
         for rect in rects {
@@ -135,13 +133,7 @@ impl Yuv444Planes {
             };
             match layout {
                 ChromaLayout::V1 => self.aux_v1(frame, left, top, right, bottom),
-                ChromaLayout::V2 => {
-                    if total_width > frame.width {
-                        continue;
-                    }
-                    let right = right.min(total_width);
-                    self.aux_v2(frame, total_width, left, top, right, bottom);
-                }
+                ChromaLayout::V2 => self.aux_v2(frame, left, top, right, bottom),
             }
         }
     }
@@ -179,17 +171,17 @@ impl Yuv444Planes {
 
     /// v2：辅流 Y 左半装 U 的奇数列、右半装 V 的奇数列（所有行）；辅流 U/V 按四分之一宽
     /// 分块，装奇数行上列号 4k（辅 U）和 4k+2（辅 V）的采样，左块是 U、右块是 V。
+    /// 半区按解出的帧宽（16 对齐的编码宽）划分，不是 surface 宽：1366 宽实测按 1376 切。
     fn aux_v2(
         &mut self,
         frame: &Nv12Frame<'_>,
-        total_width: usize,
         left: usize,
         top: usize,
         right: usize,
         bottom: usize,
     ) {
-        let half = total_width / 2;
-        let quarter = total_width / 4;
+        let half = frame.width / 2;
+        let quarter = frame.width / 4;
         for row in top..bottom {
             let dst = row * self.width;
             let y = frame.y_row(row);
@@ -324,7 +316,7 @@ mod tests {
     }
 
     /// 按 FreeRDP 编码端（general_RGBToAVC444YUV / v2）把 YUV444 拆成主辅两路。
-    /// 主流色度存 2×2 均值；宽高取偶数，省掉边缘分支。
+    /// 主流色度存 2×2 均值；宽高取偶数，省掉边缘分支。v2 半区按编码宽（16 对齐）划分。
     fn split(src: &Yuv444, layout: ChromaLayout) -> (Nv12Buf, Nv12Buf) {
         let (w, h) = (src.w, src.h);
         assert!(w % 4 == 0 && h % 2 == 0);
@@ -367,15 +359,15 @@ mod tests {
                 for y in 0..h {
                     for x in 0..w / 2 {
                         aux.y[y * aux.w + x] = at(&src.u, 2 * x + 1, y);
-                        aux.y[y * aux.w + w / 2 + x] = at(&src.v, 2 * x + 1, y);
+                        aux.y[y * aux.w + aux.w / 2 + x] = at(&src.v, 2 * x + 1, y);
                     }
                 }
                 for y in 0..h / 2 {
                     for x in 0..w / 4 {
                         aux.set_u(x, y, at(&src.u, 4 * x, 2 * y + 1));
-                        aux.set_u(w / 4 + x, y, at(&src.v, 4 * x, 2 * y + 1));
+                        aux.set_u(aux.w / 4 + x, y, at(&src.v, 4 * x, 2 * y + 1));
                         aux.set_v(x, y, at(&src.u, 4 * x + 2, 2 * y + 1));
-                        aux.set_v(w / 4 + x, y, at(&src.v, 4 * x + 2, 2 * y + 1));
+                        aux.set_v(aux.w / 4 + x, y, at(&src.v, 4 * x + 2, 2 * y + 1));
                     }
                 }
             }
@@ -422,7 +414,7 @@ mod tests {
         let mut planes = Yuv444Planes::new(w as u16, h as u16);
         let rect = [full(w, h)];
         planes.apply_main(&main.frame(), &rect);
-        planes.apply_aux(&aux.frame(), layout, w, &rect);
+        planes.apply_aux(&aux.frame(), layout, &rect);
 
         assert_eq!(planes.y, src.y);
         for y in 0..h {
@@ -450,6 +442,7 @@ mod tests {
     #[test]
     fn v2_round_trip() {
         round_trip(ChromaLayout::V2, 64, 48);
+        // 宽度不是 16 的倍数：编码宽 48，半区从 24 开始而不是 20。
         round_trip(ChromaLayout::V2, 40, 26);
     }
 
@@ -468,7 +461,7 @@ mod tests {
         let (main, aux) = split(&src, ChromaLayout::V1);
         let mut planes = Yuv444Planes::new(w as u16, h as u16);
         planes.apply_main(&main.frame(), &[full(w, h)]);
-        planes.apply_aux(&aux.frame(), ChromaLayout::V1, w, &[full(w, h)]);
+        planes.apply_aux(&aux.frame(), ChromaLayout::V1, &[full(w, h)]);
 
         let mut flat = Nv12Buf::new(w, h);
         flat.y.fill(10);
@@ -505,7 +498,7 @@ mod tests {
             right: 32,
             bottom: 16,
         };
-        planes.apply_aux(&aux.frame(), ChromaLayout::V2, w, &[sub]);
+        planes.apply_aux(&aux.frame(), ChromaLayout::V2, &[sub]);
         for y in 0..h {
             for x in 0..w {
                 let i = y * w + x;
