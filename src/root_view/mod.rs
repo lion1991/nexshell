@@ -43,6 +43,7 @@ use warpui::{
     },
     fonts,
     r#async::Timer,
+    windowing::{StateEvent as WindowStateEvent, WindowManager},
     AppContext, BlurContext, CursorInfo, Element, Entity, FocusContext, SingletonEntity as _,
     TypedActionView, View, ViewContext, ViewHandle,
 };
@@ -366,6 +367,15 @@ impl RootView {
 
         // Needed for KeyDown delivery.
         ctx.focus_self();
+        // 切换应用不走 on_blur。⌘Tab 切走时本窗口只收到 ⌘ 按下，切回来只收到 ⌘ 抬起，
+        // 不清账会被当成单按 ⌘ 给远端补发 Win，所以窗口进出前台时都抬起远端按键。
+        ctx.subscribe_to_model(&WindowManager::handle(ctx), |me, _, event, ctx| {
+            let WindowStateEvent::ValueChanged { current, previous } = event;
+            let window = Some(ctx.window_id());
+            if (current.active_window == window) != (previous.active_window == window) {
+                me.release_rdp_modifiers(me.active_tab_index);
+            }
+        });
         Self::sync_titlebar_height(ctx);
         Self::apply_window_opacity(ctx, ui_settings.opacity);
         nexshell::glass_backdrop::set_glass_quality(ui_settings.glass_quality);
