@@ -1,6 +1,6 @@
 # RDP 剪贴板对齐 Windows App 实施计划
 
-Status: in progress — 第 0、1 步完成，正在做第 5 步
+Status: in progress — 第 0、1、5 步完成
 
 Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 
@@ -73,7 +73,7 @@ Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 2. 按实测结果实现：provider 应答 file URL 前，用 `ChunkedFetch` 下载到 `~/Library/Caches/NexShell/rdp-clipboard/`；目录按 FileGroupDescriptorW 里的相对路径重建。
 3. 会话断开或远端重新复制时，清理缓存；在界面上提示下载进度。
 
-## 第 5 步：⌘ 剪贴板快捷键（提前到第 2 步之前做）
+## 第 5 步：⌘ 剪贴板快捷键（提前做，完成）
 
 - ⌘C / ⌘X / ⌘V / ⌘A / ⌘Z 转成 Ctrl 组合发给远端，其他 ⌘ 组合仍发 Win。
 - 参照 Windows App 的 `CommandKeyDelay`：`ModifierTracker` 记下 ⌘ 当前扮演的键。

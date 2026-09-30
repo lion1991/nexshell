@@ -402,6 +402,29 @@ impl RootView {
         self.rdp_hotkey_guard.borrow_mut().set_engaged(desired);
     }
 
+    /// 活动页是 RDP 时，把被本地菜单截走的 ⌘ 快捷键转成 Ctrl+键发往远端，返回是否已转发。
+    pub(in crate::root_view) fn forward_rdp_command_shortcut(&self, key: &str) -> bool {
+        if self.app_page != crate::AppPage::Terminal {
+            return false;
+        }
+        let Some(rdp) = self
+            .terminal_tabs
+            .get(self.active_tab_index)
+            .and_then(|t| t.rdp.as_ref())
+        else {
+            return false;
+        };
+        let Some((scancode, _)) = crate::rdp_view::keymap::scancode_for_key(key) else {
+            return false;
+        };
+        if let Ok(mut tracker) = rdp.mod_tracker.lock() {
+            for event in tracker.command_shortcut(scancode) {
+                let _ = rdp.handle.input_tx.try_send(event);
+            }
+        }
+        true
+    }
+
     /// 切走/关闭某 tab 前，若它是 RDP tab 则抬起全部远端修饰键与仍按住的普通键，防卡键（尤其 Win 键）。
     /// 非 RDP tab 或已断开静默跳过（try_send 满/断开也丢弃不阻塞）。
     pub(in crate::root_view) fn release_rdp_modifiers(&self, index: usize) {

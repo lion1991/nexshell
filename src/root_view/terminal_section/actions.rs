@@ -11,6 +11,10 @@ use nexshell::warp_tab_context_menu::should_finish_tab_rename_on_external_mouse_
 
 impl RootView {
     pub(in crate::root_view) fn handle_copy_selection(&mut self, ctx: &mut ViewContext<Self>) {
+        // ⌘C 被编辑菜单截走，RDP 画面收不到按键，在这里转成 Ctrl+C 发往远端。
+        if self.forward_rdp_command_shortcut("c") {
+            return;
+        }
         let selected_text = self.terminal.lock().ok().and_then(|rt| rt.selected_text());
         if let Some(text) = selected_text.filter(|text| !text.is_empty()) {
             ctx.clipboard().write(ClipboardContent::plain_text(text));

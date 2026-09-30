@@ -16,6 +16,7 @@ use warpui_core::elements::{
 use warpui_core::event::{DispatchedEvent, Event, KeyEventDetails, KeyState};
 use warpui_core::image_cache::{AnimatedImageBehavior, CacheOption, FitType, Image, ImageCache};
 use warpui_core::keymap::Keystroke;
+use warpui_core::platform::keyboard::KeyCode;
 use warpui_core::{AppContext, PaintContext, SingletonEntity};
 
 use crate::rdp_view::geometry::{letterbox_rect, viewport_device_coords, RdpViewport};
@@ -206,14 +207,39 @@ impl RdpPageElement {
             }
             return false;
         };
+        let Ok(mut tracker) = self.mod_tracker.lock() else {
+            return true;
+        };
+        // macOS 不投递 ⌘ 组合键的 KeyUp：⌘ 按着时每次按下（含自动重复）都当场补抬起，不进按住集合。
+        if tracker.command_held() {
+            let mut events = tracker.command_before_key(scancode, extended);
+            drop(tracker);
+            events.push(RdpInputEvent::Key {
+                scancode,
+                extended,
+                pressed: true,
+            });
+            events.push(RdpInputEvent::Key {
+                scancode,
+                extended,
+                pressed: false,
+            });
+            for event in events {
+                self.send(event);
+            }
+            if key_trace() {
+                eprintln!(
+                    "[nexshell key-debug] page KeyDown ⌘ combo key={:?} scancode=0x{:02X} → tap",
+                    keystroke.key, scancode
+                );
+            }
+            return true;
+        }
         if is_repeat {
             return true;
         }
-        let first = self
-            .mod_tracker
-            .lock()
-            .map(|mut t| t.press_key(scancode, extended))
-            .unwrap_or(true);
+        let first = tracker.press_key(scancode, extended);
+        drop(tracker);
         let sent = first
             && self.send(RdpInputEvent::Key {
                 scancode,
@@ -385,6 +411,20 @@ impl Element for RdpPageElement {
             Event::KeyUp { keystroke, details } => self.handle_key_up(keystroke, details),
             // 修饰键：携带物理 KeyCode + 按下/抬起，维持远端修饰键状态。
             Event::ModifierKeyChanged { key_code, state } => {
+                let pressed = matches!(state, KeyState::Pressed);
+                // ⌘ 先压住，由下一个键决定当 Ctrl 还是 Win（keymap::ModifierTracker）。
+                if matches!(key_code, KeyCode::SuperLeft | KeyCode::SuperRight) {
+                    let right = matches!(key_code, KeyCode::SuperRight);
+                    let events = self
+                        .mod_tracker
+                        .lock()
+                        .map(|mut t| t.command_changed(right, pressed))
+                        .unwrap_or_default();
+                    for event in events {
+                        self.send(event);
+                    }
+                    return true;
+                }
                 let Some((scancode, extended)) = keymap::scancode_for_modifier(*key_code) else {
                     if key_trace() {
                         eprintln!(
@@ -394,7 +434,6 @@ impl Element for RdpPageElement {
                     }
                     return false;
                 };
-                let pressed = matches!(state, KeyState::Pressed);
                 let sent = self.send(RdpInputEvent::Key {
                     scancode,
                     extended,
@@ -619,6 +658,39 @@ mod tests {
         assert!(!el.handle_key_down(&unknown, &KeyEventDetails::default(), false, false));
         assert!(!el.handle_key_up(&unknown, &KeyEventDetails::default()));
         assert!(drain(&rx).is_empty());
+    }
+
+    #[test]
+    fn command_combo_taps_without_waiting_for_key_up() {
+        let (el, rx) = element();
+        el.mod_tracker.lock().unwrap().command_changed(false, true);
+        let ks = Keystroke {
+            key: "v".into(),
+            cmd: true,
+            ..Default::default()
+        };
+        let d = KeyEventDetails {
+            key_without_modifiers: Some("v".into()),
+            ..Default::default()
+        };
+        let v = |pressed| RdpInputEvent::Key {
+            scancode: 0x2F,
+            extended: false,
+            pressed,
+        };
+        let ctrl_down = RdpInputEvent::Key {
+            scancode: 0x1D,
+            extended: false,
+            pressed: true,
+        };
+        // 连按两次 ⌘V（系统不给 KeyUp）：两次都粘贴，Ctrl 只按一次。
+        assert!(el.handle_key_down(&ks, &d, false, false));
+        assert!(el.handle_key_down(&ks, &d, false, false));
+        assert_eq!(
+            drain(&rx),
+            vec![ctrl_down, v(true), v(false), v(true), v(false)]
+        );
+        assert!(el.mod_tracker.lock().unwrap().drain_held_keys().is_empty());
     }
 
     #[test]
