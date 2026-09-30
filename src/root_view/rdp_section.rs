@@ -29,9 +29,10 @@ use crate::{
 };
 use nexshell::generation::{accepts_generation, Generation};
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
+use nexshell::host_overview::format_bytes_short;
 use nexshell::rdp_session::{
-    default_enable_egfx, default_enable_udp, spawn_rdp_session, RdpEvent, RdpResizeRequest,
-    RdpSessionConfig,
+    default_enable_egfx, default_enable_udp, spawn_rdp_session, ClipboardTransfer, RdpEvent,
+    RdpResizeRequest, RdpSessionConfig,
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
@@ -158,6 +159,7 @@ impl RootView {
                 conn_info_mbps: 0.0,
                 conn_info_fps: 0.0,
                 resize_debounce: Default::default(),
+                clipboard_transfer: None,
             });
         }
         self.attach_rdp_frame_stream(tab_id, session_generation, frame_rx, ctx);
@@ -192,6 +194,7 @@ impl RootView {
             rdp.conn_info_last_sample = None;
             rdp.conn_info_mbps = 0.0;
             rdp.conn_info_fps = 0.0;
+            rdp.clipboard_transfer = None;
             rdp.handle = handle; // 旧 handle 被替换后 drop → 优雅断开旧会话。
             rdp.phase = RdpConnectionPhase::Connecting;
             rdp.last_uploaded_generation = 0;
@@ -294,6 +297,13 @@ impl RootView {
             RdpEvent::Disconnected { reason } => {
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
                     rdp.phase = RdpConnectionPhase::Disconnected { reason };
+                    rdp.clipboard_transfer = None;
+                }
+                ctx.notify();
+            }
+            RdpEvent::ClipboardTransfer(progress) => {
+                if let Some(rdp) = self.rdp_state_mut(tab_id) {
+                    rdp.clipboard_transfer = progress;
                 }
                 ctx.notify();
             }
@@ -486,8 +496,21 @@ impl RootView {
             }
         };
 
+        let mut stack = Stack::new();
+        stack.add_child(body);
+        if let Some(progress) = rdp.clipboard_transfer {
+            stack.add_positioned_overlay_child(
+                self.render_rdp_clipboard_transfer(progress, &colors),
+                OffsetPositioning::offset_from_parent(
+                    vec2f(0.0, -CONN_INFO_MARGIN),
+                    ParentOffsetBounds::ParentByPosition,
+                    ParentAnchor::BottomMiddle,
+                    ChildAnchor::BottomMiddle,
+                ),
+            );
+        }
         if !rdp.conn_info_open {
-            return body;
+            return stack.finish();
         }
         // 按住面板任意处拖动；松手时把位移记进 conn_info_offset。
         let index = self.active_tab_index;
@@ -508,8 +531,6 @@ impl RootView {
             }
         })
         .finish();
-        let mut stack = Stack::new();
-        stack.add_child(body);
         stack.add_positioned_overlay_child(
             card,
             OffsetPositioning::offset_from_parent(
@@ -520,6 +541,12 @@ impl RootView {
             ),
         );
         stack.finish()
+    }
+
+    pub(in crate::root_view) fn handle_cancel_rdp_clipboard_transfer(&self, index: usize) {
+        if let Some(rdp) = self.terminal_tabs.get(index).and_then(|t| t.rdp.as_ref()) {
+            rdp.handle.cancel_clipboard_transfer();
+        }
     }
 
     /// 连接信息面板拖动结束：累加位移，并夹在内容区内（窗口缩小后也能拖回来）。
@@ -818,6 +845,59 @@ impl RootView {
                     .with_color(colors.text_primary)
                     .finish(),
             )
+            .finish()
+    }
+
+    /// 远端文件下载浮条：进度 +「取消」。下载期间 Finder 的粘贴会一直等着，取消后它拿到空结果。
+    fn render_rdp_clipboard_transfer(
+        &self,
+        progress: ClipboardTransfer,
+        colors: &HostOverviewColors,
+    ) -> Box<dyn Element> {
+        let index = self.active_tab_index;
+        let percent = (progress.done * 100)
+            .checked_div(progress.total)
+            .unwrap_or(0)
+            .min(100);
+        let message = rust_i18n::t!(
+            "rdp_clipboard_transfer",
+            files = progress.files,
+            percent = percent,
+            done = format_bytes_short(progress.done),
+            total = format_bytes_short(progress.total)
+        )
+        .to_string();
+        let cancel = EventHandler::new(
+            Text::new_inline(
+                rust_i18n::t!("rdp_clipboard_cancel").to_string(),
+                self.ui_font,
+                12.0,
+            )
+            .with_style(fonts::Properties::default().weight(fonts::Weight::Medium))
+            .with_color(colors.text_primary)
+            .finish(),
+        )
+        .on_left_mouse_down(move |ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::CancelRdpClipboardTransfer(index));
+            DispatchEventResult::StopPropagation
+        })
+        .finish();
+        let row = Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(
+                Text::new_inline(message, self.ui_font, 12.0)
+                    .with_color(colors.text_primary)
+                    .finish(),
+            )
+            .with_child(Container::new(cancel).with_padding_left(14.0).finish())
+            .finish();
+        Container::new(row)
+            .with_horizontal_padding(14.0)
+            .with_vertical_padding(8.0)
+            .with_background_color(colors.card_bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
+            .with_border(Border::all(1.0).with_border_color(colors.panel_border))
             .finish()
     }
 

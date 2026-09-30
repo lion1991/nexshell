@@ -47,6 +47,8 @@ rdp_info_pipeline_egfx: "EGFX graphics pipeline"
 rdp_info_publish_fps: Publish rate
 rdp_quality_standard: Standard
 rdp_quality_hidpi: HiDPI
+rdp_clipboard_transfer: "Copying %{files} files from remote · %{percent}% (%{done} / %{total})"
+rdp_clipboard_cancel: Cancel
 code_viewer_loading: "Loading file…"
 code_viewer_read_error: "Failed to read file: %{error}"
 code_viewer_saved: Saved

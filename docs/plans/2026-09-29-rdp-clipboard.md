@@ -1,6 +1,6 @@
 # RDP 剪贴板对齐 Windows App 实施计划
 
-Status: in progress — 第 0、1、3、5 步完成
+Status: in progress — 第 0 到 5 步完成，剩第 6 步
 
 Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 
@@ -38,20 +38,28 @@ Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
   - 文本编辑（TextEdit）里的富文本粘进写字板或 Word，保留格式；
   - 文本双向照旧可用。
 
-## 第 2 步：辅助进程，远端 → Mac 延迟提供文本、富文本和图片
+## 第 2 步：辅助进程，远端 → Mac 延迟提供文本、富文本和图片（完成）
 
-- `--pasteboard-helper` 模式：
-  - 不初始化 UI，只跑主 runloop，负责写入带 provider 的 `NSPasteboardItem`；
-  - provider 被调用时，经管道向父进程要数据，在它自己的主线程上阻塞等待。
-- 父进程：
-  - 首次有远端复制时拉起辅助进程，读管道的线程把请求派给对应会话的 RDP 线程；
-  - 会话断开时，若剪贴板还是这次会话写入的，就让辅助进程清空剪贴板。
-- 图片：远端给了 PNG 就直接用；否则把 CF_DIBV5 / CF_DIB 转成 PNG 和 TIFF。
-- 两个会话之间互相复制（A 的内容粘进 B）要能走通。
+- 辅助进程（`helper_process.rs`）：
+  - 同一个可执行文件以 `--pasteboard-helper` 启动，不初始化界面，只跑主 runloop；
+  - stdin 收主进程的消息，stdout 发读取请求，协议见 `wire.rs`（长度前缀 + 标签）；stdin 关闭就退出；
+  - 写剪贴板经 dispatch 主队列放到主线程；provider 回调在主线程上阻塞等主进程应答，文本和图片最多等 30 秒，文件不设上限；
+  - 条目附带私有类型 `com.nexshell.rdp-clipboard-owner`，值为 `主进程 pid:会话号`，主进程轮询据此认出自己写的内容，不发回远端。
+- 主进程（`helper_mac.rs`）：远端第一次复制时拉起辅助进程，它退出后下次需要时再拉起；读取请求按会话号派给对应会话的事件循环。
+- 会话（`remote.rs`）：
+  - 远端复制时只记格式，写入延迟提供的条目：CF_UNICODETEXT → 文本；`Rich Text Format` → RTF；图片 PNG 优先，其次 CF_DIBV5、CF_DIB，Mac 上同时提供 PNG 和 TIFF；
+  - fork 只能给一个在途的 FormatDataRequest 配对应答，请求排队逐个发；远端换了内容时，排队的请求直接应答失败，在途的那个等应答回来，免得配对错位；
+  - 同一轮里 PNG 和 TIFF 共用一次远端请求；
+  - 格式转换在辅助进程里做：DIB 解析（`dib.rs`）后经 CGBitmapContext 转成 PNG 或 TIFF。
+- 会话结束：未完成的读取都应答空结果；剪贴板还是本会话写的，并且还有没给出的数据（或者是文件）就清空，数据都已给出则保留。
+- 轮询：剪贴板为空时不算变化，免得辅助进程"先清空再写入"的中间态把远端剪贴板清空。
+- 两个会话之间：文本和图片可以互相粘贴（B 读取时经辅助进程转给 A 去远端取）；文件不转发，因为转发前要先整份下载。
+- 非 macOS 没有辅助进程，照旧立即拉取文本。
 
-验证：
-- 在开着 Alfred 的机器上，远端每复制一次，NexShell 界面都不卡：看 `[rdp-ui]` 帧率诊断。
-- 远端截图工具复制，Mac 预览选"从剪贴板新建"；Word 富文本粘进 Pages 或 TextEdit。
+验证（真机，本机常驻 Alfred 和 ClipBridge）：
+- 远端记事本文本：写入后 0.06 秒被剪贴板管理器读走，取数据 92 ms，读取在辅助进程里等待，NexShell 界面不受影响；
+- 远端截图：PNG 14 ms 取回；预览"从剪贴板新建"读 TIFF 时用同一份 PNG 转换，不再向远端请求；
+- 远端 Word 富文本：文本被剪贴板管理器立即读走，RTF 等到粘贴时才请求（43 KB，51 ms）。
 
 ## 第 3 步：Mac 文件 → 远端（完成）
 
@@ -76,14 +84,25 @@ Decision record: [ADR 0016](../adr/0016-rdp-clipboard-windows-app-parity.md)
 - 单个文件、多个文件、嵌套目录、中文文件名，逐个核对 hash；
 - 1 GB 文件：资源管理器显示进度，中途取消后远端能正常恢复。
 
-## 第 4 步：远端文件 → Finder
+## 第 4 步：远端文件 → Finder（完成）
 
-1. 先实测：
-   - 装着 Alfred 时，Windows App 在远端复制 1 GB 文件后会不会立即开始下载；
-   - 在 Finder 里粘贴时的等待表现；
-   - Alfred 读不读 file URL。
-2. 按实测结果实现：provider 应答 file URL 前，用 `ChunkedFetch` 下载到 `~/Library/Caches/NexShell/rdp-clipboard/`；目录按 FileGroupDescriptorW 里的相对路径重建。
-3. 会话断开或远端重新复制时，清理缓存；在界面上提示下载进度。
+1. 实测（2026-09-30，Swift 探针）：
+   - file URL 的延迟提供写入后 0.02 秒就被读走（本机 Alfred / ClipBridge），远端每复制一次文件都会立即整份下载；
+   - provider 被调用时不给数据，之后的读取一直为空、不会再回调，没法"先挡掉剪贴板管理器、等 Finder 粘贴再下"。
+   - 决定：对齐 Windows App，被读取就下载，不设大小阈值；进度和取消放在 RDP 窗口里。
+2. 实现（`download.rs`）：
+   - 远端复制时先取 FileGroupDescriptorW 清单（只有元数据），按顶层条目数写入多个 file URL 的延迟提供；
+   - 第一次被读取时整份下载到 `$TMPDIR/NexShell-rdp-clipboard/<pid>-<会话>-<轮次>/`，按相对路径重建目录；
+   - 每次 RANGE 1 MB、一次一个请求，边收边写盘；不用 fork 的 `ChunkedFetch`，它把整个文件攒在内存里；
+   - 请求带上 fork 在收到 FormatList 时自动加的锁 ID；
+   - 下完补上远端的修改时间，再应答各顶层条目的路径；
+   - 远端路径逐段校验，挡住 `..`、`/` 等会逃出临时目录的名字；
+   - RDP 窗口底部浮条显示进度，可以取消；取消、远端换了内容、会话结束时中止下载，等待中的读取拿到空结果，删掉下了一半的目录；
+   - 清理：本会话开始新下载时删掉上一次的目录；会话结束时删掉本会话的全部目录；进程第一次下载时删掉已退出进程留下的目录。
+3. 验证（真机，经 VPN，往返 13.5 ms）：
+   - 174 MB 文件 31 秒下完（约 5.9 MB/s），修改时间保留；每块等一次往返只占约 8%，瓶颈在链路；
+   - 中途取消后临时目录被删掉，再复制照常下载；
+   - 下载期间 Mac 剪贴板换成了别的内容（例如截图工具连文件一起放上剪贴板），本端会把新内容发给远端，远端剪贴板被替换，正在下的这份随之中止。Mac 剪贴板已经不是这批文件，中止是对的。
 
 ## 第 5 步：⌘ 剪贴板快捷键（提前做，完成）
 

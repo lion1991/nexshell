@@ -2556,6 +2556,9 @@ impl TypedActionView for RootView {
             TerminalGridAction::ToggleRdpConnectionInfo(index) => {
                 self.handle_toggle_rdp_connection_info(*index, ctx)
             }
+            TerminalGridAction::CancelRdpClipboardTransfer(index) => {
+                self.handle_cancel_rdp_clipboard_transfer(*index)
+            }
             TerminalGridAction::MoveRdpConnectionInfo { index, delta, card } => {
                 self.handle_move_rdp_connection_info(*index, *delta, *card, ctx)
             }

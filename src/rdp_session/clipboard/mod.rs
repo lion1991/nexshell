@@ -2,18 +2,32 @@
 //! backend 回调跑在 RDP 线程（active_stage.process 内），不能重入 active_stage 借用，
 //! 故经 async_channel 把"要发的 cliprdr PDU"回递事件循环统一编码发送。
 //! Mac → 远端：轮询本地变化标记，变了就广播格式清单或文件清单；远端请求时由工作线程读取、转换后应答。
-//! 远端 → Mac：目前只同步文本，远端一复制就立即拉取写入。
+//! 远端 → Mac：见 remote.rs，macOS 上经辅助进程延迟提供。
 
 mod dib;
+mod download;
 mod files;
+#[cfg_attr(target_os = "macos", path = "helper_mac.rs")]
+#[cfg_attr(not(target_os = "macos"), path = "helper_other.rs")]
+mod helper;
+#[cfg(target_os = "macos")]
+mod helper_process;
 #[cfg_attr(target_os = "macos", path = "local_mac.rs")]
 #[cfg_attr(not(target_os = "macos"), path = "local_other.rs")]
 mod local;
+mod remote;
 mod text;
+mod wire;
+
+pub(super) use helper::PasteRequests;
+#[cfg(target_os = "macos")]
+pub use helper::HELPER_ARG as PASTEBOARD_HELPER_ARG;
+#[cfg(target_os = "macos")]
+pub use helper_process::run as run_pasteboard_helper;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,11 +35,13 @@ use std::time::{Duration, Instant};
 use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend};
 use ironrdp_cliprdr::pdu::{
     ClipboardFormat, ClipboardFormatId, ClipboardFormatName, ClipboardGeneralCapabilityFlags,
-    FileContentsFlags, FileContentsRequest, FileContentsResponse, FormatDataRequest,
-    FormatDataResponse, LockDataId, OwnedFormatDataResponse,
+    FileContentsFlags, FileContentsRequest, FileContentsResponse, FileDescriptor,
+    FormatDataRequest, FormatDataResponse, LockDataId, OwnedFormatDataResponse,
 };
 use ironrdp_cliprdr::{Client, CliprdrClient, CliprdrSvcMessages};
 use ironrdp_pdu::PduResult;
+
+use super::RdpEvent;
 
 /// 本地剪贴板变化的轮询间隔。
 pub(super) const POLL_INTERVAL: Duration = local::POLL_INTERVAL;
@@ -55,6 +71,8 @@ struct Bitmap {
 /// backend（RDP 线程回调）与轮询线程之间的共享状态。
 #[derive(Clone, Debug)]
 pub(super) struct ClipboardShared {
+    /// 进程内唯一的会话号：辅助进程按它把读取请求派回会话，轮询按它认出自己写入的内容。
+    session: u64,
     /// 已处理过的本地变化标记。写入远端内容时持锁到记下新标记为止，
     /// 轮询就看不到"清空了还没写完"的中间态，也不会把自己写的内容发回远端。
     last_token: Arc<Mutex<u64>>,
@@ -68,12 +86,19 @@ pub(super) struct ClipboardShared {
 
 impl ClipboardShared {
     pub(super) fn new() -> Self {
+        static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
         Self {
+            session: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
             last_token: Arc::new(Mutex::new(0)),
             ready: Arc::new(AtomicBool::new(false)),
             files_enabled: Arc::new(AtomicBool::new(false)),
             offered_roots: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// 会话收辅助进程读取请求的入口，事件循环持有到会话结束。
+    pub(super) fn paste_requests(&self) -> PasteRequests {
+        PasteRequests::register(self.session)
     }
 }
 
@@ -102,6 +127,7 @@ pub(super) struct RdpCliprdrBackend {
     /// 最近一次广播的文件清单。远端锁住剪贴板时另存快照，带锁 ID 的请求按快照取文件。
     offered: Option<files::FileList>,
     locked: HashMap<u32, files::FileList>,
+    remote: remote::Remote,
     // trait 要求返回 &str，需自持一份（文件传输才用）。
     temp_dir: String,
 }
@@ -110,6 +136,7 @@ impl RdpCliprdrBackend {
     pub(super) fn new(
         proxy: async_channel::Sender<ClipboardMessage>,
         shared: &ClipboardShared,
+        events: async_channel::Sender<RdpEvent>,
     ) -> Self {
         let (jobs, pending) = mpsc::channel::<Job>();
         let reply = proxy.clone();
@@ -127,6 +154,7 @@ impl RdpCliprdrBackend {
             }
         });
         Self {
+            remote: remote::Remote::new(proxy.clone(), shared.clone(), events),
             proxy,
             shared: shared.clone(),
             jobs,
@@ -198,14 +226,8 @@ impl CliprdrBackend for RdpCliprdrBackend {
     fn on_remote_copy(&mut self, available_formats: &[ClipboardFormat]) {
         trace(|| format!("remote copy [{}]", describe(available_formats)));
         lock(&self.shared.offered_roots).clear();
-        if available_formats
-            .iter()
-            .any(|f| f.id() == ClipboardFormatId::CF_UNICODETEXT)
-        {
-            self.send(ClipboardMessage::SendInitiatePaste(
-                ClipboardFormatId::CF_UNICODETEXT,
-            ));
-        }
+        let files_enabled = self.shared.files_enabled.load(Ordering::Relaxed);
+        self.remote.on_remote_copy(available_formats, files_enabled);
     }
 
     fn on_format_data_request(&mut self, request: FormatDataRequest) {
@@ -217,23 +239,11 @@ impl CliprdrBackend for RdpCliprdrBackend {
     }
 
     fn on_format_data_response(&mut self, response: FormatDataResponse<'_>) {
-        trace(|| {
-            format!(
-                "remote data error={} {} bytes",
-                response.is_error(),
-                response.data().len()
-            )
-        });
-        if response.is_error() {
-            return;
-        }
-        let text = text::cf_unicode_to_mac_text(response.data());
-        let mut last = lock(&self.shared.last_token);
-        if local::write_text(&text) {
-            if let Some(token) = local::change_token() {
-                *last = token;
-            }
-        }
+        self.remote.on_format_data_response(response);
+    }
+
+    fn on_remote_file_list(&mut self, files: &[FileDescriptor], clip_data_id: Option<u32>) {
+        self.remote.on_remote_file_list(files, clip_data_id);
     }
 
     fn on_file_contents_request(&mut self, request: FileContentsRequest) {
@@ -252,8 +262,9 @@ impl CliprdrBackend for RdpCliprdrBackend {
         }
     }
 
-    // 远端 → Finder 留给第 4 步。
-    fn on_file_contents_response(&mut self, _response: FileContentsResponse<'_>) {}
+    fn on_file_contents_response(&mut self, response: FileContentsResponse<'_>) {
+        self.remote.on_file_contents_response(&response);
+    }
 
     fn on_lock(&mut self, data_id: LockDataId) {
         trace(|| format!("lock {}", data_id.0));
@@ -286,6 +297,54 @@ pub(super) fn initiate_offer(
     }
 }
 
+/// 把 backend 回递的消息交给 cliprdr。向远端要数据的请求发不出去时，当作远端应答失败，免得等待方一直挂着。
+pub(super) fn submit(
+    cliprdr: &mut CliprdrClient,
+    message: ClipboardMessage,
+) -> PduResult<CliprdrSvcMessages<Client>> {
+    match message {
+        ClipboardMessage::SendInitiateCopy(formats) => cliprdr.initiate_copy(&formats),
+        ClipboardMessage::SendFormatData(response) => cliprdr.submit_format_data(response),
+        ClipboardMessage::SendFileContentsResponse(response) => {
+            cliprdr.submit_file_contents(response)
+        }
+        ClipboardMessage::SendInitiatePaste(format) => {
+            let result = cliprdr.initiate_paste(format);
+            if result.is_err() {
+                if let Some(backend) = cliprdr.downcast_backend_mut::<RdpCliprdrBackend>() {
+                    backend.on_format_data_response(OwnedFormatDataResponse::new_error());
+                }
+            }
+            result
+        }
+        ClipboardMessage::SendFileContentsRequest(request) => {
+            let stream_id = request.stream_id;
+            let result = cliprdr.request_file_contents(request);
+            if result.is_err() {
+                if let Some(backend) = cliprdr.downcast_backend_mut::<RdpCliprdrBackend>() {
+                    backend.on_file_contents_response(FileContentsResponse::new_error(stream_id));
+                }
+            }
+            result
+        }
+        _ => Ok(Vec::new().into()),
+    }
+}
+
+/// 辅助进程转来的读取请求。
+pub(super) fn on_local_paste(cliprdr: &mut CliprdrClient, request: wire::Request) {
+    if let Some(backend) = cliprdr.downcast_backend_mut::<RdpCliprdrBackend>() {
+        backend.remote.on_local_paste(request);
+    }
+}
+
+/// 用户在界面上取消远端文件下载。
+pub(super) fn cancel_transfer(cliprdr: &mut CliprdrClient) {
+    if let Some(backend) = cliprdr.downcast_backend_mut::<RdpCliprdrBackend>() {
+        backend.remote.cancel_download();
+    }
+}
+
 /// 轮询一次：通道就绪且本地剪贴板有新变化时，返回要广播的内容（格式清单可以为空，表示清空远端）。
 pub(super) fn poll_local_change(shared: &ClipboardShared) -> Option<LocalOffer> {
     if !shared.ready.load(Ordering::Relaxed) {
@@ -298,6 +357,18 @@ pub(super) fn poll_local_change(shared: &ClipboardShared) -> Option<LocalOffer> 
     }
     *last = token;
     let available = local::available();
+    if let Some(owner) = local::owner() {
+        // 本会话经辅助进程写入的远端内容，不再发回去。
+        if owner == local::owner_marker(std::process::id(), shared.session) {
+            trace(|| format!("local change {token} → own remote content, skip"));
+            return None;
+        }
+        // 别的会话复制的远端文件：展开要先整份下载，不在会话之间转发。
+        if available.files {
+            trace(|| format!("local change {token} → files from session {owner}, skip"));
+            return None;
+        }
+    }
     if !(available.files && shared.files_enabled.load(Ordering::Relaxed)) {
         lock(&shared.offered_roots).clear();
         let formats = advertised_formats(available);

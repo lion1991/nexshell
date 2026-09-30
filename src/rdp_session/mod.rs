@@ -12,6 +12,8 @@ mod rdpdr;
 mod stats;
 mod udp;
 
+#[cfg(target_os = "macos")]
+pub use clipboard::{run_pasteboard_helper, PASTEBOARD_HELPER_ARG};
 pub use egfx::{
     for_each_wire_gfx_pdu, inspect_wire_dump_pdus, inspect_wire_dump_pdus_with_points,
     replay_wire_dump, vt_replay_dir, ChecksumRect, WatchEvent, WatchPoint, WirePduInfo,
@@ -124,6 +126,16 @@ pub enum RdpEvent {
     /// 远端分辨率已变（动态分辨率生效：EGFX ResetGraphics 或 Deactivation-Reactivation）。
     /// framebuffer 已按新尺寸重建，UI 据此刷新桌面分辨率并重置上传代号。
     Resized { width: u16, height: u16 },
+    /// 远端复制的文件正在下载到 Mac（被 Finder 等读取时触发）；None 表示结束或取消。
+    ClipboardTransfer(Option<ClipboardTransfer>),
+}
+
+/// 远端文件下载进度。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipboardTransfer {
+    pub files: usize,
+    pub done: u64,
+    pub total: u64,
 }
 
 /// UI → 会话线程的分辨率重设请求（物理像素，UI 已按 HiDPI 换算好）。
@@ -390,6 +402,7 @@ pub struct RdpSessionHandle {
     /// 运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
     pub stats: Arc<RdpStats>,
     close_tx: async_channel::Sender<()>,
+    clipboard_cancel_tx: async_channel::Sender<()>,
     _thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -397,6 +410,11 @@ impl RdpSessionHandle {
     /// 显式请求断开。事件循环 select 到后优雅退出。
     pub fn close(&self) {
         let _ = self.close_tx.try_send(());
+    }
+
+    /// 取消正在进行的远端文件下载。
+    pub fn cancel_clipboard_transfer(&self) {
+        let _ = self.clipboard_cancel_tx.try_send(());
     }
 }
 
@@ -415,6 +433,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
     let (input_tx, input_rx) = async_channel::unbounded::<RdpInputEvent>();
     let (resize_tx, resize_rx) = async_channel::unbounded::<RdpResizeRequest>();
     let (close_tx, close_rx) = async_channel::unbounded::<()>();
+    let (clipboard_cancel_tx, clipboard_cancel_rx) = async_channel::unbounded::<()>();
     let framebuffer = Arc::new(Mutex::new(RdpFramebuffer::new(config.width, config.height)));
     let stats = Arc::new(RdpStats::new());
 
@@ -441,9 +460,12 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
                     framebuffer,
                     stats,
                     event_tx,
-                    close_rx,
-                    input_rx,
-                    resize_rx,
+                    SessionInputs {
+                        close_rx,
+                        input_rx,
+                        resize_rx,
+                        clipboard_cancel_rx,
+                    },
                 ));
             }
         })
@@ -456,8 +478,17 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
         resize_tx,
         stats,
         close_tx,
+        clipboard_cancel_tx,
         _thread: thread,
     }
+}
+
+/// UI → 会话线程的各路通道。
+struct SessionInputs {
+    close_rx: async_channel::Receiver<()>,
+    input_rx: async_channel::Receiver<RdpInputEvent>,
+    resize_rx: async_channel::Receiver<RdpResizeRequest>,
+    clipboard_cancel_rx: async_channel::Receiver<()>,
 }
 
 /// `DOMAIN\user` 拆成 (Some(domain), user)；无反斜杠则本地账户 (None, user)。
@@ -575,21 +606,9 @@ async fn run_rdp_event_loop(
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
     stats: Arc<RdpStats>,
     event_tx: async_channel::Sender<RdpEvent>,
-    close_rx: async_channel::Receiver<()>,
-    input_rx: async_channel::Receiver<RdpInputEvent>,
-    resize_rx: async_channel::Receiver<RdpResizeRequest>,
+    inputs: SessionInputs,
 ) {
-    let reason = match connect_and_run(
-        &config,
-        &framebuffer,
-        &stats,
-        &event_tx,
-        &close_rx,
-        &input_rx,
-        &resize_rx,
-    )
-    .await
-    {
+    let reason = match connect_and_run(&config, &framebuffer, &stats, &event_tx, &inputs).await {
         Ok(()) => "session ended".to_string(),
         Err(error) => error,
     };
@@ -603,10 +622,14 @@ async fn connect_and_run(
     framebuffer: &Arc<Mutex<RdpFramebuffer>>,
     stats: &Arc<RdpStats>,
     event_tx: &async_channel::Sender<RdpEvent>,
-    close_rx: &async_channel::Receiver<()>,
-    input_rx: &async_channel::Receiver<RdpInputEvent>,
-    resize_rx: &async_channel::Receiver<RdpResizeRequest>,
+    inputs: &SessionInputs,
 ) -> Result<(), String> {
+    let SessionInputs {
+        close_rx,
+        input_rx,
+        resize_rx,
+        clipboard_cancel_rx,
+    } = inputs;
     // rustls 0.23 需显式选 provider（树内 ring/aws-lc-rs 共存），已装则忽略。
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -637,7 +660,9 @@ async fn connect_and_run(
     // 轮询/回调经 shared 桥接（见 clipboard 模块）。
     let clip_shared = clipboard::ClipboardShared::new();
     let (clip_tx, clip_rx) = async_channel::unbounded::<ClipboardMessage>();
-    let clip_backend = clipboard::RdpCliprdrBackend::new(clip_tx, &clip_shared);
+    let clip_backend = clipboard::RdpCliprdrBackend::new(clip_tx, &clip_shared, event_tx.clone());
+    // 辅助进程转来的读取请求；会话结束时注销，剪贴板还是本会话写的就清空。
+    let clip_paste = clip_shared.paste_requests();
 
     let connector_config = build_connector_config(config);
     if audio_diag::enabled() {
@@ -888,6 +913,19 @@ async fn connect_and_run(
                 if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
                     let messages = cliprdr.drive_timeouts();
                     write_cliprdr(&mut active_stage, &mut upgraded_framed, messages).await?;
+                }
+                continue;
+            }
+            // backend 只把要发的请求排进 clip_rx，这两路不直接写网络。
+            Some(request) = clip_paste.recv() => {
+                if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
+                    clipboard::on_local_paste(cliprdr, request);
+                }
+                continue;
+            }
+            Ok(()) = clipboard_cancel_rx.recv() => {
+                if let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() {
+                    clipboard::cancel_transfer(cliprdr);
                 }
                 continue;
             }
@@ -1170,16 +1208,7 @@ async fn send_clipboard_pdu<W: FramedWrite>(
     let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
         return Ok(());
     };
-    let messages = match msg {
-        ClipboardMessage::SendInitiateCopy(formats) => cliprdr.initiate_copy(&formats),
-        ClipboardMessage::SendInitiatePaste(format_id) => cliprdr.initiate_paste(format_id),
-        ClipboardMessage::SendFormatData(response) => cliprdr.submit_format_data(response),
-        ClipboardMessage::SendFileContentsResponse(response) => {
-            cliprdr.submit_file_contents(response)
-        }
-        // 远端文件下载（第 4 步）之前不产出其余消息。
-        _ => return Ok(()),
-    };
+    let messages = clipboard::submit(cliprdr, msg);
     write_cliprdr(active_stage, framed, messages).await
 }
 

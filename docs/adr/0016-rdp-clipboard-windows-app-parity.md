@@ -43,6 +43,9 @@ Plan: [实施计划](../plans/2026-09-29-rdp-clipboard.md)
 - 剪贴板服务没有 60 秒超时：provider 睡 75 秒，`pbpaste` 等了 72 秒照样拿到数据。
 - 本机常驻 Alfred 和 ClipBridge。promise 一写进去，provider 在 t=0s 就被调用，也就是远端每复制一次都会马上被拉数据。
 - 推论：在 NexShell 主进程里做延迟提供，远端每复制一次主线程就要等一次网络。大图走广域网能卡好几秒，文件更久。这正是 Windows App 把 provider 放进独立进程的原因。
+- 补测（2026-09-30）：
+  - file URL 的延迟提供同样在写入后 0.02 秒被读走；
+  - provider 被调用时不给数据，之后的读取一直为空，不会再回调。剪贴板管理器和 Finder 的读取分不开，没法只挡前者。
 
 ## 决策
 
@@ -64,7 +67,9 @@ Plan: [实施计划](../plans/2026-09-29-rdp-clipboard.md)
    - 每个 NexShell 进程只起一个；父进程的管道一关，它就退出。
    - 辅助进程的主线程可以放心阻塞，NexShell 界面不受影响。
    - 图片和文本数据经管道传过去；文件只传临时路径。
-6. **远端文件 → Finder**：provider 应答时，先把文件下载到缓存目录，再交出 file URL（与 Windows App 相同）。大小阈值、进度提示、剪贴板管理器误触发下载的对策，等第 4 步实测后再定。
+6. **远端文件 → Finder**：provider 应答时，先把文件下载到临时目录，再交出 file URL（与 Windows App 相同）。
+   - 不设大小阈值：装着剪贴板管理器时，远端每复制一次文件都会立即整份下载（见补测）。
+   - 下载进度和取消放在 RDP 窗口底部；取消后等待中的读取拿到空结果。
 7. **Mac 文件 → 远端**：
    - 本端声明 `STREAM_FILECLIP_ENABLED | FILECLIP_NO_FILE_PATHS | CAN_LOCK_CLIPDATA | HUGE_FILE_SUPPORT_ENABLED`。
    - 服务端来 FileContents 请求时按范围读本地文件，读取不占事件循环。
@@ -73,7 +78,7 @@ Plan: [实施计划](../plans/2026-09-29-rdp-clipboard.md)
 
 ## 风险
 
-- **剪贴板管理器（Alfred 等）会立即读取 promise**。远端每复制一张图都会被拉一次。如果管理器读 file URL，就会触发整份文件下载。第 4 步实测 Alfred 读不读 file URL，并与 Windows App 对照。
+- **剪贴板管理器（Alfred 等）会立即读取 promise**：远端每复制一张图都会被拉一次；复制文件会立即整份下载，连着复制几次就下几次（前一次会被中止）。大文件可在 RDP 窗口里取消。
 - **两端都开着第三方剪贴板同步工具（如 ClipBridge）时互相覆盖**：Mac 复制文件后，工具把文件路径文本同步到 Windows，顶掉 cliprdr 发过去的文件清单；这段文本又经 cliprdr 回到 Mac，把 Finder 的复制也顶掉，表现为远端要粘好几次。这是两套同步机制在抢同一个剪贴板，NexShell 不做规避；遇到时关掉其中一端的同步工具。
 - **后台线程读 NSPasteboard**：苹果没有明文保证线程安全。arboard 一直这样用，没出过问题。
 - **辅助进程**：带来进程管理和 IPC 的复杂度。进程崩溃时，已写入的延迟数据取不到（粘贴为空）；下次远端复制时重新拉起。

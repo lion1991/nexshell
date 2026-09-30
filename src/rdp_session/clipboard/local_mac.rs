@@ -29,30 +29,49 @@ fn pasteboard() -> Retained<NSPasteboard> {
 }
 
 // AppKit 导出的常量字符串，进程内常驻。
-fn string_type() -> &'static NSPasteboardType {
+pub(super) fn string_type() -> &'static NSPasteboardType {
     unsafe { NSPasteboardTypeString }
 }
-fn rtf_type() -> &'static NSPasteboardType {
+pub(super) fn rtf_type() -> &'static NSPasteboardType {
     unsafe { NSPasteboardTypeRTF }
 }
-fn png_type() -> &'static NSPasteboardType {
+pub(super) fn png_type() -> &'static NSPasteboardType {
     unsafe { NSPasteboardTypePNG }
 }
-fn tiff_type() -> &'static NSPasteboardType {
+pub(super) fn tiff_type() -> &'static NSPasteboardType {
     unsafe { NSPasteboardTypeTIFF }
 }
-fn file_url_type() -> &'static NSPasteboardType {
+pub(super) fn file_url_type() -> &'static NSPasteboardType {
     unsafe { NSPasteboardTypeFileURL }
+}
+
+/// 辅助进程写入远端内容时附带的私有类型，值为 `主进程 pid:会话`，轮询据此认出自己写的内容。
+pub(super) fn owner_type() -> Retained<NSPasteboardType> {
+    NSString::from_str("com.nexshell.rdp-clipboard-owner")
+}
+
+pub(super) fn owner_marker(pid: u32, session: u64) -> String {
+    format!("{pid}:{session}")
+}
+
+pub(super) fn owner() -> Option<String> {
+    autoreleasepool(|_| {
+        pasteboard()
+            .stringForType(&owner_type())
+            .map(|s| s.to_string())
+    })
 }
 
 /// changeCount 加类型清单。截图等程序先清空剪贴板、过一阵才写入数据，
 /// 写入不会再加 changeCount，只看它会把中途的空剪贴板当成最终内容。
+/// 剪贴板为空时返回 None：多半是别的程序清空后还没写完，等写完再看。
 pub(super) fn change_token() -> Option<u64> {
     autoreleasepool(|_| {
         let pb = pasteboard();
+        let types = pb.types().filter(|t| t.count() > 0)?;
         let mut hasher = DefaultHasher::new();
         pb.changeCount().hash(&mut hasher);
-        for t in pb.types().iter().flatten() {
+        for t in types.iter() {
             t.to_string().hash(&mut hasher);
         }
         Some(hasher.finish())

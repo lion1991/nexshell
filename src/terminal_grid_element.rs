@@ -800,6 +800,8 @@ pub enum TerminalGridAction {
     DisconnectTab(usize),
     /// 切换 RDP 标签的连接信息浮层。
     ToggleRdpConnectionInfo(usize),
+    /// 取消 RDP 标签正在进行的远端文件下载。
+    CancelRdpClipboardTransfer(usize),
     /// 连接信息面板拖动结束：位移 + 面板尺寸（用于把面板留在内容区内）。
     MoveRdpConnectionInfo {
         index: usize,

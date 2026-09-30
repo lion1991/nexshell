@@ -6158,6 +6158,7 @@ dependencies = [
  "cocoa 0.26.0",
  "concat-idents",
  "core-text",
+ "dispatch2",
  "embed-resource",
  "encoding_rs",
  "enum-iterator",

@@ -47,6 +47,8 @@ rdp_info_pipeline_egfx: EGFX 图形管线
 rdp_info_publish_fps: 发布帧率
 rdp_quality_standard: 标准
 rdp_quality_hidpi: 高清
+rdp_clipboard_transfer: "正在从远端复制 %{files} 个文件 · %{percent}%（%{done} / %{total}）"
+rdp_clipboard_cancel: 取消
 code_viewer_loading: 文件加载中…
 code_viewer_read_error: "读取文件失败：%{error}"
 code_viewer_saved: 已保存

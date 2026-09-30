@@ -509,6 +509,8 @@ struct RdpTabState {
     conn_info_fps: f64,
     /// 动态分辨率防抖：窗口尺寸/全屏变化稳定后才请求远端重设分辨率。
     resize_debounce: rdp_view::ResizeDebounce,
+    /// 远端复制的文件正在下载到本机时的进度，底部浮条显示。
+    clipboard_transfer: Option<nexshell::rdp_session::ClipboardTransfer>,
 }
 
 struct TerminalSessionTab {
@@ -1065,6 +1067,14 @@ fn raise_open_file_limit() {
 }
 
 fn main() -> Result<()> {
+    // RDP 剪贴板辅助进程（docs/adr/0016）：同一个可执行文件，不初始化界面。
+    #[cfg(target_os = "macos")]
+    {
+        use nexshell::rdp_session::{run_pasteboard_helper, PASTEBOARD_HELPER_ARG};
+        if std::env::args_os().nth(1).as_deref() == Some(PASTEBOARD_HELPER_ARG.as_ref()) {
+            run_pasteboard_helper();
+        }
+    }
     #[cfg(unix)]
     raise_open_file_limit();
     // 设了 RUST_LOG 才接管 tracing（看 IronRDP 内部日志，如 RUST_LOG=ironrdp_rdpsnd=debug）。

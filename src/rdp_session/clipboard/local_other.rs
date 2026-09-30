@@ -35,6 +35,14 @@ pub(super) fn write_text(text: &str) -> bool {
         .is_ok()
 }
 
+pub(super) fn owner() -> Option<String> {
+    None
+}
+
+pub(super) fn owner_marker(pid: u32, session: u64) -> String {
+    format!("{pid}:{session}")
+}
+
 pub(super) fn file_paths() -> Vec<PathBuf> {
     Vec::new()
 }
