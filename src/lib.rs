@@ -71,6 +71,7 @@ pub mod sftp_ops;
 pub mod shell_chrome;
 pub mod shell_integration;
 pub mod ssh_key_store;
+pub mod ssh_password_prompt;
 pub mod ssh_session;
 pub mod stat_widgets;
 #[cfg(feature = "warpui-app")]

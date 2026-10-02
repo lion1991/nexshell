@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -119,6 +120,35 @@ impl client::Handler for ClientHandler {
     }
 }
 
+/// 未保存密码的主机：终端里认证成功的密码只记在进程内（不落盘），供同主机新标签与后台监控复用。
+/// 空串表示 none 认证即可登录。
+static REMEMBERED_PASSWORDS: OnceLock<StdMutex<HashMap<String, String>>> = OnceLock::new();
+
+fn remembered_passwords() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
+    REMEMBERED_PASSWORDS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn password_key(username: &str, host: &str, port: u16) -> String {
+    format!("{username}@{host}:{port}")
+}
+
+pub fn remember_password(username: &str, host: &str, port: u16, password: &str) {
+    remembered_passwords().insert(password_key(username, host, port), password.to_string());
+}
+
+pub fn remembered_password(username: &str, host: &str, port: u16) -> Option<String> {
+    remembered_passwords()
+        .get(&password_key(username, host, port))
+        .cloned()
+}
+
+pub fn forget_password(username: &str, host: &str, port: u16) {
+    remembered_passwords().remove(&password_key(username, host, port));
+}
+
 pub enum ChannelRequest {
     Data(Vec<u8>),
     Resize(u32, u32),
@@ -191,16 +221,50 @@ impl SshSession {
     }
 
     pub async fn auth_password(&mut self, username: &str, password: &str) -> Result<(), String> {
-        let handle = self.handle_mut()?;
-        let auth_ok = handle
-            .authenticate_password(username, password)
-            .await
-            .map_err(|error| format!("Password auth failed: {error}"))?;
-
-        if !auth_ok {
+        if !self.try_auth_password(username, password).await? {
             return Err("Password authentication rejected by server".to_string());
         }
         Ok(())
+    }
+
+    /// Ok(false) = 服务端拒绝，可再试；Err = 传输层故障。
+    pub async fn try_auth_password(
+        &mut self,
+        username: &str,
+        password: &str,
+    ) -> Result<bool, String> {
+        self.handle_mut()?
+            .authenticate_password(username, password)
+            .await
+            .map_err(|error| format!("Password auth failed: {error}"))
+    }
+
+    /// SSH "none" 认证。空密码账户（OpenSSH PermitEmptyPasswords / dropbear -B）走这里放行，
+    /// 不必再显式发空密码（那会在服务端记一次 Failed password）。
+    pub async fn auth_none(&mut self, username: &str) -> Result<bool, String> {
+        self.handle_mut()?
+            .authenticate_none(username)
+            .await
+            .map_err(|error| format!("None auth failed: {error}"))
+    }
+
+    /// 用 `remembered_password` 取到的凭据认证（空串走 none）；被拒即遗忘。
+    pub async fn auth_remembered(
+        &mut self,
+        username: &str,
+        host: &str,
+        port: u16,
+        password: &str,
+    ) -> Result<bool, String> {
+        let ok = if password.is_empty() {
+            self.auth_none(username).await?
+        } else {
+            self.try_auth_password(username, password).await?
+        };
+        if !ok {
+            forget_password(username, host, port);
+        }
+        Ok(ok)
     }
 
     pub async fn auth_key(

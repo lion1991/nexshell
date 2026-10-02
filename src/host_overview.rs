@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     host_management::HostConnectionConfig,
-    ssh_session::{SshConnectOptions, SshSession},
+    ssh_session::{self, SshConnectOptions, SshSession},
     terminal_runtime::RemoteSshConfig,
 };
 
@@ -1002,6 +1002,22 @@ pub(crate) async fn connect_authenticated_session(
     validate_monitor_config(config)?;
     let host = config.host.trim();
     let username = config.username.trim();
+    let saved_password = config
+        .password
+        .as_deref()
+        .filter(|value| !value.trim().is_empty());
+    // 未保存密码时只用终端登录成功过的凭据，且在连接前就判定：
+    // 后台循环拿空密码反复试会在服务端累积失败，触发 fail2ban / MaxAuthTries。
+    let remembered_password =
+        if config.auth_method.eq_ignore_ascii_case("key") || saved_password.is_some() {
+            None
+        } else {
+            Some(
+                ssh_session::remembered_password(username, host, config.port).ok_or_else(|| {
+                    "host overview password is not saved; waiting for terminal login".to_string()
+                })?,
+            )
+        };
     let connect_timeout_secs = u64::from(config.tcp_connect_timeout.clamp(5, 60));
     let mut session = tokio::time::timeout(
         Duration::from_secs(connect_timeout_secs),
@@ -1043,15 +1059,21 @@ pub(crate) async fn connect_authenticated_session(
         )
         .await
         .map_err(|_| format!("host overview authentication timeout after {auth_timeout_secs}s"))?
-    } else {
-        let password = config
-            .password
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "host overview password is empty".to_string())?;
+    } else if let Some(password) = remembered_password {
         tokio::time::timeout(
             Duration::from_secs(auth_timeout_secs),
-            session.auth_password(username, password),
+            session.auth_remembered(username, host, config.port, &password),
+        )
+        .await
+        .map_err(|_| format!("host overview authentication timeout after {auth_timeout_secs}s"))?
+        .and_then(|ok| {
+            ok.then_some(())
+                .ok_or_else(|| "remembered password rejected by server".to_string())
+        })
+    } else {
+        tokio::time::timeout(
+            Duration::from_secs(auth_timeout_secs),
+            session.auth_password(username, saved_password.unwrap_or_default()),
         )
         .await
         .map_err(|_| format!("host overview authentication timeout after {auth_timeout_secs}s"))?
@@ -1080,24 +1102,15 @@ fn validate_monitor_config(config: &RemoteSshConfig) -> Result<(), String> {
     if config.username.trim().is_empty() {
         return Err("host overview username is empty".to_string());
     }
-    if config.auth_method.eq_ignore_ascii_case("key") {
-        if config
+    if config.auth_method.eq_ignore_ascii_case("key")
+        && config
             .private_key
             .as_deref()
             .map(str::trim)
             .unwrap_or_default()
             .is_empty()
-        {
-            return Err("host overview private key is empty".to_string());
-        }
-    } else if config
-        .password
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default()
-        .is_empty()
     {
-        return Err("host overview password is empty".to_string());
+        return Err("host overview private key is empty".to_string());
     }
     Ok(())
 }

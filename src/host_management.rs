@@ -1682,15 +1682,8 @@ fn ssh_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
         if no_inline && no_keyref {
             return Some("密钥认证未保存私钥".to_string());
         }
-    } else if config
-        .password
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default()
-        .is_empty()
-    {
-        return Some("密码认证未保存密码".to_string());
     }
+    // 密码可空：连接时走 none 认证或在终端里提示输入
     None
 }
 
@@ -2235,6 +2228,18 @@ mod tests {
             }
             other => panic!("expected Rdp, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn ssh_plan_without_password_is_saved_ssh() {
+        let mut card = rdp_card("root", None, RdpDisplayQuality::Standard);
+        card.protocol = "SSH".to_string();
+        card.connection = HostConnectionConfig::ssh("10.0.0.5", 22, "root");
+        let state = state_with_host(card);
+        assert!(matches!(
+            state.connection_plan_for("rdp-1"),
+            Some(HostConnectionPlan::SavedSsh { .. })
+        ));
     }
 
     #[test]

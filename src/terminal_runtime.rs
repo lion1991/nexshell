@@ -21,7 +21,8 @@ use crate::foreground_kind::ForegroundKind;
 use crate::osc7::parse_osc7_payload;
 use crate::pty_event_loop;
 use crate::pty_event_loop::{EventLoopHandle, Message, PtyEvent, PtySink};
-use crate::ssh_session::{ChannelRequest, SshConnectOptions, SshHandle, SshSession};
+use crate::ssh_password_prompt::{PasswordInput, PasswordLineEditor};
+use crate::ssh_session::{self, ChannelRequest, SshConnectOptions, SshHandle, SshSession};
 use crate::terminal_recorder::TerminalRecorder;
 
 use alacritty_terminal::{
@@ -3798,24 +3799,16 @@ fn validate_remote_ssh_config(config: &RemoteSshConfig) -> Result<(), String> {
     if config.username.trim().is_empty() {
         return Err("用户名为空".to_string());
     }
-    if config.auth_method.eq_ignore_ascii_case("key") {
-        if config
+    // 密码可空：连接时走 none 认证或在终端里提示输入
+    if config.auth_method.eq_ignore_ascii_case("key")
+        && config
             .private_key
             .as_deref()
             .map(str::trim)
             .unwrap_or_default()
             .is_empty()
-        {
-            return Err("密钥认证未保存私钥".to_string());
-        }
-    } else if config
-        .password
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default()
-        .is_empty()
     {
-        return Err("密码认证未保存密码".to_string());
+        return Err("密钥认证未保存私钥".to_string());
     }
     Ok(())
 }
@@ -4056,8 +4049,8 @@ async fn run_remote_ssh_event_loop(
     event_tx: async_channel::Sender<PtyEvent>,
     ssh_handle_tx: async_channel::Sender<SshHandle>,
     shutdown: Arc<AtomicBool>,
-    cols: u16,
-    rows: u16,
+    mut cols: u16,
+    mut rows: u16,
 ) {
     let host = config.host.trim().to_string();
     let username = config.username.trim().to_string();
@@ -4170,21 +4163,18 @@ async fn run_remote_ssh_event_loop(
         .map_err(|_| format!("Authentication timeout after {auth_timeout_secs}s"))
         .and_then(|result| result)
     } else {
-        let password = config
-            .password
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| "No password configured for this host".to_string());
-        match password {
-            Ok(password) => tokio::time::timeout(
-                Duration::from_secs(auth_timeout_secs),
-                session.auth_password(&username, password),
-            )
-            .await
-            .map_err(|_| format!("Authentication timeout after {auth_timeout_secs}s"))
-            .and_then(|result| result),
-            Err(error) => Err(error),
-        }
+        remote_password_auth(
+            &mut session,
+            &config,
+            &username,
+            &host,
+            Duration::from_secs(auth_timeout_secs),
+            &mut request_rx,
+            &state,
+            &wakeup_tx,
+            (&mut cols, &mut rows),
+        )
+        .await
     };
 
     if let Err(error) = auth_result {
@@ -4309,6 +4299,119 @@ async fn run_remote_ssh_event_loop(
 
     session.close().await;
     remote_mark_disconnected(&state, &wakeup_tx, &event_tx, disconnect_status);
+}
+
+/// 与 OpenSSH NumberOfPasswordPrompts 默认值一致。
+const PASSWORD_PROMPT_ATTEMPTS: usize = 3;
+
+async fn with_auth_timeout<T>(
+    timeout: Duration,
+    auth: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    tokio::time::timeout(timeout, auth)
+        .await
+        .map_err(|_| format!("Authentication timeout after {}s", timeout.as_secs()))?
+}
+
+/// 有保存的密码直接用；否则依次试本进程记住的密码、none 认证，最后在终端里提示输入。
+/// 不显式发空密码：none 已覆盖空密码账户，空密码只会在服务端多记一次失败。
+#[allow(clippy::too_many_arguments)]
+async fn remote_password_auth(
+    session: &mut SshSession,
+    config: &RemoteSshConfig,
+    username: &str,
+    host: &str,
+    timeout: Duration,
+    request_rx: &mut tokio::sync::mpsc::Receiver<ChannelRequest>,
+    state: &Arc<FairMutex<TerminalRuntimeState>>,
+    wakeup_tx: &async_channel::Sender<()>,
+    size: (&mut u16, &mut u16),
+) -> Result<(), String> {
+    if let Some(password) = config
+        .password
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return with_auth_timeout(timeout, session.auth_password(username, password)).await;
+    }
+
+    let port = config.port;
+    let authenticated = match ssh_session::remembered_password(username, host, port) {
+        Some(password) => {
+            with_auth_timeout(
+                timeout,
+                session.auth_remembered(username, host, port, &password),
+            )
+            .await?
+        }
+        None => {
+            let ok = with_auth_timeout(timeout, session.auth_none(username)).await?;
+            if ok {
+                ssh_session::remember_password(username, host, port, "");
+            }
+            ok
+        }
+    };
+    if authenticated {
+        return Ok(());
+    }
+
+    let (cols, rows) = size;
+    for attempt in 0..PASSWORD_PROMPT_ATTEMPTS {
+        let retry = if attempt == 0 {
+            "\r\n"
+        } else {
+            "\r\n  \x1b[31m密码错误，请重试\x1b[0m\r\n"
+        };
+        let prompt = format!("{retry}  {username}@{host} 的密码: \x1b[?25h");
+        remote_process_output(state, wakeup_tx, prompt.as_bytes());
+        let Some(password) = remote_read_password(request_rx, state, wakeup_tx, cols, rows).await
+        else {
+            return Err("已取消密码输入".to_string());
+        };
+        remote_process_output(state, wakeup_tx, b"\x1b[?25l");
+        if with_auth_timeout(timeout, session.try_auth_password(username, &password)).await? {
+            ssh_session::remember_password(username, host, port, &password);
+            return Ok(());
+        }
+    }
+    Err("Password authentication rejected by server".to_string())
+}
+
+/// 在终端里读一行密码（不回显，不经 term_encoding：SSH 密码按 UTF-8 发送）。
+/// 取消 / 标签关闭返回 None。
+async fn remote_read_password(
+    request_rx: &mut tokio::sync::mpsc::Receiver<ChannelRequest>,
+    state: &Arc<FairMutex<TerminalRuntimeState>>,
+    wakeup_tx: &async_channel::Sender<()>,
+    cols: &mut u16,
+    rows: &mut u16,
+) -> Option<String> {
+    let mut apply_resize = |new_cols: u32, new_rows: u32| {
+        *cols = new_cols as u16;
+        *rows = new_rows as u16;
+        remote_handle_resize(state, wakeup_tx, *cols, *rows);
+    };
+    // 提示出现前敲的键不算密码
+    while let Ok(request) = request_rx.try_recv() {
+        match request {
+            ChannelRequest::Data(_) => {}
+            ChannelRequest::Resize(new_cols, new_rows) => apply_resize(new_cols, new_rows),
+            ChannelRequest::Close => return None,
+        }
+    }
+    let mut editor = PasswordLineEditor::default();
+    loop {
+        match request_rx.recv().await? {
+            ChannelRequest::Data(data) => match editor.feed(&data) {
+                PasswordInput::Pending => {}
+                PasswordInput::Submit(password) => return Some(password),
+                PasswordInput::Cancel => return None,
+            },
+            ChannelRequest::Resize(new_cols, new_rows) => apply_resize(new_cols, new_rows),
+            ChannelRequest::Close => return None,
+        }
+    }
 }
 
 fn remote_update_status(
