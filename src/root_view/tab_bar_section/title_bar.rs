@@ -10,7 +10,7 @@ use crate::title_bar_chrome::{
     TitleBarChromePlatform, WindowControlKind,
 };
 use crate::{
-    AppPage, RootView, TabBarDropTargetData, TabBarLocation, TabModel,
+    AppPage, RootView, TabBarDropTargetData, TabBarLocation, TabModel, TerminalSessionKind,
     FILE_PANEL_BUTTON_POSITION_ID, GIT_PANEL_BUTTON_POSITION_ID, ICON_BUTTON_PADDING,
     ICON_BUTTON_SIZE, ICON_PATH_CHEVRON_DOWN, ICON_PATH_FOLDER, ICON_PATH_GEAR,
     ICON_PATH_GIT_BRANCH, ICON_PATH_HOME, ICON_PATH_PLUS, ICON_PATH_SIDEBAR_OPEN,
@@ -241,6 +241,20 @@ impl RootView {
     }
 
     fn render_sidebar_toggle(&self) -> Box<dyn Element> {
+        // 串口 / Telnet 没有主机概览，隐藏按钮；留同尺寸占位，切标签时 tab 行不左右跳。
+        if self.app_page == AppPage::Terminal
+            && matches!(
+                self.terminal_tabs
+                    .get(self.active_tab_index)
+                    .map(|tab| tab.kind),
+                Some(TerminalSessionKind::Serial | TerminalSessionKind::Telnet)
+            )
+        {
+            return ConstrainedBox::new(Empty::new().finish())
+                .with_width(ICON_BUTTON_SIZE)
+                .with_height(ICON_BUTTON_SIZE)
+                .finish();
+        }
         let icon_path = ICON_PATH_SIDEBAR_OPEN;
         let is_active = self.sidebar_open;
         let state = self.sidebar_button_state.clone();

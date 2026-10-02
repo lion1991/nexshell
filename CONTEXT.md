@@ -17,7 +17,7 @@ _Avoid_: 文件树、资源管理器
 一个标签的内容类型。除终端外，已有 ProcessList/NetworkList/SystemInfo/GitDiff 等**非终端**整页种类；**内置编辑器**、**RDP 标签**是其中两种。
 
 **Telnet 标签 (Telnet Tab)**：
-经 Telnet 连接的终端标签，行为同远程/串口终端标签（录制、分屏、断开重连）；没有 SFTP / exec 通道，文件面板只提示不支持，无主机监控。设计见 ADR 0018。
+经 Telnet 连接的终端标签，行为同远程/串口终端标签（录制、分屏、断开重连）；没有 SFTP / exec 通道，文件面板只提示不支持，无主机监控（侧栏按钮隐藏）。设计见 ADR 0018。
 _Avoid_: 远程标签（远程标签特指 SSH）
 
 **RDP 标签 (RDP Tab)**：

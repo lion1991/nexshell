@@ -18,7 +18,7 @@ Status: accepted (2026-10-02)
 - **编码**：与 SSH 一样经 `RemoteTerminalEncoding` 按主机的 `term_encoding` 转码（GBK 网络设备是主要场景；Serial 没做这层）。
 - **自动登录**：用户名/密码可选。填了就在登录提示出现时各答一次（`login:` / `username:` / `user name:` / `用户名:` 与 `password:` / `密码:`，大小写不敏感、只匹配输出末尾）；答完密码、或 16 KiB 输出内没见到提示即停用，之后会话里再出现 `login:` 不会误发。登录失败的重试交给用户手动输入。
 - **保活**：开启时按间隔发 IAC NOP（服务端按规范忽略），复用 SSH 的 keep-alive 开关与间隔；「最大失败次数」「认证超时」对 Telnet 无意义，表单不显示。
-- **标签**：新增 `TerminalSessionKind::Telnet`，行为同 Remote/Serial 的终端标签：可录制、可分屏（新 pane 再开一条 Telnet）、断开显示提示与重连；没有 SFTP / exec 通道，文件面板提示「不支持文件浏览」（串口标签同样处理），无主机监控。同一主机可开多个标签，不做串口那种独占去重。
+- **标签**：新增 `TerminalSessionKind::Telnet`，行为同 Remote/Serial 的终端标签：可录制、可分屏（新 pane 再开一条 Telnet）、断开显示提示与重连；没有 SFTP / exec 通道，文件面板提示「不支持文件浏览」（串口标签同样处理），无主机监控，标题栏左侧的主机概览侧栏按钮隐藏（留占位防 tab 行跳动）。同一主机可开多个标签，不做串口那种独占去重。
 
 ## 验证
 
