@@ -8687,6 +8687,7 @@ dependencies = [
 [[package]]
 name = "russh"
 version = "0.46.0"
+source = "git+https://github.com/lion1991/russh.git?rev=9e2d87fc4bceda034fbba68b8514c0d08cb442ea#9e2d87fc4bceda034fbba68b8514c0d08cb442ea"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm 0.10.3",

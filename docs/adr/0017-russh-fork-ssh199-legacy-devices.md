@@ -1,4 +1,4 @@
-# russh vendor 补丁：兼容 SSH-1.99 / ssh-rsa 老设备
+# russh fork 补丁：兼容 SSH-1.99 / ssh-rsa 老设备
 
 Status: accepted (2026-10-02)；升级 russh 后撤销
 
@@ -17,7 +17,10 @@ Status: accepted (2026-10-02)；升级 russh 后撤销
 
 ## 决策
 
-- russh 0.46.0 原样拷入 `vendor/russh`，`[patch.crates-io]` 指向它；唯一改动在 `src/ssh_read.rs`：版本行接受 `SSH-1.99-`，原串返回（交换哈希要用对端原串，不能改写成 2.0）。
+- fork `lion1991/russh`，分支 `nexshell-0.46` 从上游 tag `v0.46.0`（`e7a9ee9`）出发，`[patch.crates-io]` 只把 `russh` 钉到该分支 rev，两个补丁：
+  1. `russh/Cargo.toml` 去掉 russh-keys / russh-cryptovec / russh-util 的 `path`，三者仍走 crates.io。tag 上的 cryptovec 与发布的 0.7.3 源码不同（含 #351 wasm 重构），这样依赖与 crates.io 版 russh 0.46.0 完全一致。
+  2. `russh/src/ssh_read.rs`：版本行接受 `SSH-1.99-`，原串返回（交换哈希要用对端原串，不能改写成 2.0）。
+- 最初用 `vendor/russh` 拷贝源码（约 630K），随即改为 fork 钉 rev，与 IronRDP 做法一致、仓库不背源码。
 - `ssh_session.rs` 在默认主机密钥算法末位追加 `ssh-rsa`，新服务器仍优先 ed25519 / ecdsa / rsa-sha2。russh 读 known_hosts 时 RSA 记录一律按 rsa-sha2-256 解析，比对前把密钥算法统一到 SHA2_256，否则 ssh-rsa 记录永远对不上。
 - MAC 不用动：该设备上 chacha20-poly1305 可用，AEAD 不走单独 MAC。
 
@@ -25,5 +28,4 @@ Status: accepted (2026-10-02)；升级 russh 后撤销
 
 ## 后续
 
-- 升级 russh 到含 #514 的版本（顺带拿上游 2026-05 的安全修复）时删掉 `vendor/russh` 与对应 patch 项，并按新 API 改写 ssh-rsa 追加与 known_hosts 归一化。
-- 若嫌 vendor 目录占仓库体积，可改为像 IronRDP 一样 fork 到 GitHub 钉 rev。
+- 升级 russh 到含 #514 的版本（顺带拿上游 2026-05 的安全修复）时删掉 `russh` 的 patch 项、弃用 fork 分支，并按新 API 改写 ssh-rsa 追加与 known_hosts 归一化。
