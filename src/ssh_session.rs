@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use russh::client;
-use russh::keys::key::PublicKey;
+use russh::keys::key::{self, PublicKey, SignatureHash};
 use russh::keys::known_hosts::{check_known_hosts_path, learn_known_hosts_path};
-use russh::{Channel, ChannelMsg, Disconnect};
+use russh::{Channel, ChannelMsg, Disconnect, Preferred};
 use russh_sftp::client::SftpSession;
 use ssh_key::Certificate;
 use tokio::sync::Mutex;
@@ -38,7 +38,11 @@ pub fn verify_host_key_at(
     port: u16,
     key: &PublicKey,
 ) -> Result<HostKeyVerdict, String> {
-    match check_known_hosts_path(host, port, key, path) {
+    // russh 读 known_hosts 时 RSA 记录一律按 rsa-sha2-256 解析，且比对含算法名；
+    // ssh-rsa 协商出的密钥不先统一就永远匹配不上（每次重复写入，换钥也查不出）。
+    let mut normalized = key.clone();
+    normalized.set_algorithm(SignatureHash::SHA2_256);
+    match check_known_hosts_path(host, port, &normalized, path) {
         Ok(true) => Ok(HostKeyVerdict::Known),
         Ok(false) => {
             learn_known_hosts_path(host, port, key, path)
@@ -181,6 +185,14 @@ impl SshSession {
         options: SshConnectOptions,
     ) -> Result<Self, String> {
         let mut cfg = client::Config::default();
+        // 末位追加 ssh-rsa（SHA-1 签名），兼容只提供它的老设备（如 OpenSSH 6.x）；
+        // 新服务器仍优先协商 ed25519 / ecdsa / rsa-sha2。
+        cfg.preferred.key = Preferred::DEFAULT
+            .key
+            .iter()
+            .cloned()
+            .chain([key::SSH_RSA])
+            .collect();
         if options.keep_alive_enabled {
             cfg.keepalive_interval = Some(Duration::from_secs(u64::from(
                 options.keep_alive_interval_secs,
@@ -487,5 +499,34 @@ mod tests {
         );
         // 拒绝时不得改写 known_hosts。
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn ssh_rsa_host_key_matches_recorded_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let rsa_key = || {
+            KeyPair::generate_rsa(1024, SignatureHash::SHA1)
+                .unwrap()
+                .clone_public_key()
+                .unwrap()
+        };
+        let first = rsa_key();
+
+        assert_eq!(
+            verify_host_key_at(&path, "10.0.0.1", 22, &first).unwrap(),
+            HostKeyVerdict::Learned
+        );
+        let recorded = std::fs::read_to_string(&path).unwrap();
+        assert!(recorded.contains("10.0.0.1 ssh-rsa "));
+        assert_eq!(
+            verify_host_key_at(&path, "10.0.0.1", 22, &first).unwrap(),
+            HostKeyVerdict::Known
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), recorded);
+        assert_eq!(
+            verify_host_key_at(&path, "10.0.0.1", 22, &rsa_key()).unwrap(),
+            HostKeyVerdict::Changed
+        );
     }
 }
