@@ -8,6 +8,7 @@ quit_app: 退出 NexShell
 tab_local: 本地
 tab_remote: 远程
 tab_serial: 串口
+tab_telnet: Telnet
 tab_direct: 终端
 tab_process_list: 进程
 process_list_placeholder: 进程列表加载中…
@@ -415,6 +416,7 @@ form_tcp_timeout: TCP 连接超时
 form_auth_timeout: 认证超时
 form_terminal_encoding: 终端编码
 form_encoding_hint: 连接旧系统时可能需要修改编码
+form_telnet_login_hint: 可留空；填写后在登录提示出现时自动输入一次
 form_serial_params: 串口参数
 form_data_bits: 数据位
 form_stop_bits: 停止位

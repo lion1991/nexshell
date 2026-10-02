@@ -291,6 +291,10 @@ impl HostConnectionConfig {
         config
     }
 
+    pub fn telnet(host: impl Into<String>, port: u16, username: impl Into<String>) -> Self {
+        Self::ssh(host, port, username)
+    }
+
     pub fn serial(serial_port: impl Into<String>, serial_baud_rate: u32) -> Self {
         let serial_port = serial_port.into();
         Self {
@@ -329,6 +333,8 @@ impl HostConnectionConfig {
                 self.serial_port.as_deref().unwrap_or(self.host.as_str()),
                 self.serial_baud_rate
             )
+        } else if self.username.trim().is_empty() {
+            format!("{}:{}", self.host, self.port)
         } else {
             format!("{}@{}:{}", self.username, self.host, self.port)
         }
@@ -360,6 +366,11 @@ pub enum HostConnectionPlan {
         config: HostConnectionConfig,
     },
     Rdp {
+        session_id: String,
+        title: String,
+        config: HostConnectionConfig,
+    },
+    Telnet {
         session_id: String,
         title: String,
         config: HostConnectionConfig,
@@ -409,6 +420,7 @@ pub enum ProtocolFilter {
     Ssh,
     Serial,
     Rdp,
+    Telnet,
 }
 
 fn all_hosts_group_label() -> String {
@@ -422,6 +434,7 @@ impl ProtocolFilter {
             Self::Ssh => "SSH".to_string(),
             Self::Serial => "Serial".to_string(),
             Self::Rdp => "RDP".to_string(),
+            Self::Telnet => "Telnet".to_string(),
         }
     }
 
@@ -430,7 +443,8 @@ impl ProtocolFilter {
             Self::All => Self::Ssh,
             Self::Ssh => Self::Serial,
             Self::Serial => Self::Rdp,
-            Self::Rdp => Self::All,
+            Self::Rdp => Self::Telnet,
+            Self::Telnet => Self::All,
         }
     }
 
@@ -440,6 +454,7 @@ impl ProtocolFilter {
             Self::Ssh => host.protocol == "SSH",
             Self::Serial => host.protocol == "Serial",
             Self::Rdp => host.protocol == "RDP",
+            Self::Telnet => host.protocol == "Telnet",
         }
     }
 }
@@ -839,6 +854,17 @@ impl HostManagementState {
             },
             "RDP" => match rdp_saved_connection_error(&host.connection) {
                 None => HostConnectionPlan::Rdp {
+                    session_id: session_id_for_host(&host.id),
+                    title: host.name.clone(),
+                    config: host.connection.clone(),
+                },
+                Some(reason) => HostConnectionPlan::Unsupported {
+                    title: host.name.clone(),
+                    reason,
+                },
+            },
+            "Telnet" => match telnet_saved_connection_error(&host.connection) {
+                None => HostConnectionPlan::Telnet {
                     session_id: session_id_for_host(&host.id),
                     title: host.name.clone(),
                     config: host.connection.clone(),
@@ -1334,13 +1360,7 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
     let now = unix_ts_seconds();
     let tags_json = serde_json::to_string(&host.tags)
         .map_err(|error| format!("serialize host {} tags: {error}", host.id))?;
-    let protocol = if host.protocol.eq_ignore_ascii_case("serial") {
-        "serial"
-    } else if host.protocol.eq_ignore_ascii_case("rdp") {
-        "rdp"
-    } else {
-        "ssh"
-    };
+    let protocol = protocol_db_value(&host.protocol);
     let config = &host.connection;
 
     conn.execute(
@@ -1569,15 +1589,8 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
     let rows = stmt
         .query_map([], |row| {
             let protocol_raw: String = row.get(6)?;
-            let is_serial = protocol_raw.eq_ignore_ascii_case("serial");
-            let is_rdp = protocol_raw.eq_ignore_ascii_case("rdp");
-            let protocol = if is_serial {
-                "Serial".to_string()
-            } else if is_rdp {
-                "RDP".to_string()
-            } else {
-                "SSH".to_string()
-            };
+            let protocol = protocol_display_name(&protocol_raw).to_string();
+            let is_serial = protocol == "Serial";
             let tags_json: String = row.get(27)?;
             let connection = HostConnectionConfig {
                 host: row.get(3)?,
@@ -1632,6 +1645,25 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
         hosts.push(row.map_err(|error| format!("read host row: {error}"))?);
     }
     Ok(hosts)
+}
+
+// 库里存小写；未知值（含更新版本写入的协议）回落 SSH。
+fn protocol_db_value(protocol: &str) -> &'static str {
+    match protocol.trim().to_ascii_lowercase().as_str() {
+        "serial" => "serial",
+        "rdp" => "rdp",
+        "telnet" => "telnet",
+        _ => "ssh",
+    }
+}
+
+fn protocol_display_name(db_value: &str) -> &'static str {
+    match protocol_db_value(db_value) {
+        "serial" => "Serial",
+        "rdp" => "RDP",
+        "telnet" => "Telnet",
+        _ => "SSH",
+    }
 }
 
 // 空描述保持为空：卡片/编辑窗对空值各自处理，不再注入占位文案。
@@ -1703,6 +1735,14 @@ fn rdp_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
         .is_empty()
     {
         return Some("RDP 需要保存密码".to_string());
+    }
+    None
+}
+
+// 用户名/密码可空：留空则在终端里手动登录
+fn telnet_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
+    if config.host.trim().is_empty() {
+        return Some("主机地址为空".to_string());
     }
     None
 }
@@ -2280,6 +2320,77 @@ mod tests {
             RdpDisplayQuality::Hidpi
         );
         assert_eq!(host.connection.password.as_deref(), Some("pw"));
+    }
+
+    fn telnet_card(host: &str, username: &str) -> HostCardSnapshot {
+        let conn = HostConnectionConfig::telnet(host, 23, username);
+        HostCardSnapshot {
+            id: "tel-1".to_string(),
+            name: "switch".to_string(),
+            protocol: "Telnet".to_string(),
+            endpoint: conn.endpoint("Telnet"),
+            description: String::new(),
+            connection: conn,
+            group_id: None,
+            tags: Vec::new(),
+            system: HostSystemIcon::Terminal,
+            sort_order: 0,
+        }
+    }
+
+    #[test]
+    fn telnet_host_roundtrips_through_db() {
+        let (db_path, _conn) = temp_db();
+        upsert_host_card_in_db_path(&db_path, &telnet_card("10.0.0.9", "admin")).unwrap();
+
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        let host = snapshot.hosts.iter().find(|h| h.id == "tel-1").unwrap();
+        assert_eq!(host.protocol, "Telnet");
+        assert_eq!(host.connection.port, 23);
+        assert_eq!(host.connection.username, "admin");
+    }
+
+    #[test]
+    fn telnet_plan_without_credentials_is_telnet() {
+        let state = state_with_host(telnet_card("10.0.0.9", ""));
+        match state.connection_plan_for("tel-1").unwrap() {
+            HostConnectionPlan::Telnet { config, title, .. } => {
+                assert_eq!(title, "switch");
+                assert_eq!(config.host, "10.0.0.9");
+                assert_eq!(config.port, 23);
+            }
+            other => panic!("expected Telnet, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn telnet_plan_missing_host_is_unsupported() {
+        let state = state_with_host(telnet_card(" ", "admin"));
+        assert!(matches!(
+            state.connection_plan_for("tel-1"),
+            Some(HostConnectionPlan::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn telnet_endpoint_omits_empty_username() {
+        assert_eq!(
+            HostConnectionConfig::telnet("10.0.0.9", 23, "").endpoint("Telnet"),
+            "10.0.0.9:23"
+        );
+        assert_eq!(
+            HostConnectionConfig::telnet("10.0.0.9", 2323, "admin").endpoint("Telnet"),
+            "admin@10.0.0.9:2323"
+        );
+    }
+
+    #[test]
+    fn protocol_filter_telnet_matches_only_telnet_hosts() {
+        let card = telnet_card("10.0.0.9", "");
+        assert!(ProtocolFilter::Telnet.matches(&card));
+        assert!(!ProtocolFilter::Ssh.matches(&card));
+        assert_eq!(ProtocolFilter::Rdp.next(), ProtocolFilter::Telnet);
+        assert_eq!(ProtocolFilter::Telnet.next(), ProtocolFilter::All);
     }
 
     #[test]

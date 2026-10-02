@@ -35,6 +35,7 @@ impl RootView {
             || (draft.protocol == "Serial" && draft.serial_baud_rate == 0)
             || (draft.protocol == "SSH" && draft.username.trim().is_empty())
             || (draft.protocol == "RDP" && (draft.port == 0 || draft.username.trim().is_empty()))
+            || (draft.protocol == "Telnet" && draft.port == 0)
         {
             self.host_state.notice = Some(rust_i18n::t!("toast_form_required").to_string());
             return false;
@@ -349,6 +350,17 @@ impl RootView {
             connection.password = optional_text(&draft.password);
             connection.rdp_display_quality = draft.rdp_display_quality;
             connection.rdp_resolution = draft.rdp_resolution;
+            return connection;
+        }
+
+        if draft.protocol == "Telnet" {
+            let mut connection =
+                HostConnectionConfig::telnet(draft.host.trim(), draft.port, draft.username.trim());
+            connection.password = optional_text(&draft.password);
+            connection.keep_alive_enabled = draft.keep_alive_enabled;
+            connection.keep_alive_interval = draft.keep_alive_interval;
+            connection.tcp_connect_timeout = draft.tcp_connect_timeout;
+            connection.term_encoding = draft.term_encoding.clone();
             return connection;
         }
 

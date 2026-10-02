@@ -399,6 +399,17 @@ impl RootView {
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
         let state = &tab.file_panel_state;
+        // 串口 / Telnet 没有 SFTP 通道，别让它一直显示「等待 SSH 连接」。
+        if matches!(
+            tab.kind,
+            TerminalSessionKind::Serial | TerminalSessionKind::Telnet
+        ) {
+            return file_panel_fill_slot(file_panel_message(
+                "此连接类型不支持文件浏览",
+                self.ui_font,
+                colors.text_muted,
+            ));
+        }
         if !matches!(tab.kind, TerminalSessionKind::Local) && tab.ssh_handle.is_none() {
             return file_panel_fill_slot(file_panel_message(
                 "等待 SSH 连接...",

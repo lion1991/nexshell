@@ -31,6 +31,7 @@ use warpui::{Entity, ReadModel, UpdateModel};
 
 // RDP 端口默认值：切到 RDP 且端口仍是 SSH 默认(22) 时自动改用此值。
 const RDP_DEFAULT_PORT: u16 = 3389;
+const TELNET_DEFAULT_PORT: u16 = 23;
 
 // ── 数据模型 ──
 
@@ -245,6 +246,7 @@ struct FieldStates {
     close_btn_state: MouseStateHandle,
     protocol_ssh_state: MouseStateHandle,
     protocol_rdp_state: MouseStateHandle,
+    protocol_telnet_state: MouseStateHandle,
     protocol_serial_state: MouseStateHandle,
     rdp_quality_standard_state: MouseStateHandle,
     rdp_quality_hidpi_state: MouseStateHandle,
@@ -291,6 +293,7 @@ impl FieldStates {
             close_btn_state: ms(),
             protocol_ssh_state: ms(),
             protocol_rdp_state: ms(),
+            protocol_telnet_state: ms(),
             protocol_serial_state: ms(),
             rdp_quality_standard_state: ms(),
             rdp_quality_hidpi_state: ms(),
@@ -692,6 +695,7 @@ impl HostEditView {
         });
         let is_ssh = protocol == "SSH";
         let is_rdp = protocol == "RDP";
+        let is_telnet = protocol == "Telnet";
         let mut fields = vec![EditField::Name, EditField::Host];
 
         if is_ssh {
@@ -704,7 +708,7 @@ impl HostEditView {
             } else {
                 fields.push(EditField::Password);
             }
-        } else if is_rdp {
+        } else if is_rdp || is_telnet {
             fields.push(EditField::Port);
             fields.push(EditField::Username);
             fields.push(EditField::Password);
@@ -718,6 +722,9 @@ impl HostEditView {
             fields.push(EditField::KeepAliveMaxFailures);
             fields.push(EditField::TcpConnectTimeout);
             fields.push(EditField::AuthTimeout);
+        } else if is_telnet {
+            fields.push(EditField::KeepAliveInterval);
+            fields.push(EditField::TcpConnectTimeout);
         }
         fields
     }
@@ -943,8 +950,8 @@ impl warpui::TypedActionView for HostEditView {
             HostEditAction::SelectProtocol(target) => {
                 self.states.borrow_mut().open_dropdown = None;
                 let target = target.clone();
-                // 切协议时按 SSH/RDP 默认端口互换（仅当端口仍是另一协议默认值），避免残留。
                 let mut port_change: Option<u16> = None;
+                let mut username_change: Option<String> = None;
                 let host_placeholder = ctx.update_model(&self.model, |m, ctx| {
                     if m.draft.protocol != target {
                         let old_protocol = std::mem::replace(&mut m.draft.protocol, target.clone());
@@ -961,10 +968,10 @@ impl warpui::TypedActionView for HostEditView {
                         ) {
                             m.draft.host = host;
                         }
-                        if target == "RDP" && m.draft.port == 22 {
-                            port_change = Some(RDP_DEFAULT_PORT);
-                        } else if target == "SSH" && m.draft.port == RDP_DEFAULT_PORT {
-                            port_change = Some(22);
+                        port_change = protocol_switch_port(&target, m.draft.port);
+                        username_change = protocol_switch_username(&target, &m.draft.username);
+                        if let Some(username) = &username_change {
+                            m.draft.username = username.clone();
                         }
                         ctx.notify();
                     }
@@ -972,6 +979,11 @@ impl warpui::TypedActionView for HostEditView {
                 });
                 if let Some(port) = port_change {
                     self.set_port_value(port, ctx);
+                }
+                if let Some(username) = username_change {
+                    self.username_editor.update(ctx, |editor, ctx| {
+                        editor.system_reset_buffer_text(&username, ctx);
+                    });
                 }
                 let host_text = ctx.read_model(&self.model, |m, _| m.draft.host.clone());
                 self.host_editor.update(ctx, |editor, ctx| {
@@ -1270,6 +1282,29 @@ fn protocol_switch_host(
     None
 }
 
+/// 切协议时端口仍是某协议默认值才换成目标协议默认值，用户自定义端口不动。
+fn protocol_switch_port(new_protocol: &str, port: u16) -> Option<u16> {
+    let target = default_port(new_protocol)?;
+    let is_default = ["SSH", "RDP", "Telnet"]
+        .into_iter()
+        .any(|protocol| default_port(protocol) == Some(port));
+    (is_default && port != target).then_some(target)
+}
+
+fn default_port(protocol: &str) -> Option<u16> {
+    match protocol {
+        "SSH" => Some(22),
+        "RDP" => Some(RDP_DEFAULT_PORT),
+        "Telnet" => Some(TELNET_DEFAULT_PORT),
+        _ => None,
+    }
+}
+
+/// Telnet 填了用户名就会自动应答登录提示：切过去时清掉新建 SSH 主机预填的 root。
+fn protocol_switch_username(new_protocol: &str, username: &str) -> Option<String> {
+    (new_protocol == "Telnet" && username.trim() == "root").then(String::new)
+}
+
 fn number_bounds(field: EditField) -> Option<(u16, u16)> {
     match field {
         EditField::Port => Some((1, u16::MAX)),
@@ -1435,6 +1470,56 @@ fn render_form(
             appearance,
             480.0,
         ));
+    } else if draft.protocol == "Telnet" {
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_host_address"),
+            ui_font,
+            hc,
+        ));
+        col.add_child(render_text_field(&view.host_editor, appearance));
+
+        col.add_child(render_field_label(&rust_i18n::t!("form_port"), ui_font, hc));
+        col.add_child(render_port_stepper(
+            draft.port,
+            &view.port_editor,
+            states,
+            ui_font,
+            appearance,
+            hc,
+        ));
+
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_username"),
+            ui_font,
+            hc,
+        ));
+        col.add_child(render_text_field(&view.username_editor, appearance));
+
+        col.add_child(render_field_label(
+            &rust_i18n::t!("form_password"),
+            ui_font,
+            hc,
+        ));
+        col.add_child(render_password_field(
+            &view.password_editor,
+            &states.password_eye_state,
+            password_visible,
+            appearance,
+            hc,
+        ));
+        col.add_child(
+            Container::new(
+                Text::new_inline(
+                    rust_i18n::t!("form_telnet_login_hint").to_string(),
+                    ui_font,
+                    12.0,
+                )
+                .with_color(hc.text_secondary)
+                .finish(),
+            )
+            .with_margin_top(6.0)
+            .finish(),
+        );
     } else if draft.protocol == "SSH" {
         col.add_child(render_field_label(
             &rust_i18n::t!("form_host_address"),
@@ -1572,7 +1657,7 @@ fn render_form(
         hc,
     ));
 
-    // 高级设置（keep-alive/超时/编码）是 SSH/串口概念，RDP 不展示。
+    // 高级设置（keep-alive/超时/编码）是 SSH/Telnet/串口概念，RDP 不展示。
     if draft.protocol != "RDP" {
         col.add_child(render_advanced_settings(
             draft, states, ui_font, view, appearance, hc,
@@ -2379,6 +2464,21 @@ fn render_protocol_toggle(
             .with_child(
                 Expanded::new(
                     1.0,
+                    Container::new(protocol_segment(
+                        "Telnet",
+                        protocol == "Telnet",
+                        &states.protocol_telnet_state,
+                        ui_font,
+                        hc,
+                    ))
+                    .with_margin_right(8.0)
+                    .finish(),
+                )
+                .finish(),
+            )
+            .with_child(
+                Expanded::new(
+                    1.0,
                     protocol_segment(
                         "Serial",
                         protocol == "Serial",
@@ -2698,6 +2798,8 @@ fn render_advanced_card(
         return render_serial_advanced_card(draft, states, ui_font, appearance, hc);
     }
 
+    // Telnet 保活是定时 IAC NOP、无认证阶段：不显示最大失败次数与认证超时。
+    let is_telnet = draft.protocol == "Telnet";
     let mut card = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
@@ -2733,15 +2835,19 @@ fn render_advanced_card(
                 appearance,
                 hc,
             ),
-            render_settings_number_item(
-                &rust_i18n::t!("form_max_failures"),
-                draft.keep_alive_max_failures,
-                &view.keep_alive_max_failures_editor,
-                "1-10 次",
-                ui_font,
-                appearance,
-                hc,
-            ),
+            if is_telnet {
+                warpui::elements::Empty::new().finish()
+            } else {
+                render_settings_number_item(
+                    &rust_i18n::t!("form_max_failures"),
+                    draft.keep_alive_max_failures,
+                    &view.keep_alive_max_failures_editor,
+                    "1-10 次",
+                    ui_font,
+                    appearance,
+                    hc,
+                )
+            },
         ))
         .with_margin_top(18.0)
         .finish(),
@@ -2764,15 +2870,19 @@ fn render_advanced_card(
                 appearance,
                 hc,
             ),
-            render_settings_number_item(
-                &rust_i18n::t!("form_auth_timeout"),
-                draft.auth_timeout,
-                &view.auth_timeout_editor,
-                "10-120 秒",
-                ui_font,
-                appearance,
-                hc,
-            ),
+            if is_telnet {
+                warpui::elements::Empty::new().finish()
+            } else {
+                render_settings_number_item(
+                    &rust_i18n::t!("form_auth_timeout"),
+                    draft.auth_timeout,
+                    &view.auth_timeout_editor,
+                    "10-120 秒",
+                    ui_font,
+                    appearance,
+                    hc,
+                )
+            },
         ))
         .with_margin_top(12.0)
         .finish(),
@@ -3432,6 +3542,31 @@ mod tests {
     }
 
     #[test]
+    fn protocol_switch_port_swaps_only_default_ports() {
+        assert_eq!(protocol_switch_port("RDP", 22), Some(3389));
+        assert_eq!(protocol_switch_port("SSH", 3389), Some(22));
+        assert_eq!(protocol_switch_port("Telnet", 22), Some(23));
+        assert_eq!(protocol_switch_port("SSH", 23), Some(22));
+        assert_eq!(protocol_switch_port("RDP", 23), Some(3389));
+        // 已是目标默认值、或用户自定义端口：不动
+        assert_eq!(protocol_switch_port("Telnet", 23), None);
+        assert_eq!(protocol_switch_port("Telnet", 2323), None);
+        // 串口不用端口
+        assert_eq!(protocol_switch_port("Serial", 22), None);
+    }
+
+    #[test]
+    fn protocol_switch_username_clears_ssh_default_for_telnet() {
+        assert_eq!(
+            protocol_switch_username("Telnet", "root"),
+            Some(String::new())
+        );
+        assert_eq!(protocol_switch_username("Telnet", "admin"), None);
+        assert_eq!(protocol_switch_username("SSH", "root"), None);
+        assert_eq!(protocol_switch_username("RDP", "root"), None);
+    }
+
+    #[test]
     fn protocol_switch_host_migrates_serial_residue() {
         let dev = || Some("COM3".to_string());
         // 离开串口：设备名残留清空；空值/非设备名不动
@@ -3459,7 +3594,12 @@ mod tests {
             protocol_switch_host("SSH", "Serial", "myhost", None),
             Some(String::new())
         );
+        assert_eq!(
+            protocol_switch_host("Serial", "Telnet", "COM1", None),
+            Some(String::new())
+        );
         // 非串口协议之间互切：即使主机名形似 COM 口也不动（只有离开串口才清）
         assert_eq!(protocol_switch_host("SSH", "RDP", "com3", None), None);
+        assert_eq!(protocol_switch_host("SSH", "Telnet", "com3", None), None);
     }
 }

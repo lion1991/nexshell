@@ -90,7 +90,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>NexShell 需要访问局域网，以便连接你的 SSH / RDP / Serial 主机。</string>
+    <string>NexShell 需要访问局域网，以便连接你的 SSH / RDP / Telnet / Serial 主机。</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>NexShell 中运行的程序可能使用 AppleScript 来控制其他应用。</string>
 </dict>

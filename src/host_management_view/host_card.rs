@@ -336,11 +336,12 @@ fn render_select_checkbox(
     .finish()
 }
 
-// 协议标识色：badge 与系统图标底共用，SSH 蓝 / Serial 橙 / RDP 紫。
+// 协议标识色：badge 与系统图标底共用，SSH 蓝 / Serial 橙 / RDP 紫 / Telnet 青。
 pub(super) fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, ColorU) {
     match protocol {
         "Serial" => (hc.badge_serial_bg, hc.badge_serial_text),
         "RDP" => (hc.badge_rdp_bg, hc.badge_rdp_text),
+        "Telnet" => (hc.badge_telnet_bg, hc.badge_telnet_text),
         _ => (hc.badge_ssh_bg, hc.badge_ssh_text),
     }
 }

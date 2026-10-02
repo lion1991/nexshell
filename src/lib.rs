@@ -76,6 +76,7 @@ pub mod ssh_session;
 pub mod stat_widgets;
 #[cfg(feature = "warpui-app")]
 pub mod telemetry;
+pub mod telnet;
 pub mod terminal_lifecycle;
 pub mod terminal_mount;
 pub mod terminal_recorder;

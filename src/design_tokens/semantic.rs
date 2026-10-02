@@ -29,6 +29,8 @@ pub struct SemanticColors {
     pub swap: ColorU,
     /// RDP 协议标识色（badge/图标底），与 SSH accent 蓝、Serial warn 橙区分。
     pub rdp: ColorU,
+    /// Telnet 协议标识色。
+    pub telnet: ColorU,
     pub upload: ColorU,
     pub download: ColorU,
     pub transparent: ColorU,
@@ -46,6 +48,7 @@ impl SemanticColors {
                 memory: rgb(0xd4a72c),
                 swap: rgb(0xbc8cff),
                 rdp: rgb(0xbc8cff),
+                telnet: rgb(0x39c5cf),
                 upload: rgb(0xf0883e),
                 download: rgb(0x56d364),
                 transparent: TRANSPARENT,
@@ -60,6 +63,7 @@ impl SemanticColors {
                 memory: rgb(0xbf8700),
                 swap: rgb(0x8250df),
                 rdp: rgb(0x8250df),
+                telnet: rgb(0x1b7c83),
                 upload: rgb(0xbc4c00),
                 download: rgb(0x2da44e),
                 transparent: TRANSPARENT,

@@ -16,6 +16,10 @@ _Avoid_: 文件树、资源管理器
 **标签种类 (TerminalSessionKind)**：
 一个标签的内容类型。除终端外，已有 ProcessList/NetworkList/SystemInfo/GitDiff 等**非终端**整页种类；**内置编辑器**、**RDP 标签**是其中两种。
 
+**Telnet 标签 (Telnet Tab)**：
+经 Telnet 连接的终端标签，行为同远程/串口终端标签（录制、分屏、断开重连）；没有 SFTP / exec 通道，文件面板只提示不支持，无主机监控。设计见 ADR 0018。
+_Avoid_: 远程标签（远程标签特指 SSH）
+
 **RDP 标签 (RDP Tab)**：
 承载 Windows 远程桌面画面的**整页**标签。不参与 split、无侧栏；关闭标签即断开连接；连接中断显示页内「已断开 + 重连按钮」，不自动重连。引擎选型见 ADR 0007。
 _Avoid_: 远程桌面窗口（不是独立窗口）、RDP 终端（不是终端）
@@ -112,7 +116,7 @@ _Avoid_: `../warp` 当前内容、Cargo 路径依赖
 
 ## Relationships
 
-- **RDP** 是主机库 `protocol` 的第三个取值（与 SSH / Serial 并列），不是新的主机实体；凭据复用主机的用户名/密码，Windows 域写在用户名里（`DOMAIN\user`）。
+- **RDP**、**Telnet** 与 SSH / Serial 并列，都是主机库 `protocol` 的取值，不是新的主机实体；RDP 凭据复用主机的用户名/密码，Windows 域写在用户名里（`DOMAIN\user`）。
 - **RDP 标签**的键盘按物理直映（⌘→Win、⌥→Alt、⌃→Ctrl），NexShell 自身快捷键本地优先；中文输入交给**远端** Windows 输入法。
 - 服务器证书 v1 无条件接受，与 SSH host key 现状同姿态；「统一主机信任层（TOFU 钉扎）」是两协议一起做的后续项。
 - **内置编辑器**对**本地与远程标签**的**文本文件**都生效：本地经 fs，远程经 SFTP 把内容读进编辑器、`Cmd+S` 写回原路径。

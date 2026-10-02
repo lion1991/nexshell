@@ -696,6 +696,17 @@ impl RootView {
                     rows,
                 )
             }
+            HostConnectionPlan::Telnet {
+                session_id, config, ..
+            } => {
+                let tab_session_id = self.unique_terminal_tab_id(&session_id);
+                LocalTerminalRuntime::spawn_telnet_or_failed(
+                    &tab_session_id,
+                    Self::telnet_config_from_host_config(&config),
+                    cols,
+                    rows,
+                )
+            }
             HostConnectionPlan::Rdp { .. } => {
                 // RDP 整页 tab 走专用重连（用 tab 内 config 重 spawn，沿用原分辨率）。
                 self.reconnect_rdp_tab(index, ctx);

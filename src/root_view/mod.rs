@@ -71,7 +71,7 @@ use nexshell::pty_event_loop::PtyEvent;
 use nexshell::ssh_key_store::SshKeyRecord;
 use nexshell::terminal_runtime::{
     terminal_focus_report_bytes, LocalTerminalRuntime, RemoteSshConfig, SerialPortRuntimeConfig,
-    TerminalInputEditor, TerminalPalette,
+    TelnetRuntimeConfig, TerminalInputEditor, TerminalPalette,
 };
 use nexshell::warp_horizontal_tabs::{new_tab_insert_index, NewTabPlacement};
 use nexshell::warp_tab_context_menu::TabContextMenuAnchor;
@@ -1681,6 +1681,7 @@ impl RootView {
                     TerminalSessionKind::Local
                         | TerminalSessionKind::Remote
                         | TerminalSessionKind::Serial
+                        | TerminalSessionKind::Telnet
                         | TerminalSessionKind::Direct
                 )
             )
@@ -3284,6 +3285,35 @@ impl RootView {
             } => {
                 self.connect_rdp_host(host_id, &session_id, title, config, ctx);
             }
+            HostConnectionPlan::Telnet {
+                session_id,
+                title,
+                config,
+            } => {
+                let tab_session_id = self.unique_terminal_tab_id(&session_id);
+                let (cols, rows) = self
+                    .last_resize_cells
+                    .lock()
+                    .map(|cells| *cells)
+                    .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS));
+                let terminal = LocalTerminalRuntime::spawn_telnet_or_failed(
+                    &tab_session_id,
+                    Self::telnet_config_from_host_config(&config),
+                    cols,
+                    rows,
+                );
+                self.push_terminal_tab(
+                    terminal,
+                    &tab_session_id,
+                    title.clone(),
+                    TerminalSessionKind::Telnet,
+                    Some(host_id.to_string()),
+                    None,
+                    ctx,
+                );
+                self.host_state.notice =
+                    Some(rust_i18n::t!("toast_connecting", title = title).to_string());
+            }
             HostConnectionPlan::Unsupported { title, reason } => {
                 self.host_state.notice = Some(
                     rust_i18n::t!("toast_connect_failed", title = title, reason = reason)
@@ -3309,6 +3339,19 @@ impl RootView {
             flow_control: config.serial_flow_control.clone(),
             dtr: config.serial_dtr,
             rts: config.serial_rts,
+        }
+    }
+
+    fn telnet_config_from_host_config(config: &HostConnectionConfig) -> TelnetRuntimeConfig {
+        TelnetRuntimeConfig {
+            host: config.host.trim().to_string(),
+            port: config.port,
+            username: config.username.trim().to_string(),
+            password: config.password.clone().unwrap_or_default(),
+            connect_timeout_secs: config.tcp_connect_timeout,
+            keep_alive_enabled: config.keep_alive_enabled,
+            keep_alive_interval_secs: config.keep_alive_interval,
+            term_encoding: config.term_encoding.clone(),
         }
     }
 
@@ -3373,6 +3416,10 @@ mod ime_tests {
         assert!(RootView::page_uses_terminal_ime_cursor(
             AppPage::Terminal,
             Some(TerminalSessionKind::Direct)
+        ));
+        assert!(RootView::page_uses_terminal_ime_cursor(
+            AppPage::Terminal,
+            Some(TerminalSessionKind::Telnet)
         ));
 
         assert!(!RootView::page_uses_terminal_ime_cursor(

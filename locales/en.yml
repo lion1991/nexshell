@@ -8,6 +8,7 @@ quit_app: Quit NexShell
 tab_local: Local
 tab_remote: Remote
 tab_serial: Serial
+tab_telnet: Telnet
 tab_direct: Terminal
 tab_process_list: Processes
 process_list_placeholder: "Loading processes…"
@@ -415,6 +416,7 @@ form_tcp_timeout: TCP connect timeout
 form_auth_timeout: Auth timeout
 form_terminal_encoding: Terminal encoding
 form_encoding_hint: May need to change encoding for old systems
+form_telnet_login_hint: Optional; filled values are typed once when the login prompt appears
 form_serial_params: Serial parameters
 form_data_bits: Data bits
 form_stop_bits: Stop bits

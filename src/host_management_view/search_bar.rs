@@ -277,6 +277,7 @@ fn protocol_filter_options(
         ProtocolFilter::Ssh,
         ProtocolFilter::Serial,
         ProtocolFilter::Rdp,
+        ProtocolFilter::Telnet,
     ]
     .into_iter()
     .map(|filter| {

@@ -363,6 +363,7 @@ enum TerminalSessionKind {
     Local,
     Remote,
     Serial,
+    Telnet,
     Direct,
     ProcessList,
     NetworkList,
@@ -378,6 +379,7 @@ impl TerminalSessionKind {
             Self::Local => rust_i18n::t!("tab_local").to_string(),
             Self::Remote => rust_i18n::t!("tab_remote").to_string(),
             Self::Serial => rust_i18n::t!("tab_serial").to_string(),
+            Self::Telnet => rust_i18n::t!("tab_telnet").to_string(),
             Self::Direct => rust_i18n::t!("tab_direct").to_string(),
             Self::ProcessList => rust_i18n::t!("tab_process_list").to_string(),
             Self::NetworkList => rust_i18n::t!("tab_network_list").to_string(),
@@ -388,10 +390,15 @@ impl TerminalSessionKind {
         }
     }
 
+    /// 有连接状态（会断开、可重连）的终端标签。
+    fn is_connection_terminal(self) -> bool {
+        matches!(self, Self::Remote | Self::Serial | Self::Telnet)
+    }
+
     fn supports_terminal_recording(self) -> bool {
         matches!(
             self,
-            Self::Local | Self::Remote | Self::Serial | Self::Direct
+            Self::Local | Self::Remote | Self::Serial | Self::Telnet | Self::Direct
         )
     }
 }
@@ -675,28 +682,24 @@ impl TerminalSessionTab {
             .any(|rt| rt.lock().map_or(false, |rt| rt.is_recording()))
     }
 
-    /// 远程/串口任一会话断开即视为离线（驱动标签红点）。
+    /// 远程/串口/Telnet 任一会话断开即视为离线（驱动标签红点）。
     fn is_disconnected(&self) -> bool {
-        matches!(
-            self.kind,
-            TerminalSessionKind::Remote | TerminalSessionKind::Serial
-        ) && self
-            .pane_terminals
-            .values()
-            .chain(std::iter::once(&self.terminal))
-            .any(|rt| rt.lock().map_or(false, |rt| !rt.is_connected()))
+        self.kind.is_connection_terminal()
+            && self
+                .pane_terminals
+                .values()
+                .chain(std::iter::once(&self.terminal))
+                .any(|rt| rt.lock().map_or(false, |rt| !rt.is_connected()))
     }
 
-    /// 远程/串口且任一会话仍连接：决定是否显示「断开连接」菜单项。
+    /// 远程/串口/Telnet 且任一会话仍连接：决定是否显示「断开连接」菜单项。
     fn can_disconnect(&self) -> bool {
-        matches!(
-            self.kind,
-            TerminalSessionKind::Remote | TerminalSessionKind::Serial
-        ) && self
-            .pane_terminals
-            .values()
-            .chain(std::iter::once(&self.terminal))
-            .any(|rt| rt.lock().map_or(false, |rt| rt.is_connected()))
+        self.kind.is_connection_terminal()
+            && self
+                .pane_terminals
+                .values()
+                .chain(std::iter::once(&self.terminal))
+                .any(|rt| rt.lock().map_or(false, |rt| rt.is_connected()))
     }
 }
 
@@ -1269,6 +1272,7 @@ mod tests {
             TerminalSessionKind::Local,
             TerminalSessionKind::Remote,
             TerminalSessionKind::Serial,
+            TerminalSessionKind::Telnet,
             TerminalSessionKind::Direct,
         ] {
             assert!(kind.supports_terminal_recording(), "{kind:?}");
@@ -1283,6 +1287,25 @@ mod tests {
             TerminalSessionKind::Rdp,
         ] {
             assert!(!kind.supports_terminal_recording(), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn only_remote_serial_telnet_tabs_track_connection() {
+        for kind in [
+            TerminalSessionKind::Remote,
+            TerminalSessionKind::Serial,
+            TerminalSessionKind::Telnet,
+        ] {
+            assert!(kind.is_connection_terminal(), "{kind:?}");
+        }
+        for kind in [
+            TerminalSessionKind::Local,
+            TerminalSessionKind::Direct,
+            TerminalSessionKind::CodeViewer,
+            TerminalSessionKind::Rdp,
+        ] {
+            assert!(!kind.is_connection_terminal(), "{kind:?}");
         }
     }
 

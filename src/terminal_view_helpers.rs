@@ -36,11 +36,7 @@ pub(crate) fn terminal_tab_original_label(
     runtime_title: Option<&str>,
 ) -> String {
     let has_fallback = !fallback_label.trim().is_empty();
-    if matches!(
-        kind,
-        TerminalSessionKind::Remote | TerminalSessionKind::Serial
-    ) && has_fallback
-    {
+    if kind.is_connection_terminal() && has_fallback {
         return fallback_label.to_string();
     }
 
@@ -70,6 +66,7 @@ pub(crate) fn terminal_disconnected_notice_text(
     let title = match kind {
         TerminalSessionKind::Remote => "远程连接已断开",
         TerminalSessionKind::Serial => "串口连接已断开",
+        TerminalSessionKind::Telnet => "Telnet 连接已断开",
         TerminalSessionKind::Local
         | TerminalSessionKind::Direct
         | TerminalSessionKind::ProcessList
@@ -308,11 +305,7 @@ pub(crate) fn split_pane_header_badge_title(
     }
 
     let fallback = fallback_label.trim();
-    if matches!(
-        kind,
-        TerminalSessionKind::Remote | TerminalSessionKind::Serial
-    ) && !fallback.is_empty()
-    {
+    if kind.is_connection_terminal() && !fallback.is_empty() {
         return truncate_path_display(fallback, 30);
     }
 
@@ -321,8 +314,10 @@ pub(crate) fn split_pane_header_badge_title(
 
 pub(crate) fn split_pane_header_badge_icon(kind: TerminalSessionKind) -> &'static str {
     match kind {
-        // RDP 亦为远程主机，与 Remote 同用云图标（RDP 整页不参与分屏，取值仅备用）。
-        TerminalSessionKind::Remote | TerminalSessionKind::Rdp => ICON_PATH_CLOUD,
+        // RDP / Telnet 亦为远程主机，与 Remote 同用云图标（RDP 整页不参与分屏，取值仅备用）。
+        TerminalSessionKind::Remote | TerminalSessionKind::Rdp | TerminalSessionKind::Telnet => {
+            ICON_PATH_CLOUD
+        }
         TerminalSessionKind::Local
         | TerminalSessionKind::Serial
         | TerminalSessionKind::Direct
@@ -340,6 +335,7 @@ pub(crate) fn terminal_tab_kind_uses_side_panel_layout(kind: TerminalSessionKind
         TerminalSessionKind::Local
             | TerminalSessionKind::Remote
             | TerminalSessionKind::Serial
+            | TerminalSessionKind::Telnet
             | TerminalSessionKind::Direct
             | TerminalSessionKind::GitDiff
             | TerminalSessionKind::CodeViewer
@@ -545,10 +541,10 @@ mod tests {
     use super::{
         split_pane_header_background_color, split_pane_header_badge_icon,
         split_pane_header_badge_title, terminal_context_menu_offset_bounds,
-        terminal_disconnected_notice_text, terminal_tab_original_label, terminal_window_title,
-        update_cursor_blink, CursorBlinkState, EventDispatchMode, ParentOffsetBounds,
-        TerminalSessionKind, DEFAULT_WINDOW_TITLE, ICON_PATH_CLOUD, ICON_PATH_FOLDER,
-        TERMINAL_CURSOR_BLINK_INTERVAL,
+        terminal_disconnected_notice_text, terminal_tab_kind_uses_side_panel_layout,
+        terminal_tab_original_label, terminal_window_title, update_cursor_blink, CursorBlinkState,
+        EventDispatchMode, ParentOffsetBounds, TerminalSessionKind, DEFAULT_WINDOW_TITLE,
+        ICON_PATH_CLOUD, ICON_PATH_FOLDER, TERMINAL_CURSOR_BLINK_INTERVAL,
     };
     use crate::terminal_grid_element::ThemeChoice;
     use std::time::{Duration, Instant};
@@ -610,6 +606,25 @@ mod tests {
     }
 
     #[test]
+    fn telnet_terminal_tab_label_prefers_connection_label_over_runtime_title() {
+        assert_eq!(
+            terminal_tab_original_label(TerminalSessionKind::Telnet, "Core Switch", Some("vt100")),
+            "Core Switch"
+        );
+    }
+
+    #[test]
+    fn telnet_tab_uses_side_panel_layout_and_cloud_badge() {
+        assert!(terminal_tab_kind_uses_side_panel_layout(
+            TerminalSessionKind::Telnet
+        ));
+        assert_eq!(
+            split_pane_header_badge_icon(TerminalSessionKind::Telnet),
+            ICON_PATH_CLOUD
+        );
+    }
+
+    #[test]
     fn local_terminal_tab_label_still_prefers_runtime_title() {
         assert_eq!(
             terminal_tab_original_label(TerminalSessionKind::Local, "Local", Some("vim main.rs")),
@@ -650,6 +665,18 @@ mod tests {
                 "failed to open serial port"
             ),
             Some("串口连接已断开\nfailed to open serial port".to_string())
+        );
+    }
+
+    #[test]
+    fn telnet_terminal_disconnect_notice_uses_runtime_status() {
+        assert_eq!(
+            terminal_disconnected_notice_text(
+                TerminalSessionKind::Telnet,
+                false,
+                "Connection closed by foreign host"
+            ),
+            Some("Telnet 连接已断开\nConnection closed by foreign host".to_string())
         );
     }
 

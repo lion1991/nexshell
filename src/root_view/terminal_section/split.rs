@@ -121,6 +121,19 @@ impl RootView {
                             rows,
                         )
                     }
+                    HostConnectionPlan::Telnet {
+                        session_id: sid,
+                        config,
+                        ..
+                    } => {
+                        let tab_session_id = self.unique_terminal_tab_id(&sid);
+                        LocalTerminalRuntime::spawn_telnet_or_failed(
+                            &tab_session_id,
+                            Self::telnet_config_from_host_config(&config),
+                            cols,
+                            rows,
+                        )
+                    }
                     // RDP 为整页 tab，不参与分屏（已定案）；分屏场景退回本地终端。
                     HostConnectionPlan::Rdp { .. } => spawn_local(&session_id),
                     HostConnectionPlan::Unsupported { .. } => spawn_local(&session_id),

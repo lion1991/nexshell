@@ -25,6 +25,9 @@ use crate::ssh_password_prompt::{PasswordInput, PasswordLineEditor};
 use crate::ssh_session::{self, ChannelRequest, SshConnectOptions, SshHandle, SshSession};
 use crate::terminal_recorder::TerminalRecorder;
 
+mod telnet;
+pub use telnet::TelnetRuntimeConfig;
+
 use alacritty_terminal::{
     event::{Event, EventListener, WindowSize},
     grid::{Dimensions, GridCell, Scroll},
@@ -2834,6 +2837,8 @@ pub struct LocalTerminalRuntime {
     /// Native serial sessions use the serialport crate directly, without
     /// spawning external `screen`/`cu` programs inside our PTY.
     serial_event_loop: Option<SerialEventLoopHandle>,
+    /// Telnet 会话：std TcpStream + 独立线程，见 `telnet` 子模块。
+    telnet_event_loop: Option<telnet::TelnetEventLoopHandle>,
     /// 仅 remote SSH session 才有：take-once 拿到主 SSH handle，UI 用它开 SFTP。
     ssh_handle_rx: Option<async_channel::Receiver<SshHandle>>,
     /// Taken once by the UI on first `take_wakeup_rx` call. After that
@@ -3031,6 +3036,7 @@ impl LocalTerminalRuntime {
             event_loop: None,
             remote_event_loop: Some(remote_event_loop),
             serial_event_loop: None,
+            telnet_event_loop: None,
             ssh_handle_rx: Some(ssh_handle_rx),
             wakeup_rx: Some(wakeup_rx),
             event_rx: Some(event_rx),
@@ -3084,6 +3090,7 @@ impl LocalTerminalRuntime {
             event_loop: None,
             remote_event_loop: None,
             serial_event_loop: Some(serial_event_loop),
+            telnet_event_loop: None,
             ssh_handle_rx: None,
             wakeup_rx: Some(wakeup_rx),
             event_rx: Some(event_rx),
@@ -3130,6 +3137,7 @@ impl LocalTerminalRuntime {
             event_loop: None,
             remote_event_loop: None,
             serial_event_loop: None,
+            telnet_event_loop: None,
             ssh_handle_rx: None,
             wakeup_rx: None,
             event_rx: None,
@@ -3196,6 +3204,7 @@ impl LocalTerminalRuntime {
             event_loop: Some(event_loop),
             remote_event_loop: None,
             serial_event_loop: None,
+            telnet_event_loop: None,
             ssh_handle_rx: None,
             wakeup_rx,
             event_rx,
@@ -3404,6 +3413,15 @@ impl LocalTerminalRuntime {
             return;
         }
 
+        if let Some(telnet_event_loop) = &self.telnet_event_loop {
+            terminal_runtime_debug_log(format_args!(
+                "runtime send_input telnet {}",
+                terminal_runtime_debug_bytes(&bytes)
+            ));
+            telnet_event_loop.send_data(bytes);
+            return;
+        }
+
         if let Some(remote_event_loop) = &self.remote_event_loop {
             terminal_runtime_debug_log(format_args!(
                 "runtime send_input remote {}",
@@ -3445,6 +3463,11 @@ impl LocalTerminalRuntime {
                 cell_width,
                 cell_height,
             )));
+            return;
+        }
+
+        if let Some(telnet_event_loop) = &self.telnet_event_loop {
+            telnet_event_loop.resize(cols, rows);
             return;
         }
 
@@ -3541,11 +3564,12 @@ impl LocalTerminalRuntime {
         self.state.lock().connected
     }
 
-    /// 主动断开远程/串口会话：丢弃 IO 句柄（Drop 触发 shutdown + Close），
+    /// 主动断开远程/串口/Telnet 会话：丢弃 IO 句柄（Drop 触发 shutdown + Close），
     /// 保留 grid 内容；后台线程随即 remote_mark_disconnected 置 connected=false。
     pub fn disconnect(&mut self) {
         self.remote_event_loop = None;
         self.serial_event_loop = None;
+        self.telnet_event_loop = None;
     }
 
     /// 写入 IME marked text（合成中状态）。等价 Warp `TerminalModel::set_marked_text`：
