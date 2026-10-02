@@ -483,6 +483,7 @@ fn main() {
                 }
             }
             Ok(RdpEvent::PointerChanged(_)) => {} // probe 不关心指针形状
+            Ok(RdpEvent::ClipboardTransfer(_)) => {} // 也不关心剪贴板文件传输进度
             Ok(RdpEvent::Resized { width, height }) => {
                 println!("[probe] resized {width}x{height}");
             }
