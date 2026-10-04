@@ -276,6 +276,19 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 证据 | `evidence/phase-4/protection-audit.md` (`dd515e8c...329f`)；Glass/scene 自动过滤测试；视觉精确门禁和 240-frame A/B 未执行 |
 | 状态 | `Pass`（2026-08-04 Matt 运行时签收：manual-signoff.md） |
 
+### W-021 RDP 滚轮原始格数
+
+| 字段 | 内容 |
+| --- | --- |
+| 来源 | `8f38ae88e` |
+| 契约 | macOS 派发 `ScrollWheel` 期间 `warpui_core::event::wheel_ticks()` 返回 CGEvent `kCGScrollWheelEventDeltaAxis2/1` 原始格数（x=水平，y=垂直）；触控板等连续设备与非 macOS 为 `None`；不改 `Event::ScrollWheel` 字段与其他消费者语义 |
+| 消费端 | `src/rdp_view/page_element.rs`（普通滚轮每格 ±120 转发，同 Windows 本机鼠标） |
+| 风险 | 上游重构 `warp_handle_view_event` 派发路径或 mac event conversion，线程局部未包住派发即静默退化为加速后的小数 delta |
+| 必需证据 | `S A M R` |
+| 候选位置 | `crates/warpui_core/src/event.rs`、`crates/warpui/src/platform/mac/event.rs`、`crates/warpui/src/platform/mac/window.rs`、`crates/warpui/Cargo.toml`（objc2-core-graphics） |
+| 证据 | NexShell `page_element` wheel focused tests；真实 RDP 2026-10-03：`NEXSHELL_RDP_INPUT_LOG` 记 33 次普通滚轮，delta 0.1~0.589 均为 ticks ±1 → ±120；触控板路径未实测 |
+| 状态 | `Pass`（2026-10-03 Matt 真机 RDP 验证普通滚轮） |
+
 ## 3. 官方历史接管项
 
 这些提交当前以 cherry-pick 形式位于私有分支。目标不是保留重复提交，而是证明目标官方历史包含等价或更新实现。
@@ -334,9 +347,9 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | `crates/warpui/src/platform/headless/event_loop.rs` | U-001 | 系统终止路径 |
 | `crates/warpui/src/platform/mac/app.rs` | W-009, U-001 | RDP raw dispatch 与系统终止 |
 | `crates/warpui/src/platform/mac/delegate.rs` | W-008 | Hidden/CustomImage、NSCursor cache |
-| `crates/warpui/src/platform/mac/event.rs` | W-003 | raw/converted key diagnostics |
+| `crates/warpui/src/platform/mac/event.rs` | W-003, W-021 | raw/converted key diagnostics、滚轮原始格数 |
 | `crates/warpui/src/platform/mac/fonts.rs` | U-005 | CGFont identity 与上游字体演进 |
-| `crates/warpui/src/platform/mac/window.rs` | W-005, W-006, W-007 | IME、synthetic drag、上游窗口 API |
+| `crates/warpui/src/platform/mac/window.rs` | W-005, W-006, W-007, W-021 | IME、synthetic drag、滚轮格数派发包裹、上游窗口 API |
 | `crates/warpui_core/src/core/app.rs` | W-009, U-003 | raw dispatch、EntityId、window transfer |
 | `crates/warpui_core/src/core/window.rs` | W-005, W-009 | 窗口平台契约和输入状态 |
 | `crates/warpui_core/src/elements/formatted_text_element_tests.rs` | U-002 | 上游删除/迁移后保留选词回归 |

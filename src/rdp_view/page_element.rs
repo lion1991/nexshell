@@ -125,7 +125,11 @@ impl RdpPageElement {
             }
             *last = Some((x, y));
         }
-        log_input(position, x, y);
+        log_input(format_args!(
+            "move logical=({:.2},{:.2}) remote=({x},{y})",
+            position.x(),
+            position.y()
+        ));
         self.send(RdpInputEvent::MouseMove { x, y });
         true
     }
@@ -151,24 +155,38 @@ impl RdpPageElement {
         true
     }
 
-    /// 滚轮：垂直 + 水平各发一次（有位移才发）。
-    fn send_wheel(&self, position: Vector2F, delta: Vector2F, precise: bool) -> bool {
+    /// 滚轮：垂直、水平各自拆包发送（有位移才发）。`ticks` 为平台原始格数（见 wheel_units）。
+    fn send_wheel(
+        &self,
+        position: Vector2F,
+        delta: Vector2F,
+        ticks: Option<Vector2F>,
+        precise: bool,
+    ) -> bool {
         let Some((x, y)) = self.device_coords(position) else {
             return false;
         };
         let mut handled = false;
-        for (axis_delta, horizontal) in [(delta.y(), false), (delta.x(), true)] {
-            let units = wheel_units(axis_delta, precise);
-            if units == 0 {
-                continue;
+        for (axis_delta, axis_ticks, horizontal) in [
+            (delta.y(), ticks.map(|t| t.y()), false),
+            (delta.x(), ticks.map(|t| t.x()), true),
+        ] {
+            let total = wheel_units(axis_delta, axis_ticks, precise);
+            if total != 0 || axis_delta != 0.0 {
+                log_input(format_args!(
+                    "wheel horizontal={horizontal} precise={precise} delta={axis_delta:.3} \
+                     ticks={axis_ticks:?} units={total}"
+                ));
             }
-            self.send(RdpInputEvent::Wheel {
-                horizontal,
-                delta: units,
-                x,
-                y,
-            });
-            handled = true;
+            for units in wheel_packets(total) {
+                self.send(RdpInputEvent::Wheel {
+                    horizontal,
+                    delta: units,
+                    x,
+                    y,
+                });
+                handled = true;
+            }
         }
         handled
     }
@@ -290,9 +308,9 @@ fn key_scancode(keystroke: &Keystroke, details: &KeyEventDetails) -> Option<(u8,
         .or_else(|| keymap::scancode_for_key(&keystroke.key.to_lowercase()))
 }
 
-/// 诊断（NEXSHELL_RDP_INPUT_LOG=<file>）：把去重后实发的 MouseMove 逐条追加落盘，
-/// 含原始逻辑坐标与反算远端坐标，供真机抖动溯源（看远端坐标是否在静止时仍振荡）。
-fn log_input(pos: Vector2F, x: u16, y: u16) {
+/// 诊断（NEXSHELL_RDP_INPUT_LOG=<file>）：逐条追加落盘。MouseMove 记去重后实发的
+/// 逻辑/远端坐标（抖动溯源）；滚轮记原始 delta、平台格数与实发包（滚动步进溯源）。
+fn log_input(line: std::fmt::Arguments<'_>) {
     use std::io::Write;
     let Some(path) = std::env::var_os("NEXSHELL_RDP_INPUT_LOG") else {
         return;
@@ -302,23 +320,33 @@ fn log_input(pos: Vector2F, x: u16, y: u16) {
         .append(true)
         .open(path)
     {
-        let _ = writeln!(
-            f,
-            "move logical=({:.2},{:.2}) remote=({x},{y})",
-            pos.x(),
-            pos.y()
-        );
+        let _ = writeln!(f, "{line}");
     }
 }
 
-/// 滚轮位移 → RDP rotation units（一格=120）。line 模式 delta 为行数，pixel 模式为像素。
-/// set-1 只编码低字节量级，clamp 到 ±255 防截断反号。
-fn wheel_units(delta: f32, precise: bool) -> i16 {
-    if delta.abs() < f32::EPSILON {
-        return 0;
-    }
-    let raw = if precise { delta } else { delta * 120.0 };
-    raw.round().clamp(-255.0, 255.0) as i16
+/// 单次滚轮事件的单轴上限（16 格），防加速后的巨量刷屏。
+const MAX_WHEEL_UNITS: f32 = 120.0 * 16.0;
+
+/// 单轴滚轮位移 → RDP rotation units 总量（一格=120，同 Windows 本机鼠标）。
+/// 普通滚轮优先用平台原始格数：macOS scrollingDelta 经加速、非整格，远端按 120 整除的
+/// 程序会时滚时不滚。无原始格数时 line 模式按行数换算；触控板（precise）为像素量。
+fn wheel_units(delta: f32, ticks: Option<f32>, precise: bool) -> i32 {
+    let raw = match (precise, ticks) {
+        (true, _) => delta,
+        (false, Some(ticks)) => ticks * 120.0,
+        (false, None) => delta * 120.0,
+    };
+    raw.round().clamp(-MAX_WHEEL_UNITS, MAX_WHEEL_UNITS) as i32
+}
+
+/// 线上字段为 9 位补码（-256..=255），按 ±120 一包拆分，多格不截断。
+fn wheel_packets(units: i32) -> impl Iterator<Item = i16> {
+    let full = std::iter::repeat_n(
+        120 * units.signum() as i16,
+        (units / 120).unsigned_abs() as usize,
+    );
+    let rest = units % 120;
+    full.chain((rest != 0).then_some(rest as i16))
 }
 
 impl Element for RdpPageElement {
@@ -554,7 +582,8 @@ impl Element for RdpPageElement {
                     return false;
                 }
                 self.reconcile_modifiers(mods_flags(*modifiers));
-                self.send_wheel(*position, *delta, *precise)
+                let ticks = warpui_core::event::wheel_ticks();
+                self.send_wheel(*position, *delta, ticks, *precise)
             }
             _ => false,
         }
@@ -703,5 +732,51 @@ mod tests {
         assert_eq!(tracker.drain_held_keys(), vec![key(false)]);
         tracker.clear();
         assert!(tracker.drain_held_keys().is_empty());
+    }
+
+    #[test]
+    fn wheel_units_prefers_raw_ticks() {
+        // 加速后的小数 delta 被原始格数取代：一格恒为 120。
+        assert_eq!(wheel_units(0.1, Some(1.0), false), 120);
+        assert_eq!(wheel_units(-4.6, Some(-3.0), false), -360);
+        assert_eq!(wheel_units(0.3, Some(0.0), false), 0);
+        // 无原始格数：按行数换算；触控板按像素。
+        assert_eq!(wheel_units(1.0, None, false), 120);
+        assert_eq!(wheel_units(7.4, None, true), 7);
+        assert_eq!(wheel_units(1.0, Some(100.0), false), 1920);
+    }
+
+    #[test]
+    fn wheel_packets_split_by_notch() {
+        let packets = |u| wheel_packets(u).collect::<Vec<_>>();
+        assert_eq!(packets(0), Vec::<i16>::new());
+        assert_eq!(packets(120), vec![120]);
+        assert_eq!(packets(360), vec![120, 120, 120]);
+        assert_eq!(packets(-300), vec![-120, -120, -60]);
+        assert_eq!(packets(7), vec![7]);
+    }
+
+    #[test]
+    fn wheel_sends_one_packet_per_tick() {
+        let (el, rx) = element();
+        *el.viewport_out.lock().unwrap() =
+            Some(letterbox_rect(Vector2F::new(800.0, 600.0), el.desktop_size));
+        let pos = Vector2F::new(10.0, 10.0);
+        assert!(el.send_wheel(
+            pos,
+            Vector2F::new(0.0, -0.2),
+            Some(Vector2F::new(0.0, -2.0)),
+            false
+        ));
+        let sent: Vec<_> = drain(&rx)
+            .into_iter()
+            .map(|e| match e {
+                RdpInputEvent::Wheel {
+                    horizontal, delta, ..
+                } => (horizontal, delta),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(sent, vec![(false, -120), (false, -120)]);
     }
 }
