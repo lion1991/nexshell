@@ -41,7 +41,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
    - UDP 的 TLS 与 TCP 同策略：平台根严格校验 + 同一 `host:port` 的 TOFU 指纹回调。
 5. **缩放改走 `prepare_resize` 并按通道分流**。`encode_resize` 固定走 TCP，Soft-Sync 后 Display Control 已在 UDP 上。
 6. **开关与观测**：UDP 默认开启，`NEXSHELL_RDP_DISABLE_UDP=1` 退回纯 TCP；`NEXSHELL_RDP_AUTODETECT=1` 改报自动探测；`NEXSHELL_RDP_NET_TRACE=1` 打印服务端测得的网络特征。有通道迁到 UDP 后，统计面板"传输"显示 `TCP + UDP`，UDP 收包计入接收码率。
-7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）、决策 10（`973d4e78`）三个补丁；当前 rev 见 ADR 0013 基线。
+7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）、决策 10（`973d4e78`、`40800b26`）三个补丁；当前 rev 见 ADR 0013 基线。
 8. **fork 补丁：Soft-Sync 按服务端清单路由**（`ironrdp-dvc` client）。Windows 的 Soft-Sync 请求会列出客户端拒绝过或尚未打开的通道 ID（实测 `[2, 6, 7, 8, 9, 10, 11, 12]`，客户端只开了 7 号 Graphics）。上游见到未知 ID 就跳过整条隧道，而服务端发出请求时已经改走隧道（MS-RDPEDYC 3.2.5.3.1），结果画面停在"正在连接"。补丁：
    - 列出的 ID 全部按服务端路由记下，应答里带上该隧道。
    - 隧道上除 Data 外也接受 Create / Close，应答原路回隧道。实测 Windows 在 Soft-Sync 之后经隧道新建 Video::Control / Video::Data / Geometry（清单内 ID），以及清单外的 `AUDIO_PLAYBACK_DVC`（ID 16）。
@@ -50,10 +50,11 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
    - 发送失败按丢包处理：数据靠 RTO 重传，ACK 由下一个替代。macOS 在接口队列（如 VPN utun）满时会返回 ENOBUFS。
    - 接收时遇到 ICMP 回报的错误（拒绝、重置、主机或网络不可达）跳过。链路真断了仍由 65s 空闲超时关闭。
    - 驱动出错退出时打 warn 日志；`shutdown` 优先返回驱动自己的错误，断开提示里能看到根因，而不只是 TLS 层的"transport error"。
-10. **fork 补丁：丢包下 ACK 完整上报**（`ironrdp-rdpeudp` connection）。服务端同一数据报重传几次仍收不到 ACK 就判连接丢失（MS-RDPEUDP 3.1.6.1）；Soft-Sync 之后图形通道在隧道里，服务端随即拆掉整个连接，客户端看到的是 TCP 被重置。上游接收端有三处缺陷会走到这一步：
-    - ACK 向量最多 32 个元素，从最高序号往下填，满了就丢最旧的段。窗口内洞超过 16 个时，向量够不到最低的洞。ACK 是累计语义（3.1.1.4），服务端把这些洞当作已收、不再重传，客户端按序交付卡死，画面停住。补丁：按接收窗口预留向量空间（每槽一个元素，上限 256），不再截断；万一截断，保留最旧的段并调低 `snSourceAck`。代价是上行每包载荷从 1076 降到 852 字节，上行只有帧确认等小包，可忽略。
-    - 重复包和窗口外的包不回 ACK。上行 ACK 丢失后，服务端重传客户端已收的包却得不到应答，只能等 8s 一次的 keepalive。补丁：每个 Source Packet 都回 ACK。
-    - ACK-of-ACKs 的累计值漏算重传队列里的包，可能越过尚未确认的上行数据。补丁：取发送窗口与重传队列中的最小序号。
+10. **fork 补丁：丢包下 ACK 完整上报**（`ironrdp-rdpeudp` connection / recv_window）。服务端同一数据报重传几次仍收不到 ACK 就判连接丢失（MS-RDPEUDP 3.1.6.1）；Soft-Sync 之后图形通道在隧道里，服务端随即拆掉整个连接，客户端看到的是 TCP 被重置。抓包确认：**Windows 只认 ACK 向量里列出的包，不按累计语义处理**。它自己当接收端时，向量也从对端最近一次 AoA 报起。上游接收端有以下缺陷：
+    - **根因：发 ACK 即释放接收窗口**（`40800b26`）。每发一个 ACK 就把已连续收到的部分移出窗口，之后的向量只从第一个洞报起。某个包唯一的那次 ACK 在隧道里丢了，这个包就再也不会被报告，服务端重传到上限后断开。补丁：MS-RDPEUDP（v1/v2 帧格式）发 ACK 不再释放，向量下沿只随服务端 AoA 推进（RDPEUDP2 不变）；接收上限改从第一个洞起算一个窗口，等待 AoA 的已收历史不占窗口，最多保留一个窗口的历史，服务端不发 AoA 时也不会无限增长。
+    - ACK 向量最多 32 个元素，从最高序号往下填，满了就丢最旧的段，洞多时向量够不到最低的洞（`973d4e78`）。补丁：按接收窗口预留向量空间（每槽一个元素，上限 256），不再截断；万一截断，保留最旧的段并调低 `snSourceAck`。代价是上行每包载荷从 1076 降到 852 字节，上行只有帧确认等小包，可忽略。
+    - 重复包和窗口外的包不回 ACK（`973d4e78`）。补丁：每个 Source Packet 都回 ACK（3.1.1.4）。
+    - ACK-of-ACKs 的累计值漏算重传队列里的包，可能越过尚未确认的上行数据（`973d4e78`）。补丁：取发送窗口与重传队列中的最小序号。
 
 ## 影响与风险
 
@@ -74,7 +75,9 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
 | 图形复位后断开 | 隧道包 `1c 10 "AUDIO_PLAYBACK_DVC"`：清单外 ID 16 的 Create | 路由改为跟随 Create 到达的传输 |
 | 报 LAN 时服务端估带宽恒为 10 Mbps，Windows App 为 95–103 Mbps | `RemoteFX Network` 计数器；RDP-Tcp `SelectNetworkDetect = 1`（关连接时探测） | LAN 取类型下限，IronRDP 不应答会话期带宽测量，估值不更新 → 服务端改 0 后报 LAN 与 Autodetect 均测到 102400 kbps，Autodetect 下 62 fps、帧质量 100% → 决策 1 |
 | 运行 1–6 分钟后 "reliable UDP tunnel closed" | 抓包：客户端先停止发包，服务端指数退避重传约 21s 后放弃（事件 226 UdpEventErrorOnSend）；客户端报 `TLS error, caused by: RDPEUDP2 transport error`，即驱动出错退出，只可能来自 socket 收发 | 补丁后日志：`send` 返回 ENOBUFS（os error 55），7 次集中在同一毫秒，都是 12 字节的纯 ACK；按丢包处理后连续运行 10 分钟以上不断开 → 决策 9 |
-| 网络不稳时运行一两分钟后断开，报 `read frame failed: Connection reset by peer (os error 54)` | 断开前面板接收码率、帧率均为 0，随后 TCP 被服务端重置 | 代码审查：窗口内洞多于 16 个时 ACK 向量够不到最低的洞，重复包不回 ACK，服务端重传放弃后拆连接 → 决策 10（单测覆盖，真机待验证） |
+| 网络不稳（隧道丢包 5%、RTT 50–230 ms）时运行十几秒到几分钟后断开，报 `read frame failed: Connection reset by peer (os error 54)` 或 `reliable UDP tunnel closed` | 客户端 utun 抓包：客户端为某包单独发的 ACK 丢失，之后向量从更高的洞报起；服务端对该包重传 3–6 次（间隔翻倍，约 19s），随后 TCP RST。RST 序号若超前于客户端已收（中间 TCP 段丢了），macOS 按 RFC 5961 忽略它，界面卡住，直到 65s UDP 空闲超时才报 tunnel closed | 发 ACK 即释放接收窗口，Windows 不按累计语义确认 → 决策 10。补丁后同一网络连续运行 10 分钟：服务端重传 308 个包，每个至多 4 次即被确认，无 RST |
+
+客户端抓包：用户在 `access_bpf` 组时可免 sudo，`tcpdump -i <utun> -s 320 -w rdp.pcap host <服务端>`。RDPEUDP 头部（`snSourceAck`、ACK 向量、AoA、`snSourceStart`）是明文，能直接看出服务端在重传哪个包、客户端的 ACK 有没有覆盖它。
 
 Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational` 事件 130/131/132/135，客户端设 `RUST_LOG=ironrdp_dvc=debug` 看 Soft-Sync 清单与建通道顺序，`ironrdp_rdpeudp_tokio=debug` 看驱动退出原因与被丢弃的收发错误。
 
@@ -82,13 +85,12 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
 
 ## 验证
 
-- 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 44、`ironrdp-rdpeudp`（`--features std`）199、`ironrdp-rdpeudp-tokio` 55 项通过；决策 10 的单测覆盖多洞时向量够到最低的洞、最坏向量加满载荷不超 MTU、重复包回 ACK、AoA 不越过待重传包。
-- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常；服务端开连接时探测后，报 LAN 与 Autodetect 的带宽估值都是实测值（决策 1）。
+- 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 44、`ironrdp-rdpeudp`（`--features std`）201、`ironrdp-rdpeudp-tokio` 55 项通过；决策 10 的单测覆盖已收包留在向量中直到 AoA（按抓包场景构造，旧逻辑下失败）、未释放历史不缩小窗口且有上限、多洞时向量够到最低的洞、最坏向量加满载荷不超 MTU、重复包回 ACK、AoA 不越过待重传包。
+- 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；打决策 10 补丁后在丢包 5% 的隧道里连续运行 10 分钟不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常；服务端开连接时探测后，报 LAN 与 Autodetect 的带宽估值都是实测值（决策 1）。
 - 真机待做：
   - 缩放、剪贴板、共享盘在 UDP 下逐项回归。
   - UDP 被挡：连接回落 TCP，额外等待不超过约 3s。
   - 隧道内 5% 丢包：与 `NEXSHELL_RDP_DISABLE_UDP=1` 对比流畅度与接收码率。
-  - 决策 10：弱网下连续运行 10 分钟以上不再出现 TCP 被重置；断开时看服务端有无事件 226。
   - 连接异常时分别设两个开关复现，区分是 UDP 还是自动探测引起。
 
 ## 回退

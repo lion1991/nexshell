@@ -43,7 +43,7 @@ ADR 0011 基线（上游 `872845c` + 12 个 fork 补丁，rev `d9ee675`）之后
 
 ## 基线
 
-- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。其上追加 ADR 0014 的三个补丁（决策 8 / 9 / 10）与上面的音频补丁，当前 rev `973d4e78`。
+- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。其上追加 ADR 0014 的三个补丁（决策 8 / 9 / 10）与上面的音频补丁，当前 rev `40800b26`。
 - IronRDP 验证：`ironrdp-egfx` 单测 62 通过；`ironrdp-testsuite-core` 1684 通过（含上游 #1848 Haven 真机 Progressive fixtures）；改动 crate clippy 无新告警。
 - NexShell 验证：`cargo check --all-targets`（aarch64 / x86_64 macOS）、lib 测试 480、bin 测试 195 通过。Windows（x86_64-pc-windows-gnu）交叉检查中 ironrdp 全部依赖编译通过，仅 `src/osc7.rs` 的 `libc::gethostname` 报错——main 上 `f47bfb5` 引入的既有问题，与本次无关，不混入。
 - 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧），`egfx_replay` 新旧逐帧 hash 完全一致、0 解码失败。该 dump 以 Progressive 为主，AVC420 路径的改写仅由单测覆盖（语义不变，只换类型）。
