@@ -1,5 +1,6 @@
 //! 远端文件 → Finder（ADR 0016 第 4 步）：剪贴板里的 file URL 被读取时，
-//! 把远端这次复制的文件整份下载到临时目录，下完再把各顶层条目的路径交给辅助进程。
+//! 把远端这次复制的文件整份下载到临时目录，下完再把各顶层条目的路径交给辅助进程；
+//! 读取方没等到的，由辅助进程改写剪贴板。
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -51,6 +52,7 @@ enum State {
 
 pub(super) struct Download {
     session: u64,
+    generation: u64,
     dir: PathBuf,
     lock: Option<u32>,
     entries: Vec<Entry>,
@@ -108,6 +110,7 @@ impl Download {
         let total = entries.iter().filter_map(|e| e.size).sum();
         Some(Self {
             session,
+            generation,
             dir,
             lock,
             entries,
@@ -256,6 +259,13 @@ impl Download {
         for (id, root) in std::mem::take(&mut self.waiters) {
             helper::reply(id, self.path_reply(root));
         }
+        // 读取方等不了整个下载，辅助进程据此把剪贴板改写成下好的路径。
+        let paths = self
+            .roots
+            .iter()
+            .filter_map(|p| p.to_str().map(String::from))
+            .collect();
+        helper::files(self.session, self.generation, paths);
         self.send_progress(None);
         None
     }
@@ -292,6 +302,7 @@ impl Download {
         for (id, _) in std::mem::take(&mut self.waiters) {
             helper::reply(id, None);
         }
+        helper::files(self.session, self.generation, Vec::new());
         let _ = fs::remove_dir_all(&self.dir);
         self.send_progress(None);
         None

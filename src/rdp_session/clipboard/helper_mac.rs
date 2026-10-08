@@ -34,6 +34,17 @@ pub(super) fn reply(id: u64, data: Option<Data>) {
     send(ToHelper::Reply { id, data }, false);
 }
 
+pub(super) fn files(session: u64, generation: u64, paths: Vec<String>) {
+    send(
+        ToHelper::Files {
+            session,
+            generation,
+            paths,
+        },
+        false,
+    );
+}
+
 /// start 为 false 时辅助进程不在就丢弃：应答和清空只对还活着的那个有意义。
 fn send(msg: ToHelper, start: bool) -> bool {
     let mut client = lock(&CLIENT);

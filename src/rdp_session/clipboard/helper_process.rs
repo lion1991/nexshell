@@ -25,8 +25,11 @@ use objc2_foundation::{NSArray, NSData, NSDictionary, NSRunLoop, NSString, NSURL
 use super::wire::{self, Data, Format, Kind, Offer, Request, ToHelper};
 use super::{dib, local, text, trace, Bitmap};
 
-/// 文本、图片等主进程应答的上限。文件要等下载，不设上限，用户可在 NexShell 里取消。
+/// 文本、图片等主进程应答的上限。
 const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
+/// 读文件路径最多等这么久。读取方的主线程一直卡着（CleanShot X 定时读剪贴板），
+/// 所以下载没完就先不给，下完由主进程发 Files 改写剪贴板。
+const FILE_WAIT: Duration = Duration::from_secs(1);
 
 struct ProviderIvars {
     session: u64,
@@ -70,10 +73,13 @@ impl Provider {
 /// 最近一次写入的剪贴板内容。
 struct Current {
     session: u64,
+    generation: u64,
     change_count: isize,
     /// 还没给出数据的类型数。
     pending: usize,
     files: bool,
+    /// 文件路径没等到就交了空，之后的读取都直接给空，等 Files 改写。
+    deferred: bool,
 }
 
 /// 主线程独占的状态。
@@ -114,6 +120,14 @@ pub fn run() -> ! {
                 }
                 Ok(ToHelper::Clear { session }) => {
                     DispatchQueue::main().exec_async(move || clear(session));
+                }
+                Ok(ToHelper::Files {
+                    session,
+                    generation,
+                    paths,
+                }) => {
+                    DispatchQueue::main()
+                        .exec_async(move || write_files(session, generation, &paths));
                 }
                 Err(_) => process::exit(0),
             }
@@ -158,25 +172,83 @@ fn write_offer(offer: Offer) {
             }
             (vec![promise(0, &types)], types.len())
         };
-        let marker = local::owner_marker(std::os::unix::process::parent_id(), offer.session);
-        items[0].setString_forType(&NSString::from_str(&marker), &local::owner_type());
-        let objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = items
-            .into_iter()
-            .map(ProtocolObject::from_retained)
-            .collect();
-        pb.clearContents();
-        pb.writeObjects(&NSArray::from_retained_slice(&objects));
+        let change_count = write_items(&pb, items, offer.session);
         trace(|| format!("helper offered {offer:?}"));
         with_helper(|h| {
             h.providers = providers;
             h.current = Some(Current {
                 session: offer.session,
-                change_count: pb.changeCount(),
+                generation: offer.generation,
+                change_count,
                 pending,
                 files: offer.files > 0,
+                deferred: false,
             });
         });
     });
+}
+
+/// 下载结束，读取时没等到的那一轮：剪贴板还没被换掉就改写成下好的路径。
+/// paths 为空表示下载失败，读不出数据的条目留着没用，清空。
+fn write_files(session: u64, generation: u64, paths: &[String]) {
+    autoreleasepool(|_| {
+        let pb = NSPasteboard::generalPasteboard();
+        let change_count = pb.changeCount();
+        let matched = with_helper(|h| {
+            h.current.as_ref().is_some_and(|c| {
+                c.session == session
+                    && c.generation == generation
+                    && c.deferred
+                    && c.change_count == change_count
+            })
+        });
+        if matched != Some(true) {
+            return;
+        }
+        // 同 write_offer，写剪贴板时不持 HELPER 的借用。
+        let items: Vec<_> = paths
+            .iter()
+            .filter_map(|path| {
+                let url = NSURL::fileURLWithPath(&NSString::from_str(path)).absoluteString()?;
+                let item = NSPasteboardItem::new();
+                item.setString_forType(&url, local::file_url_type());
+                Some(item)
+            })
+            .collect();
+        if items.is_empty() {
+            pb.clearContents();
+            with_helper(|h| {
+                h.current = None;
+                h.providers.clear();
+            });
+            trace(|| "helper cleared failed download".into());
+            return;
+        }
+        let count = items.len();
+        let change_count = write_items(&pb, items, session);
+        with_helper(|h| {
+            if let Some(current) = &mut h.current {
+                current.change_count = change_count;
+                current.pending = 0;
+                current.deferred = false;
+            }
+            h.providers.clear();
+        });
+        trace(|| format!("helper rewrote {count} downloaded files"));
+    });
+}
+
+/// 第一个条目带上本会话的标记，主进程轮询据此不发回远端。返回写入后的 changeCount。
+fn write_items(pb: &NSPasteboard, items: Vec<Retained<NSPasteboardItem>>, session: u64) -> isize {
+    let marker = local::owner_marker(std::os::unix::process::parent_id(), session);
+    items[0].setString_forType(&NSString::from_str(&marker), &local::owner_type());
+    let objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = items
+        .into_iter()
+        .map(ProtocolObject::from_retained)
+        .collect();
+    pb.clearContents();
+    pb.writeObjects(&NSArray::from_retained_slice(&objects));
+    pb.changeCount()
 }
 
 /// 会话结束。剪贴板还是它写的、且还有没给出的数据（或是文件，临时目录会被删）就清空；
@@ -200,6 +272,11 @@ fn provide(owner: &ProviderIvars, item: &NSPasteboardItem, ty: &NSPasteboardType
     let Some(kind) = kind_of(ty) else {
         return;
     };
+    if kind == Kind::FileUrl
+        && with_helper(|h| h.current_for(owner).is_some_and(|c| c.deferred)) == Some(true)
+    {
+        return;
+    }
     let request = Request {
         id: 0,
         session: owner.session,
@@ -208,35 +285,44 @@ fn provide(owner: &ProviderIvars, item: &NSPasteboardItem, ty: &NSPasteboardType
         index: owner.index,
     };
     let started = Instant::now();
-    let Some(data) = with_helper(|h| h.fetch(request)).flatten() else {
-        trace(|| format!("helper got nothing for {kind:?}"));
-        return;
-    };
-    let set = autoreleasepool(|_| set_data(item, ty, kind, &data));
+    let data = with_helper(|h| h.fetch(request)).flatten();
+    let set = data.is_some_and(|data| autoreleasepool(|_| set_data(item, ty, kind, &data)));
     trace(|| format!("helper provided {kind:?}={set} in {:?}", started.elapsed()));
-    if set {
-        with_helper(|h| {
-            if let Some(current) = &mut h.current {
-                current.pending = current.pending.saturating_sub(1);
-            }
-        });
-    }
+    with_helper(|h| {
+        let Some(current) = h.current_for(owner) else {
+            return;
+        };
+        if set {
+            current.pending = current.pending.saturating_sub(1);
+        } else if kind == Kind::FileUrl {
+            // 这个条目之后读都是空，等下载结束改写。
+            current.deferred = true;
+        }
+    });
 }
 
 impl Helper {
+    /// provider 所属的那一轮还是最近一次写入的内容。
+    fn current_for(&mut self, owner: &ProviderIvars) -> Option<&mut Current> {
+        self.current
+            .as_mut()
+            .filter(|c| c.session == owner.session && c.generation == owner.generation)
+    }
+
     fn fetch(&mut self, mut request: Request) -> Option<Data> {
         self.next_id += 1;
         request.id = self.next_id;
         wire::write_request(&mut self.out, &request).ok()?;
-        let deadline = (request.kind != Kind::FileUrl).then(|| Instant::now() + REPLY_TIMEOUT);
+        let wait = match request.kind {
+            Kind::FileUrl => FILE_WAIT,
+            _ => REPLY_TIMEOUT,
+        };
+        let deadline = Instant::now() + wait;
         loop {
-            let (id, data) = match deadline {
-                Some(deadline) => self
-                    .replies
-                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                    .ok()?,
-                None => self.replies.recv().ok()?,
-            };
+            let (id, data) = self
+                .replies
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .ok()?;
             // 超时后才到的旧应答丢掉。
             if id == request.id {
                 return data;

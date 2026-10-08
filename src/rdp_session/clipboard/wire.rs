@@ -87,6 +87,12 @@ pub(super) enum ToHelper {
     Clear {
         session: u64,
     },
+    /// 远端文件下载结束。读取时没等到的，剪贴板还没换就改写成这些路径；为空表示失败，清空。
+    Files {
+        session: u64,
+        generation: u64,
+        paths: Vec<String>,
+    },
 }
 
 /// 剪贴板里的延迟数据被读取，辅助进程向主进程要数据。
@@ -103,11 +109,13 @@ pub(in crate::rdp_session) struct Request {
 const TAG_OFFER: u8 = 1;
 const TAG_REPLY: u8 = 2;
 const TAG_CLEAR: u8 = 3;
+const TAG_FILES: u8 = 4;
 const TAG_REQUEST: u8 = 1;
 
 pub(super) fn write_to_helper(w: &mut impl Write, msg: &ToHelper) -> io::Result<()> {
     let mut head = Vec::with_capacity(32);
     let mut body: &[u8] = &[];
+    let joined;
     match msg {
         ToHelper::Offer(offer) => {
             head.push(TAG_OFFER);
@@ -130,6 +138,18 @@ pub(super) fn write_to_helper(w: &mut impl Write, msg: &ToHelper) -> io::Result<
         ToHelper::Clear { session } => {
             head.push(TAG_CLEAR);
             head.extend_from_slice(&session.to_le_bytes());
+        }
+        // 路径里不会有 NUL，用它分隔。
+        ToHelper::Files {
+            session,
+            generation,
+            paths,
+        } => {
+            head.push(TAG_FILES);
+            head.extend_from_slice(&session.to_le_bytes());
+            head.extend_from_slice(&generation.to_le_bytes());
+            joined = paths.join("\0");
+            body = joined.as_bytes();
         }
     }
     write_frame(w, &head, body)
@@ -164,6 +184,20 @@ pub(super) fn read_to_helper(r: &mut impl Read) -> io::Result<ToHelper> {
             ToHelper::Reply { id, data }
         }
         TAG_CLEAR => ToHelper::Clear { session: f.u64()? },
+        TAG_FILES => {
+            let session = f.u64()?;
+            let generation = f.u64()?;
+            let paths = std::str::from_utf8(f.rest()).map_err(|_| invalid())?;
+            ToHelper::Files {
+                session,
+                generation,
+                paths: paths
+                    .split('\0')
+                    .filter(|p| !p.is_empty())
+                    .map(String::from)
+                    .collect(),
+            }
+        }
         _ => return Err(invalid()),
     };
     Ok(msg)
@@ -278,6 +312,16 @@ mod tests {
         });
         roundtrip(ToHelper::Reply { id: 1, data: None });
         roundtrip(ToHelper::Clear { session: 9 });
+        roundtrip(ToHelper::Files {
+            session: 2,
+            generation: 5,
+            paths: vec!["/tmp/a b".into(), "/tmp/中文".into()],
+        });
+        roundtrip(ToHelper::Files {
+            session: 2,
+            generation: 6,
+            paths: Vec::new(),
+        });
     }
 
     #[test]

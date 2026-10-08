@@ -10,6 +10,8 @@ pub(super) fn offer(_offer: Offer) -> bool {
 
 pub(super) fn reply(_id: u64, _data: Option<Data>) {}
 
+pub(super) fn files(_session: u64, _generation: u64, _paths: Vec<String>) {}
+
 /// 收不到任何请求；自持发送端，免得通道关闭后事件循环空转。
 pub(in crate::rdp_session) struct PasteRequests {
     rx: async_channel::Receiver<Request>,
