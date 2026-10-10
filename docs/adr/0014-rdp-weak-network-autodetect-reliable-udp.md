@@ -1,6 +1,6 @@
 # RDP 弱网优化：可靠 UDP 旁路（连接类型自动探测已否决）
 
-Status: proposed (2026-09-28)；Win11 真机验证 UDP 迁移与弱网表现后转 accepted
+Status: proposed (2026-09-28，2026-10-10 增补决策 11 / 12)；Win11 真机验证 UDP 迁移与弱网表现后转 accepted
 
 ## 背景
 
@@ -30,7 +30,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
    | 开（0，Windows 默认） | 实测 102400 kbps | 实测 102400 kbps |
    | 关（1，事件 101 "Reason Code 2"） | 恒为 10000 kbps（LAN 类型的下限 10 Mbps） | 默认特征 RTT 400 ms、512 kbps；RemoteFX 自适应图形"按最小网络带宽优化"（事件 166），帧率掉到 6 以下 |
 
-   报 LAN 在两种配置下都能用，Autodetect 在关了连接时探测的服务端上不可用，所以默认 LAN。关了连接时探测后，服务端靠会话中的持续探测修正估值：Windows App 应答会话期带宽测量，同配置下测到 95–103 Mbps；IronRDP 只在连接时应答带宽测量，会话期只应答 RTT，估值停在初值。10 Mbps 的估值看起来压住了服务端的发送量：同样拖窗口，估值 10 Mbps 时流量平均 9.6 Mbps、最高 18 Mbps；100 Mbps 时平均 13.7、最高 37（两次操作不完全相同）。服务端建议保持默认（`SelectNetworkDetect` 为 0 或不配置）。
+   报 LAN 在两种配置下都能用，Autodetect 在关了连接时探测的服务端上不可用，所以默认 LAN。关了连接时探测后，服务端靠会话中的持续探测修正估值：Windows App 应答会话期带宽测量，同配置下测到 95–103 Mbps；IronRDP 此前只在连接时应答带宽测量，会话期只应答 RTT，估值停在初值（决策 11 补上）。10 Mbps 的估值看起来压住了服务端的发送量：同样拖窗口，估值 10 Mbps 时流量平均 9.6 Mbps、最高 18 Mbps；100 Mbps 时平均 13.7、最高 37（两次操作不完全相同）。服务端建议保持默认（`SelectNetworkDetect` 为 0 或不配置）。
 2. **声明 `TRANSPORT_TYPE_UDP_FECR | SOFT_SYNC_TCP_TO_UDP`**。服务端请求可靠 UDP 时建隧道，EGFX 图形、Display Control 等动态通道经 Soft-Sync 迁入后双向走 UDP。静态通道（剪贴板、rdpsnd 音频、rdpdr）与快速路径键鼠输入仍走 TCP。DRDYNVC 随 EGFX 注册，关 EGFX 时不声明 UDP，否则隧道建成后无通道可迁、启用隧道会报错断开。
 3. **只做可靠 UDP**。有损 UDP（FEC + DTLS）上游未实现，服务端请求时回 E_ABORT。EGFX 依赖参考帧与帧确认，mstsc 也走可靠通道；NexShell 音频走 rdpsnd 静态通道，不受影响。
 4. **与参考客户端的差异**（`src/rdp_session/udp.rs`）：
@@ -41,7 +41,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
    - UDP 的 TLS 与 TCP 同策略：平台根严格校验 + 同一 `host:port` 的 TOFU 指纹回调。
 5. **缩放改走 `prepare_resize` 并按通道分流**。`encode_resize` 固定走 TCP，Soft-Sync 后 Display Control 已在 UDP 上。
 6. **开关与观测**：UDP 默认开启，`NEXSHELL_RDP_DISABLE_UDP=1` 退回纯 TCP；`NEXSHELL_RDP_AUTODETECT=1` 改报自动探测；`NEXSHELL_RDP_NET_TRACE=1` 打印服务端测得的网络特征。有通道迁到 UDP 后，统计面板"传输"显示 `TCP + UDP`，UDP 收包计入接收码率。
-7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）、决策 10（`973d4e78`、`40800b26`）三个补丁；当前 rev 见 ADR 0013 基线。
+7. **依赖**：新增 `ironrdp-rdpeudp` / `ironrdp-rdpeudp-tokio` / `ironrdp-rdpemt`，与其余 ironrdp crate 同走 fork 路径 patch。fork 在 ADR 0013 基线 `65cb3a93` 上追加决策 8（`7240b9a6`）、决策 9（`03e51ba6`）、决策 10（`973d4e78`、`40800b26`）、决策 11（`8182c7fc`、`586e6fcb`）、决策 12（`99495453`）；当前 rev 见 ADR 0013 基线。
 8. **fork 补丁：Soft-Sync 按服务端清单路由**（`ironrdp-dvc` client）。Windows 的 Soft-Sync 请求会列出客户端拒绝过或尚未打开的通道 ID（实测 `[2, 6, 7, 8, 9, 10, 11, 12]`，客户端只开了 7 号 Graphics）。上游见到未知 ID 就跳过整条隧道，而服务端发出请求时已经改走隧道（MS-RDPEDYC 3.2.5.3.1），结果画面停在"正在连接"。补丁：
    - 列出的 ID 全部按服务端路由记下，应答里带上该隧道。
    - 隧道上除 Data 外也接受 Create / Close，应答原路回隧道。实测 Windows 在 Soft-Sync 之后经隧道新建 Video::Control / Video::Data / Geometry（清单内 ID），以及清单外的 `AUDIO_PLAYBACK_DVC`（ID 16）。
@@ -55,6 +55,13 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
     - ACK 向量最多 32 个元素，从最高序号往下填，满了就丢最旧的段，洞多时向量够不到最低的洞（`973d4e78`）。补丁：按接收窗口预留向量空间（每槽一个元素，上限 256），不再截断；万一截断，保留最旧的段并调低 `snSourceAck`。代价是上行每包载荷从 1076 降到 852 字节，上行只有帧确认等小包，可忽略。
     - 重复包和窗口外的包不回 ACK（`973d4e78`）。补丁：每个 Source Packet 都回 ACK（3.1.1.4）。
     - ACK-of-ACKs 的累计值漏算重传队列里的包，可能越过尚未确认的上行数据（`973d4e78`）。补丁：取发送窗口与重传队列中的最小序号。
+11. **fork 补丁：应答会话期带宽测量**（`ironrdp-session` x224 / `ironrdp-rdpeudp-tokio` autodetect）。连接后服务端用 Bandwidth Measure Start / Stop 持续测带宽（MS-RDPBCGR 2.2.14.1.2 / 2.2.14.1.4，requestType 0x0014 / 0x0429；有损 UDP 为 0x0114 / 0x0629），客户端回 Bandwidth Measure Results（2.2.14.2.2，responseType 0x000B）：timeDelta 为收到 Start 到收到 Stop 的毫秒数，byteCount 为其间服务端→客户端的全部字节（规范：连接后用正常 PDU 替代 Payload 消息）。规范允许两条承载路径，都实现：
+    - TCP 主连接的 Auto-Detect Request PDU：上游只打 debug 日志后丢弃。补丁在 x224 处理器开窗，`ActiveStage::process` 入口按整帧累加（含 fastpath），Stop 时在 message channel 回应答。
+    - RDPEMT 隧道子头（MS-RDPEMT 2.2.1.1.1）：上游驱动丢弃 `sub_headers`。补丁解析隧道 Data PDU 子头里的请求，按整个隧道 PDU 计数，应答放进空载荷 Data PDU 的子头回发；写泵通道改传 `TunnelData`。隧道内 RTT 请求一并应答。子头的 SubHeaderLength / SubHeaderType 就是探测结构自己的 headerLength / headerTypeId，SubHeaderData 只剩 sequenceNumber 之后的字段，所以按完整子头解析和回包（`586e6fcb`；初版把 SubHeaderData 当完整结构，真机上隧道请求全部解码失败）。
+    - 没有 Start 就来的 Stop 不回：报 0 字节会被当成断链。Start 所在 PDU 不计入，Stop 所在 PDU 计入。
+    - Windows 两条路径都用，隧道为主（见"验证"）。
+    - 收益分情况：服务端开着连接时探测（默认）时初值已是实测值，会话期测量只会随链路下修，弱网下可能少卡也可能降画质；关了连接时探测的服务端（估值卡在 10 Mbps）收益最确定。真机对比看 `RemoteFX Network\Current TCP/UDP Bandwidth` 是否随时间变化。
+12. **fork 补丁：QoE 帧确认**（`ironrdp-egfx` client）。EndFrame 后在标准 FrameAcknowledge 之外追加 RDPGFX_QOE_FRAME_ACKNOWLEDGE_PDU（MS-RDPEGFX 2.2.2.21）：timestamp 为处理 StartFrame 的单调毫秒（首值定原点，u32 回绕），timeDiffSE 为 StartFrame 到 EndFrame，timeDiffEDR 为 EndFrame 到 `on_frame_complete` 返回（NexShell 的 publish 在其中，真正上屏时刻拿不到），超过 65535 ms 填 0。只在确认的能力集是 V10 及以上时发送，V8 / V8.1 不发。规范明说它只作信息与调试用途，不计入弱网优化的预期收益。
 
 ## 影响与风险
 
@@ -85,13 +92,20 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
 
 ## 验证
 
-- 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 44、`ironrdp-rdpeudp`（`--features std`）201、`ironrdp-rdpeudp-tokio` 55 项通过；决策 10 的单测覆盖已收包留在向量中直到 AoA（按抓包场景构造，旧逻辑下失败）、未释放历史不缩小窗口且有上限、多洞时向量够到最低的洞、最坏向量加满载荷不超 MTU、重复包回 ACK、AoA 不越过待重传包。
+- 单测：多传输标志、两个环境变量开关、请求判定（同协议只试一次、无 Soft-Sync 拒绝、有损拒绝）、连接器配置（标志随 UDP 开关且要求 EGFX）。`cargo test --lib` 与 `--bin` 全部通过。fork：`ironrdp-dvc` 7、`ironrdp-session` 46、`ironrdp-rdpeudp`（`--features std`）201、`ironrdp-rdpeudp-tokio` 60、`ironrdp-egfx` 65 项通过；决策 11 的单测覆盖 Start 前后计数边界、无 Start 的 Stop 不回、有损变体、RTT 应答、坏子头跳过、按 Windows 实发字节的子头编解码；决策 12 覆盖 V8 不发 / V10.7 追加、无 StartFrame 不发、65535 ms 截断；决策 10 的单测覆盖已收包留在向量中直到 AoA（按抓包场景构造，旧逻辑下失败）、未释放历史不缩小窗口且有上限、多洞时向量够到最低的洞、最坏向量加满载荷不超 MTU、重复包回 ACK、AoA 不越过待重传包。
 - 真机已验证（Win11，经 MTU 1160 的 UDP 隧道）：隧道建立，面板显示 `TCP + UDP`，图形数据基本走 UDP；LAN 连接类型下 30 fps 以上；打决策 9 补丁后连续运行 10 分钟以上不断开；打决策 10 补丁后在丢包 5% 的隧道里连续运行 10 分钟不断开；音频（rdpsnd 静态通道，服务端先在隧道和 TCP 上试 `AUDIO_PLAYBACK_DVC`，被拒后回落）正常；服务端开连接时探测后，报 LAN 与 Autodetect 的带宽估值都是实测值（决策 1）。
+- 真机已验证决策 11（2026-10-10，Win11，base RTT 约 65 ms、ping 丢包 7.8%）：
+  - Windows 两条路径都用，隧道为主。修复子头解析后的一次约 12 分钟会话里，应答隧道带宽测量 4134 次、TCP 主连接 7705 次（TCP 上的探测主要出现在播放视频期间）。
+  - 服务端隧道带宽估值从连接时的 363 kbps 随测量更新，每分钟中位数 0.8–3.9 Mbps，峰值 5.6 Mbps。修复前隧道请求全部被丢弃，估值不会更新。
+  - 服务端测得 TCP 上的 RTT 为 200–900 ms（最高 3.9 s），隧道约 68 ms。丢包下 TCP 队头阻塞，客户端日志里 TCP 请求成簇到达（簇间隔 p50 76 ms、p90 216 ms），与快速重传和超时重传的时间对得上。
+  - 约一半样本的 Start / Stop 在同一毫秒内处理，timeDelta 取下限 1 ms，单样本偏高。服务端平滑后的估值未见异常，暂不处理。
 - 真机待做：
   - 缩放、剪贴板、共享盘在 UDP 下逐项回归。
   - UDP 被挡：连接回落 TCP，额外等待不超过约 3s。
   - 隧道内 5% 丢包：与 `NEXSHELL_RDP_DISABLE_UDP=1` 对比流畅度与接收码率。
   - 连接异常时分别设两个开关复现，区分是 UDP 还是自动探测引起。
+  - 决策 11：用 typeperf 在服务端对照 `RemoteFX Network` 的带宽估值，比较弱网隧道里的帧率与画质有无变化。日志用 `RUST_LOG=ironrdp_session::x224=debug,ironrdp_rdpeudp_tokio=debug` 加 `NEXSHELL_RDP_NET_TRACE=1`。
+  - 决策 12：Wireshark 解密或服务端事件确认 QoE PDU 被接受，EGFX 通道不因它断开。
 
 ## 回退
 
