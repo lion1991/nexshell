@@ -87,9 +87,12 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
     - `H264Decoder` 新增 `decode_regions`，默认实现是整帧解码再裁剪，行为不变。
     - NexShell 的 VideoToolbox 解码器覆盖它：借用 NV12 平面，只把 regionRects 转成 RGBA。
     - 收益有限：HiDPI 整帧 vImage 转换约 0.4 ms（ADR 0015），全屏视频时没有收益。
-16. **MouseCursor DVC 先探测**（`src/rdp_session/mouse_cursor.rs`，`NEXSHELL_RDP_MOUSE_CURSOR_PROBE=1`）。
-    - 接受服务端创建的通道但不发 CapsAdvertise，服务端照旧走 FastPath 指针。
-    - 真机：服务端会创建该通道，Soft-Sync 也把它迁进隧道。完整实现待做；做完后光标形状更新改走 UDP，避开 TCP 队头阻塞。
+16. **光标改走 MouseCursor DVC**（MS-RDPEMSC，`src/rdp_session/mouse_cursor.rs`）。
+    - 服务端创建通道后发 CapsAdvertise（v1，字节同 Windows App）；确认后服务端不再发 FastPath 指针，光标形状随隧道走 UDP，避开 TCP 队头阻塞。
+    - 载荷沿用 `ironrdp-pdu` 的 `PointerAttribute` / `LargePointerAttribute` 解码（布局与 MS-RDPBCGR 一致），指针缓存按通道自建；位置更新照旧忽略。
+    - 与 Windows App 不同：CapsConfirm 不合法时不关通道，只记日志。ironrdp-dvc 的处理器没法主动关通道，且服务端确认后已改走这条通道发光标。
+    - 错误不上抛（DVC 层会当致命错误）：坏包只记日志，解码失败退回系统箭头。
+    - 真机（Win11）：服务端创建该通道并确认能力，Soft-Sync 把它迁进隧道；此后光标变化全部经 DVC 下发，FastPath 指针停发。
 
 ## 影响与风险
 
@@ -131,8 +134,8 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
   - 服务端 `suppressOutputSupport` 为 true，切 tab 时 suppress / allow 正常收发；
   - 声明 `AUTORECONNECT_SUPPORTED` 后，服务端开始下发 cookie；
   - 心跳参数为 1 s / 8 / 12，即 20 s 判定掉线；
-  - MouseCursor 通道被创建（channel 8），并列入 Soft-Sync 清单。
-- 真机待做：
+  - MouseCursor 通道被创建（channel 8），并列入 Soft-Sync 清单；决策 16 实现后，一次会话 87 次光标变化全部经 DVC 下发，FastPath 指针为 0。
+- 以下真机验证决定不做（2026-10-10）：
   - 决策 13：断网 20 s 以上后重连并接回原会话；睡眠唤醒；在别处登录挤下线时不重连。
   - 决策 14：最小化、隐藏应用后画面能恢复。
   - 缩放、剪贴板、共享盘在 UDP 下逐项回归。
@@ -144,4 +147,4 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
 
 ## 回退
 
-运行期设 `NEXSHELL_RDP_DISABLE_UDP=1`；或 revert 合入提交回到纯 TCP。
+运行期设 `NEXSHELL_RDP_DISABLE_UDP=1`；或 revert 合入提交回到纯 TCP。光标设 `NEXSHELL_RDP_MOUSE_CURSOR_DVC=0` 退回 FastPath 指针。

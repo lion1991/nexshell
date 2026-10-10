@@ -166,7 +166,7 @@ fn net_trace() -> bool {
 }
 
 /// 指针链路追踪开关（NEXSHELL_RDP_PTR_TRACE=1）。
-fn ptr_trace() -> bool {
+pub(super) fn ptr_trace() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_PTR_TRACE").is_ok_and(|v| v == "1"))
 }

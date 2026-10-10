@@ -77,7 +77,13 @@ pub fn build_dvc_client(
     desktop_width: u16,
     desktop_height: u16,
 ) -> DrdynvcClient {
-    let handler = EgfxHandler::new(framebuffer, event_tx, stats, desktop_width, desktop_height);
+    let handler = EgfxHandler::new(
+        framebuffer,
+        event_tx.clone(),
+        stats,
+        desktop_width,
+        desktop_height,
+    );
     // 关闭库内 Progressive 解码与合成器（上游 #1443/#1461）：解码/合成全在本模块，避免双份工作。
     let client = GraphicsPipelineClient::new(Box::new(handler), platform_h264_decoder())
         .with_builtin_compositing(false);
@@ -87,7 +93,7 @@ pub fn build_dvc_client(
         .with_dynamic_channel(wire_dump::wrap_if_enabled(client))
         .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
 
-    let client = super::mouse_cursor::attach_probe(client);
+    let client = super::mouse_cursor::attach(client, event_tx);
     super::audio_diag::attach_audio_dvc_probes(client)
 }
 

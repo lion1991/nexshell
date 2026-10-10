@@ -64,9 +64,10 @@
 
 - **注册**：DVC 由服务端发 Create Request 创建，客户端不能主动打开。在 `build_dvc_client`（`src/rdp_session/egfx/mod.rs`）里注册通道名，`DvcProcessor::start()` 时发 CapsAdvertise。Windows App 也是在 `OnChannelOpened` 里发。
 - **先探测**：只注册通道、打一行日志，确认这台 Windows 会不会创建它、是否经 Soft-Sync 迁到隧道，再做完整实现。Windows App 用 `EnableMouseCursorDVC` 开关控制这条通道。哪些服务端版本支持未核实，规范 v1.0 发布于 2023-09。
-  - 探测已实现（`src/rdp_session/mouse_cursor.rs`，`NEXSHELL_RDP_MOUSE_CURSOR_PROBE=1`）：接受通道但不发 CapsAdvertise，服务端照旧走 FastPath 指针，光标不受影响。
-  - 真机（Win11）：服务端创建了该通道（channel 8），Soft-Sync 清单 `[2, 6, 7, 8, 9, 10, 11, 12]` 也把它迁进了隧道。可以做完整实现。
-- **CapsConfirm 不合法**：关闭通道，回落到 FastPath 指针。Windows App 也是这样处理。
+  - 探测结果（Win11）：服务端创建了该通道（channel 8），Soft-Sync 清单 `[2, 6, 7, 8, 9, 10, 11, 12]` 也把它迁进了隧道。
+- **已实现**（`src/rdp_session/mouse_cursor.rs`，默认开启，`NEXSHELL_RDP_MOUSE_CURSOR_DVC=0` 关闭）：`start()` 发 CapsAdvertise，处理 CapsConfirm 与六种 updateType。真机（Win11，2026-10-10）：服务端确认能力，之后 87 次光标变化全部经 DVC 下发（含 41×39 的大光标），FastPath 指针为 0，无解码错误。
+- **CapsConfirm 不合法**：Windows App 关闭通道、回落到 FastPath 指针。NexShell 只记日志、照常处理更新：ironrdp-dvc 的处理器没法主动关通道，且服务端确认后已改走这条通道发光标。
+- **错误处理**：处理器返回错误会被 DVC 层当成致命错误，所以坏包只记日志；指针解码失败同 FastPath，丢掉该缓存槽、退回系统箭头。
 - **解码复用**：
   - `ironrdp-pdu` 的 basic_output/pointer：ColorPointerAttribute / PointerAttribute / CachedPointerAttribute / LargePointerAttribute / Point16。
   - `ironrdp-graphics` 的 `DecodedPointer::decode_*`。
@@ -94,7 +95,7 @@
 
 Windows App 实发字节：`01 00 00 00 43 41 50 53 01 00 00 00 0C 00 00 00`。
 
-**updateType**：0x05 SYSTEM_NULL、0x06 SYSTEM_DEFAULT、0x08 POSITION、0x0A CACHED、0x0B POINTER、0x0C LARGE_POINTER。载荷沿用 MS-RDPBCGR 中对应的指针结构，实现前对照 MS-RDPEMSC 2.2.2.x 逐个核对。
+**updateType**：0x05 SYSTEM_NULL、0x06 SYSTEM_DEFAULT、0x08 POSITION、0x0A CACHED、0x0B POINTER、0x0C LARGE_POINTER。载荷已对照 MS-RDPEMSC v2.0（2024-04）核对：POSITION 为 TS_POINT16，CACHED 为 2 字节缓存索引，POINTER / LARGE_POINTER 与 MS-RDPBCGR 的 TS_POINTERATTRIBUTE / TS_FP_LARGEPOINTERATTRIBUTE 布局相同，结尾可有 1 字节 pad；SYSTEM_NULL / SYSTEM_DEFAULT 无载荷。
 
 ### 关键参数
 
@@ -229,14 +230,14 @@ VT 输出 NV12，现在每帧都用 vImage 把整帧转成 RGBA、写进一个�
 |---|---|---|
 | 0. fork 能力位 | 已做，真机已验证 | fork `f7da0a6e` |
 | 1. SuppressOutput + "session ended" 覆盖 bug | 已做；真机见到 suppress / allow 收发 | `rdp_session/suppress.rs`、`root_view/rdp_section.rs`、`macos_window_util.rs` |
-| 2. Auto Reconnect | 已做，真机待验证 | fork `f7da0a6e`；`rdp_session/reconnect.rs` |
+| 2. Auto Reconnect | 已做，未做真机验证 | fork `f7da0a6e`；`rdp_session/reconnect.rs` |
 | 3. EGFX 4.1 | 未做，等基线测量 | — |
 | 3. EGFX 4.4 | 已做 | fork `287f337d`；`egfx/decoder_vt.rs`、`egfx/vimage.rs` |
-| 4. MouseCursor | 探测已做，真机确认可用；完整实现待做 | `rdp_session/mouse_cursor.rs` |
+| 4. MouseCursor | 已做，真机已验证 | `rdp_session/mouse_cursor.rs` |
 
 `rdp_session/mod.rs` 超过 1500 行，按约定把帧输出处理拆到 `rdp_session/outputs.rs`。
 
-真机待做：
+以下真机验证决定不做（2026-10-10）：
 - 断网 20 s 以上后自动重连，并接回原会话；
 - 睡眠唤醒后的提示语和重连；
 - 在别处登录同一账号把 NexShell 挤下线时，不自动重连；
