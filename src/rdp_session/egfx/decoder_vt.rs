@@ -11,7 +11,10 @@ use std::slice;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use ironrdp_egfx::decode::{DecodedFrame, DecoderError, DecoderResult, H264Decoder};
+use ironrdp_egfx::decode::{
+    DecodedFrame, DecodedRegions, DecoderError, DecoderResult, H264Decoder,
+};
+use ironrdp_pdu::geometry::ExclusiveRectangle;
 
 use super::avc444::Nv12Frame;
 use super::vimage;
@@ -239,15 +242,22 @@ impl VtH264Decoder {
         data: &[u8],
         f: impl FnOnce(&Nv12Frame<'_>) -> R,
     ) -> DecoderResult<R> {
+        self.decode_nv12_ranged(data, |frame, full_range| full_range.then(|| f(frame)))?
+            .ok_or_else(|| DecoderError::msg("VT output is video range, AVC444 expects full range"))
+    }
+
+    /// 同 [`Self::decode_nv12`]，不限范围，把是否全范围一并交给 `f`。
+    fn decode_nv12_ranged<R>(
+        &mut self,
+        data: &[u8],
+        f: impl FnOnce(&Nv12Frame<'_>, bool) -> R,
+    ) -> DecoderResult<R> {
         let pixel_buffer = self.decode_pixel_buffer(data)?;
         // SAFETY: pixel_buffer 存活；with_locked_nv12 锁定期间借出平面、结束前解锁。
         let result = unsafe {
             with_locked_nv12(&pixel_buffer, |p| {
-                if !p.full_range {
-                    return Err("VT output is video range, AVC444 expects full range");
-                }
                 Nv12Frame::new(p.width, p.height, p.y, p.y_stride, p.uv, p.uv_stride)
-                    .map(|frame| (p.width, p.height, f(&frame)))
+                    .map(|frame| (p.width, p.height, f(&frame, p.full_range)))
                     .ok_or("VT NV12 planes shorter than frame size")
             })
         };
@@ -277,6 +287,26 @@ impl H264Decoder for VtH264Decoder {
         cvt_us.fetch_add(decoded.elapsed().as_micros() as u64, Ordering::Relaxed);
         self.log_first_frame(frame.width() as usize, frame.height() as usize);
         Ok(frame)
+    }
+
+    /// AVC420 只转 regionRects（docs/plans/2026-10-10-suppress-output-mouse-cursor.md §4.4），
+    /// 不再整帧转 RGBA 再裁。
+    fn decode_regions(
+        &mut self,
+        data: &[u8],
+        regions: &[ExclusiveRectangle],
+    ) -> DecoderResult<DecodedRegions> {
+        let started = Instant::now();
+        let mut decoded = started;
+        let converted = self.decode_nv12_ranged(data, |frame, full_range| {
+            decoded = Instant::now();
+            vimage::nv12_regions_to_rgba(frame, full_range, regions)
+        })?;
+        let [n, dec_us, cvt_us] = &AVC420_TIMING;
+        n.fetch_add(1, Ordering::Relaxed);
+        dec_us.fetch_add((decoded - started).as_micros() as u64, Ordering::Relaxed);
+        cvt_us.fetch_add(decoded.elapsed().as_micros() as u64, Ordering::Relaxed);
+        converted.map_err(DecoderError::msg)
     }
 
     fn reset(&mut self) {

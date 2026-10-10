@@ -301,6 +301,21 @@ impl RootView {
                 }
                 ctx.notify();
             }
+            RdpEvent::Reconnecting {
+                attempt,
+                max,
+                after_sleep,
+            } => {
+                if let Some(rdp) = self.rdp_state_mut(tab_id) {
+                    rdp.phase = RdpConnectionPhase::Reconnecting {
+                        attempt,
+                        max,
+                        after_sleep,
+                    };
+                    rdp.clipboard_transfer = None;
+                }
+                ctx.notify();
+            }
             RdpEvent::ClipboardTransfer(progress) => {
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
                     rdp.clipboard_transfer = progress;
@@ -412,6 +427,33 @@ impl RootView {
         self.rdp_hotkey_guard.borrow_mut().set_engaged(desired);
     }
 
+    /// 下发各 RDP 会话的画面可见性：终端页的活动 tab 且应用可见。render 每帧调，句柄内去重。
+    pub(in crate::root_view) fn sync_rdp_visibility(&self) {
+        let page_visible = self.app_visible && self.app_page == crate::AppPage::Terminal;
+        for (index, tab) in self.terminal_tabs.iter().enumerate() {
+            if let Some(rdp) = tab.rdp.as_ref() {
+                rdp.handle
+                    .set_visible(page_visible && index == self.active_tab_index);
+            }
+        }
+    }
+
+    /// 订阅应用可见性（macOS 遮挡状态）；其他平台没有这个信号，视为始终可见。
+    pub(in crate::root_view) fn watch_app_visibility(ctx: &mut ViewContext<Self>) {
+        #[cfg(target_os = "macos")]
+        ctx.spawn_stream_local(
+            crate::macos_window_util::app_visibility_events(),
+            |view, visible, ctx| {
+                view.app_visible = visible;
+                view.sync_rdp_visibility();
+                ctx.notify();
+            },
+            |_, _| {},
+        );
+        #[cfg(not(target_os = "macos"))]
+        let _ = ctx;
+    }
+
     /// 活动页是 RDP 时，把被本地菜单截走的 ⌘ 快捷键转成 Ctrl+键发往远端，返回是否已转发。
     pub(in crate::root_view) fn forward_rdp_command_shortcut(&self, key: &str) -> bool {
         if self.app_page != crate::AppPage::Terminal {
@@ -474,7 +516,11 @@ impl RootView {
                 Some(self.active_tab_index),
                 &colors,
             ),
-            RdpConnectionPhase::Connected => {
+            // 还没传过帧就没有旧画面可留，只显示文字。
+            RdpConnectionPhase::Reconnecting { .. } if rdp.last_uploaded_generation == 0 => {
+                self.render_rdp_status(Self::rdp_reconnecting_message(&rdp.phase), None, &colors)
+            }
+            RdpConnectionPhase::Connected | RdpConnectionPhase::Reconnecting { .. } => {
                 let (w, h) = {
                     let fb = rdp.handle.framebuffer.lock();
                     (fb.width, fb.height)
@@ -498,6 +544,34 @@ impl RootView {
 
         let mut stack = Stack::new();
         stack.add_child(body);
+        if matches!(rdp.phase, RdpConnectionPhase::Reconnecting { .. })
+            && rdp.last_uploaded_generation != 0
+        {
+            let card = Container::new(
+                Text::new_inline(
+                    Self::rdp_reconnecting_message(&rdp.phase),
+                    self.ui_font,
+                    13.0,
+                )
+                .with_color(colors.text_primary)
+                .finish(),
+            )
+            .with_horizontal_padding(16.0)
+            .with_vertical_padding(10.0)
+            .with_background_color(colors.card_bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
+            .with_border(Border::all(1.0).with_border_color(colors.panel_border))
+            .finish();
+            stack.add_positioned_overlay_child(
+                card,
+                OffsetPositioning::offset_from_parent(
+                    Vector2F::zero(),
+                    ParentOffsetBounds::ParentByPosition,
+                    ParentAnchor::Center,
+                    ChildAnchor::Center,
+                ),
+            );
+        }
         if let Some(progress) = rdp.clipboard_transfer {
             stack.add_positioned_overlay_child(
                 self.render_rdp_clipboard_transfer(progress, &colors),
@@ -928,6 +1002,23 @@ impl RootView {
         Container::new(Align::new(column.finish()).finish())
             .with_background_color(colors.panel_bg)
             .finish()
+    }
+
+    fn rdp_reconnecting_message(phase: &RdpConnectionPhase) -> String {
+        let RdpConnectionPhase::Reconnecting {
+            attempt,
+            max,
+            after_sleep,
+        } = phase
+        else {
+            return String::new();
+        };
+        let key = if *after_sleep {
+            "rdp_reconnecting_after_sleep"
+        } else {
+            "rdp_reconnecting"
+        };
+        rust_i18n::t!(key, attempt = attempt, max = max).to_string()
     }
 
     fn render_rdp_reconnect_button(

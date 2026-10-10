@@ -18,6 +18,7 @@ use ironrdp_rdpemt::TunnelConfig;
 use ironrdp_rdpeudp_tokio::{UdpTlsConfig, UdpTransport, UdpTransportConfig};
 use ironrdp_session::ActiveStage;
 
+use super::reconnect::{io_error, net, SessionError};
 use super::stats::RdpStats;
 
 // 连接期握手是内联等待的：UDP 被防火墙挡时每次连接都要白等这么久，故远短于上游默认 10s。
@@ -173,11 +174,13 @@ impl UdpSideband {
         &mut self,
         active_stage: &mut ActiveStage,
         payload: Option<Vec<u8>>,
-    ) -> Result<Option<DvcMessageBatch>, String> {
+    ) -> Result<Option<DvcMessageBatch>, SessionError> {
         let Some(payload) = payload else {
             let reason = self.close_reason().await;
             if active_stage.reliable_udp_dvc_tunnel_in_use() {
-                return Err(format!("reliable UDP tunnel closed: {reason}"));
+                return Err(SessionError::Network(format!(
+                    "reliable UDP tunnel closed: {reason}"
+                )));
             }
             eprintln!("[rdp-udp] tunnel closed before Soft-Sync, staying on TCP: {reason}");
             active_stage
@@ -193,7 +196,7 @@ impl UdpSideband {
             self.pending = Some(payload);
             return Ok(None);
         }
-        self.process(active_stage, &payload).map(Some)
+        Ok(Some(self.process(active_stage, &payload)?))
     }
 
     /// 隧道已关：回收后台任务，取出驱动 / 泵的退出原因（recv 只给 None）。
@@ -252,7 +255,7 @@ pub(super) async fn handle_recv<W: FramedWrite>(
     active_stage: &mut ActiveStage,
     framed: &mut W,
     payload: Option<Vec<u8>>,
-) -> Result<(), String> {
+) -> Result<(), SessionError> {
     let Some(sideband) = udp.as_mut() else {
         return Ok(());
     };
@@ -267,7 +270,7 @@ pub(super) async fn drain_pending<W: FramedWrite>(
     udp: &mut Option<UdpSideband>,
     active_stage: &mut ActiveStage,
     framed: &mut W,
-) -> Result<bool, String> {
+) -> Result<bool, SessionError> {
     let Some(sideband) = udp.as_mut() else {
         return Ok(false);
     };
@@ -284,13 +287,16 @@ pub(super) async fn route_dvc_batch<W: FramedWrite>(
     active_stage: &mut ActiveStage,
     framed: &mut W,
     batch: DvcMessageBatch,
-) -> Result<(), String> {
+) -> Result<(), SessionError> {
     let channel_id = batch.channel_id();
     let messages = batch.into_messages();
     if active_stage.dvc_tunnel_for_channel(channel_id) == Some(SoftSyncTunnelType::RELIABLE_UDP) {
-        let transport = udp
-            .and_then(|u| u.transport.as_ref())
-            .ok_or_else(|| "reliable UDP tunnel unavailable for a Soft-Sync channel".to_string())?;
+        // 隧道已关（transport 被取走）而通道还在隧道上：等同断链。
+        let transport = udp.and_then(|u| u.transport.as_ref()).ok_or_else(|| {
+            SessionError::Network(
+                "reliable UDP tunnel unavailable for a Soft-Sync channel".to_string(),
+            )
+        })?;
         for message in messages {
             let payload = message
                 .encode_unframed_pdu()
@@ -298,7 +304,7 @@ pub(super) async fn route_dvc_batch<W: FramedWrite>(
             transport
                 .send(payload)
                 .await
-                .map_err(|e| format!("write UDP tunnel failed: {e}"))?;
+                .map_err(net("write UDP tunnel failed"))?;
         }
         return Ok(());
     }
@@ -308,7 +314,7 @@ pub(super) async fn route_dvc_batch<W: FramedWrite>(
     framed
         .write_all(&frame)
         .await
-        .map_err(|e| format!("write DVC messages failed: {e}"))
+        .map_err(io_error("write DVC messages failed"))
 }
 
 /// 会话期到达的多传输请求：尝试建隧道（未启用 UDP 则直接拒绝），按需在 TCP 上应答。
@@ -318,7 +324,7 @@ pub(super) async fn answer_requests<W: FramedWrite>(
     framed: &mut W,
     requests: Vec<MultitransportRequestPdu>,
     soft_sync: bool,
-) -> Result<(), String> {
+) -> Result<(), SessionError> {
     for request in requests {
         let (result, established) = match udp.as_mut() {
             Some(sideband) => sideband.handle_request(&request, soft_sync).await,
@@ -334,7 +340,7 @@ pub(super) async fn answer_requests<W: FramedWrite>(
             framed
                 .write_all(&frame)
                 .await
-                .map_err(|e| format!("write multitransport response failed: {e}"))?;
+                .map_err(io_error("write multitransport response failed"))?;
         }
         if established {
             active_stage

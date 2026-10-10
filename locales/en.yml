@@ -29,6 +29,8 @@ tab_code_viewer: Built-in Editor
 tab_rdp: Remote Desktop
 rdp_connecting: "Connecting to remote desktop…"
 rdp_disconnected: "Disconnected: %{reason}"
+rdp_reconnecting: "Connection lost. Reconnecting (%{attempt}/%{max})…"
+rdp_reconnecting_after_sleep: "Mac woke from sleep. Reconnecting (%{attempt}/%{max})…"
 rdp_reconnect: Reconnect
 rdp_info_title: Connection Information
 rdp_info_na: N/A

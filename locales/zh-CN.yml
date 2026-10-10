@@ -29,6 +29,8 @@ tab_code_viewer: 内置编辑器
 tab_rdp: 远程桌面
 rdp_connecting: 正在连接远程桌面…
 rdp_disconnected: "连接已断开：%{reason}"
+rdp_reconnecting: "连接中断，正在重连（%{attempt}/%{max}）…"
+rdp_reconnecting_after_sleep: "Mac 已从睡眠中唤醒，正在重连（%{attempt}/%{max}）…"
 rdp_reconnect: 重新连接
 rdp_info_title: 连接信息
 rdp_info_na: 不可用

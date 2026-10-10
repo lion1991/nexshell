@@ -487,6 +487,9 @@ fn main() {
             Ok(RdpEvent::Resized { width, height }) => {
                 println!("[probe] resized {width}x{height}");
             }
+            Ok(RdpEvent::Reconnecting { attempt, max, .. }) => {
+                println!("[probe] reconnecting {attempt}/{max}");
+            }
             Ok(RdpEvent::Disconnected { reason }) => {
                 println!("[probe] disconnected: {reason}");
                 break;

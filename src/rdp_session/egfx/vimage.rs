@@ -5,6 +5,9 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
+use ironrdp_egfx::decode::{DecodedRegion, DecodedRegions};
+use ironrdp_pdu::geometry::ExclusiveRectangle;
+
 use super::avc444::Nv12Frame;
 
 #[repr(C)]
@@ -197,6 +200,59 @@ pub fn nv12_to_rgba(frame: &Nv12Frame<'_>, full_range: bool, dst: &mut [u8]) -> 
     check(err)
 }
 
+/// 只把 AVC420 的 regionRects 转成 RGBA，裁剪规则同 ironrdp_egfx 的 `crop_region`
+/// （右/下不含，裁到帧内，整块在帧外的丢掉）。NV12 色度是 2×2 下采样，
+/// 所以先把转换区向外对齐到偶数坐标，多转出来的边再裁掉。
+pub fn nv12_regions_to_rgba(
+    frame: &Nv12Frame<'_>,
+    full_range: bool,
+    rects: &[ExclusiveRectangle],
+) -> Result<DecodedRegions, String> {
+    let (fw, fh) = (frame.width, frame.height);
+    let mut regions = Vec::with_capacity(rects.len());
+    for rect in rects {
+        let (left, top) = (usize::from(rect.left), usize::from(rect.top));
+        let right = usize::from(rect.right).min(fw);
+        let bottom = usize::from(rect.bottom).min(fh);
+        if right <= left || bottom <= top {
+            continue;
+        }
+        let (ax, ay) = (left & !1, top & !1);
+        let ar = right.next_multiple_of(2).min(fw);
+        let ab = bottom.next_multiple_of(2).min(fh);
+        let (aw, ah) = (ar - ax, ab - ay);
+        let crop = frame
+            .crop(ax, ay, aw, ah)
+            .ok_or_else(|| format!("region {left},{top}-{right},{bottom} outside NV12 frame"))?;
+        let mut rgba = vec![0u8; aw * ah * 4];
+        nv12_to_rgba(&crop, full_range, &mut rgba)?;
+        let (w, h) = (right - left, bottom - top);
+        let data = if (aw, ah) == (w, h) {
+            rgba
+        } else {
+            let (stride, col) = (aw * 4, (left - ax) * 4);
+            let mut out = Vec::with_capacity(w * h * 4);
+            for row in top - ay..top - ay + h {
+                let start = row * stride + col;
+                out.extend_from_slice(&rgba[start..start + w * 4]);
+            }
+            out
+        };
+        regions.push(DecodedRegion {
+            left: rect.left,
+            top: rect.top,
+            width: w as u16,
+            height: h as u16,
+            data,
+        });
+    }
+    Ok(DecodedRegions {
+        frame_width: fw as u32,
+        frame_height: fh as u32,
+        regions,
+    })
+}
+
 /// AYpCbCr8 交错块（全范围，行距 = 宽 × 4）→ RGBA，写到 `dst` 开头、行距 `dst_stride`。
 pub fn ayuv_to_rgba(
     src: &[u8],
@@ -266,6 +322,44 @@ mod tests {
             );
         }
         assert_eq!(got[3], 255, "{what}: alpha");
+    }
+
+    /// 区域转换须与整帧转换后裁剪逐字节一致，含奇数原点、越界裁剪、整块越界丢弃。
+    #[test]
+    fn nv12_regions_match_full_frame_crop() {
+        let (w, h) = (32, 16);
+        let y = samples(w * h, 3);
+        let uv = samples(w * h / 2, 4);
+        let frame = Nv12Frame::new(w, h, &y, w, &uv, w).unwrap();
+        let mut full = vec![0; w * h * 4];
+        nv12_to_rgba(&frame, true, &mut full).unwrap();
+        let rect = |left, top, right, bottom| ExclusiveRectangle {
+            left,
+            top,
+            right,
+            bottom,
+        };
+        let rects = [
+            rect(0, 0, 32, 16),
+            rect(3, 5, 10, 8),
+            rect(16, 2, 18, 4),
+            rect(29, 13, 40, 40),
+            rect(40, 0, 50, 4),
+        ];
+
+        let decoded = nv12_regions_to_rgba(&frame, true, &rects).unwrap();
+
+        assert_eq!(decoded.regions.len(), 4, "the out-of-frame rect is dropped");
+        for region in &decoded.regions {
+            let (l, t) = (usize::from(region.left), usize::from(region.top));
+            let (rw, rh) = (usize::from(region.width), usize::from(region.height));
+            let want: Vec<u8> = (t..t + rh)
+                .flat_map(|row| full[(row * w + l) * 4..(row * w + l + rw) * 4].to_vec())
+                .collect();
+            assert_eq!(region.data, want, "region at ({l}, {t}) {rw}x{rh}");
+        }
+        let last = &decoded.regions[3];
+        assert_eq!((last.width, last.height), (3, 3), "clipped to the frame");
     }
 
     #[test]

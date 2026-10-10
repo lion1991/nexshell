@@ -455,12 +455,24 @@ impl HostFleetSyncDebounce {
 enum RdpConnectionPhase {
     Connecting,
     Connected,
-    Disconnected { reason: String },
+    /// 网络中断后自动重连中，保留旧画面。
+    Reconnecting {
+        attempt: u32,
+        max: u32,
+        after_sleep: bool,
+    },
+    Disconnected {
+        reason: String,
+    },
 }
 
 impl RdpConnectionPhase {
     fn on_transport_connected(&mut self) {
-        // 首帧上传前继续显示连接态，避免稳定 asset key 暴露上一会话的缓存画面。
+        // 自动重连沿用同一 framebuffer，旧画面就是本会话的，直接恢复。
+        // 首次连接则等首帧上传，避免稳定 asset key 暴露上一会话的缓存画面。
+        if matches!(self, Self::Reconnecting { .. }) {
+            *self = Self::Connected;
+        }
     }
 
     fn on_frame_uploaded(&mut self) {
@@ -1208,6 +1220,9 @@ fn main() -> Result<()> {
         ApproveTerminateResult::Cancel
     }));
 
+    // 唤醒后 RDP 会话多半已断：缩短心跳超时，尽快自动重连。
+    callbacks.on_cpu_awakened = Some(Box::new(|_| nexshell::rdp_session::notify_system_wake()));
+
     // 点 Dock 图标且无可见窗口时，重新打开主窗口
     callbacks.on_new_window_requested = Some(Box::new(move |ctx| {
         open_main_window(ctx, Arc::clone(&flags_for_reopen));
@@ -1373,6 +1388,18 @@ mod tests {
         assert!(matches!(phase, RdpConnectionPhase::Connecting));
 
         phase.on_frame_uploaded();
+        assert!(matches!(phase, RdpConnectionPhase::Connected));
+    }
+
+    #[test]
+    fn rdp_reconnect_resumes_without_waiting_for_a_frame() {
+        let mut phase = RdpConnectionPhase::Reconnecting {
+            attempt: 2,
+            max: 20,
+            after_sleep: false,
+        };
+
+        phase.on_transport_connected();
         assert!(matches!(phase, RdpConnectionPhase::Connected));
     }
 

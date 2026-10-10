@@ -8,8 +8,12 @@ mod audio_diag;
 mod clipboard;
 mod egfx;
 mod frame_marker;
+mod mouse_cursor;
+mod outputs;
 mod rdpdr;
+mod reconnect;
 mod stats;
+mod suppress;
 mod udp;
 
 #[cfg(target_os = "macos")]
@@ -19,13 +23,14 @@ pub use egfx::{
     replay_wire_dump, vt_replay_dir, ChecksumRect, WatchEvent, WatchPoint, WirePduInfo,
     WirePduRecord, WirePipelineError, WireReplayFrame, WireReplayOptions, WireReplaySummary,
 };
+pub use reconnect::notify_system_wake;
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 pub use udp::default_enable_udp;
 
 use std::net::SocketAddr;
 #[cfg(target_os = "macos")]
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -43,7 +48,6 @@ use ironrdp_connector::{
 use ironrdp_core::WriteBuf;
 use ironrdp_displaycontrol::pdu::MonitorLayoutEntry;
 use ironrdp_graphics::image_processing::PixelFormat;
-use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::input::fast_path::FastPathInputEvent;
 use ironrdp_pdu::rdp::capability_sets::BitmapCodecs;
 use ironrdp_session::image::DecodedImage;
@@ -52,6 +56,12 @@ use parking_lot::Mutex;
 use tokio::net::TcpStream;
 
 use crate::rdp_cert_store;
+#[cfg(test)]
+use ironrdp_pdu::geometry::InclusiveRectangle;
+use outputs::{drain_outputs, publish_frame, OutputSignals};
+#[cfg(test)]
+use outputs::{inclusive_to_dirty, pointer_to_event, union_dirty};
+use reconnect::{connector_error, io_error, net, within, SessionEnd, SessionError, SessionMemo};
 
 /// 连接参数，由调用方（主机库）填。分辨率也由调用方定。
 #[derive(Clone, Debug)]
@@ -119,8 +129,15 @@ pub enum RdpEvent {
     Connected,
     /// framebuffer 已更新（脏区域）。UI 收到后读 Arc<Mutex<RdpFramebuffer>> 重绘。
     FrameUpdated { dirty: DirtyRect },
-    /// 连接结束（正常或错误）。
+    /// 连接结束（正常或错误），不再重连。
     Disconnected { reason: String },
+    /// 网络中断，正在自动重连；framebuffer 保留旧画面。重连成功后再发 Connected。
+    Reconnecting {
+        attempt: u32,
+        max: u32,
+        /// 断开发生在系统唤醒前后。
+        after_sleep: bool,
+    },
     /// 远端光标形态变化：本地据此接管/隐藏/复原鼠标（accelerated 模式，不合成进帧）。
     PointerChanged(RdpPointer),
     /// 远端分辨率已变（动态分辨率生效：EGFX ResetGraphics 或 Deactivation-Reactivation）。
@@ -401,6 +418,9 @@ pub struct RdpSessionHandle {
     pub resize_tx: async_channel::Sender<RdpResizeRequest>,
     /// 运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
     pub stats: Arc<RdpStats>,
+    visible_tx: async_channel::Sender<bool>,
+    /// 上次通知会话的可见性，set_visible 据此去重（render 每帧都会调）。
+    visible: AtomicBool,
     close_tx: async_channel::Sender<()>,
     clipboard_cancel_tx: async_channel::Sender<()>,
     _thread: Option<thread::JoinHandle<()>>,
@@ -415,6 +435,13 @@ impl RdpSessionHandle {
     /// 取消正在进行的远端文件下载。
     pub fn cancel_clipboard_transfer(&self) {
         let _ = self.clipboard_cancel_tx.try_send(());
+    }
+
+    /// 画面是否可见（tab 活动、终端页、窗口未最小化/遮挡）。不可见时会话用 SuppressOutput 让服务端停发图形更新。
+    pub fn set_visible(&self, visible: bool) {
+        if self.visible.swap(visible, Ordering::Relaxed) != visible {
+            let _ = self.visible_tx.try_send(visible);
+        }
     }
 }
 
@@ -433,6 +460,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
     let (input_tx, input_rx) = async_channel::unbounded::<RdpInputEvent>();
     let (resize_tx, resize_rx) = async_channel::unbounded::<RdpResizeRequest>();
     let (close_tx, close_rx) = async_channel::unbounded::<()>();
+    let (visible_tx, visible_rx) = async_channel::unbounded::<bool>();
     let (clipboard_cancel_tx, clipboard_cancel_rx) = async_channel::unbounded::<()>();
     let framebuffer = Arc::new(Mutex::new(RdpFramebuffer::new(config.width, config.height)));
     let stats = Arc::new(RdpStats::new());
@@ -464,6 +492,7 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
                         close_rx,
                         input_rx,
                         resize_rx,
+                        visible_rx,
                         clipboard_cancel_rx,
                     },
                 ));
@@ -477,6 +506,8 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
         input_tx,
         resize_tx,
         stats,
+        visible_tx,
+        visible: AtomicBool::new(true),
         close_tx,
         clipboard_cancel_tx,
         _thread: thread,
@@ -488,6 +519,7 @@ struct SessionInputs {
     close_rx: async_channel::Receiver<()>,
     input_rx: async_channel::Receiver<RdpInputEvent>,
     resize_rx: async_channel::Receiver<RdpResizeRequest>,
+    visible_rx: async_channel::Receiver<bool>,
     clipboard_cancel_rx: async_channel::Receiver<()>,
 }
 
@@ -600,7 +632,8 @@ fn attach_audio_static_channels(
     connector.with_static_channel(rdpsnd)
 }
 
-/// 事件循环：连接 → NLA → 激活 → 收帧。任何阶段出错都发 Disconnected 收尾。
+/// 事件循环：连接 → NLA → 激活 → 收帧。进过活动期后的网络类断开自动重连
+/// （立即一次，之后每 3 s，上限 MAX_ATTEMPTS）；其余情况发 Disconnected 收尾。
 async fn run_rdp_event_loop(
     config: RdpSessionConfig,
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
@@ -608,9 +641,48 @@ async fn run_rdp_event_loop(
     event_tx: async_channel::Sender<RdpEvent>,
     inputs: SessionInputs,
 ) {
-    let reason = match connect_and_run(&config, &framebuffer, &stats, &event_tx, &inputs).await {
-        Ok(()) => "session ended".to_string(),
-        Err(error) => error,
+    let mut memo = SessionMemo::default();
+    let mut attempt = 0;
+    let reason = loop {
+        // 重连沿用断开时的桌面尺寸（动态分辨率可能已改过）。
+        let mut config = config.clone();
+        if memo.ever_activated {
+            (config.width, config.height) = desktop_size(&framebuffer);
+        }
+        let result = tokio::select! {
+            result = connect_and_run(&config, &framebuffer, &stats, &event_tx, &inputs, &mut memo) => result,
+            _ = inputs.close_rx.recv() => Ok(SessionEnd::Closed),
+        };
+        let error = match result {
+            Ok(end) => break end.to_string(),
+            Err(error) => error,
+        };
+        if memo.activated {
+            attempt = 0;
+        }
+        if !matches!(error, SessionError::Network(_))
+            || !memo.ever_activated
+            || attempt >= reconnect::MAX_ATTEMPTS
+            || memo.logon_attempts >= reconnect::MAX_LOGON_ATTEMPTS
+        {
+            break error.to_string();
+        }
+        attempt += 1;
+        eprintln!(
+            "[rdp] connection lost: {error}; reconnecting ({attempt}/{})",
+            reconnect::MAX_ATTEMPTS
+        );
+        let _ = event_tx.try_send(RdpEvent::Reconnecting {
+            attempt,
+            max: reconnect::MAX_ATTEMPTS,
+            after_sleep: memo.after_sleep(),
+        });
+        if attempt > 1 {
+            tokio::select! {
+                _ = tokio::time::sleep(reconnect::RETRY_INTERVAL) => {}
+                _ = inputs.close_rx.recv() => break SessionEnd::Closed.to_string(),
+            }
+        }
     };
     // 断开原因同时打到 stderr，便于命令行复现时与 IronRDP tracing 日志对齐时间线。
     eprintln!("[rdp] disconnected: {reason}");
@@ -623,20 +695,25 @@ async fn connect_and_run(
     stats: &Arc<RdpStats>,
     event_tx: &async_channel::Sender<RdpEvent>,
     inputs: &SessionInputs,
-) -> Result<(), String> {
+    memo: &mut SessionMemo,
+) -> Result<SessionEnd, SessionError> {
     let SessionInputs {
         close_rx,
         input_rx,
         resize_rx,
+        visible_rx,
         clipboard_cancel_rx,
     } = inputs;
+    memo.begin_connection();
+    let reconnecting = memo.ever_activated;
+    let connect_deadline = tokio::time::Instant::now() + reconnect::CONNECT_TIMEOUT;
     // rustls 0.23 需显式选 provider（树内 ring/aws-lc-rs 共存），已装则忽略。
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let addr = format!("{}:{}", config.host, config.port);
-    let tcp = TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("TCP connect failed: {e}"))?;
+    let tcp = within(connect_deadline, TcpStream::connect(&addr))
+        .await?
+        .map_err(net("TCP connect failed"))?;
     // 关 Nagle：rdpdr 是请求-响应式小包，Nagle+延迟ACK 把每个响应压 ~40ms，
     // 驱动器传文件吞吐锁死在百 KB/s。mstsc/FreeRDP/IronRDP 官方 client 同样开。
     tcp.set_nodelay(true)
@@ -673,6 +750,15 @@ async fn connect_and_run(
     }
     let mut connector = ClientConnector::new(connector_config, client_addr)
         .with_static_channel(CliprdrClient::new(Box::new(clip_backend)));
+    // 重连：cookie 精确接回原会话，NETCHAR_SYNC 让服务端跳过连接期网络探测。
+    if reconnecting {
+        if let Some(cookie) = memo.arc_cookie.clone() {
+            connector = connector.with_auto_reconnect_cookie(cookie);
+        }
+        if let Some(sync) = memo.network_sync() {
+            connector = connector.with_network_characteristics_sync(sync);
+        }
+    }
     // EGFX：门控开时挂 drdynvc 静态通道 + EGFX 合成动态通道（docs/adr/0008 第②步，出画面）。
     // handler 直接往共享 framebuffer 写并发 FrameUpdated；ActiveStage 自动路由并回发 FrameAck。
     if config.enable_egfx {
@@ -710,9 +796,12 @@ async fn connect_and_run(
 
     // 阶段一：明文协商到 TLS 升级点。
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
-    let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
-        .await
-        .map_err(|e| format!("connect_begin failed: {e}"))?;
+    let should_upgrade = within(
+        connect_deadline,
+        ironrdp_tokio::connect_begin(&mut framed, &mut connector),
+    )
+    .await?
+    .map_err(connector_error("connect_begin failed"))?;
 
     // 阶段二：TLS 升级 + 取服务端公钥（CredSSP 绑定用）。
     // 证书优先走平台根校验；自签（RDP 常态）落到回调里按 host:port 做指纹 TOFU。
@@ -755,20 +844,21 @@ async fn connect_and_run(
             Arc::clone(stats),
         )
     });
-    let (upgraded_stream, server_cert) =
+    let (upgraded_stream, server_cert) = within(
+        connect_deadline,
         ironrdp_tls::upgrade_with_certificate_validation_callback_for_endpoint(
             initial_stream,
             &config.host,
             &endpoint,
             callback,
-        )
-        .await
-        .map_err(|e| {
-            trust_error
-                .lock()
-                .take()
-                .unwrap_or_else(|| format!("TLS upgrade failed: {e}"))
-        })?;
+        ),
+    )
+    .await?
+    .map_err(|e| match trust_error.lock().take() {
+        // 证书变了：重试也一样，不重连。
+        Some(reason) => SessionError::Fatal(reason),
+        None => io_error("TLS upgrade failed")(e),
+    })?;
     let server_public_key = ironrdp_tls::extract_tls_server_public_key(&server_cert)
         .ok_or_else(|| "extract server public key failed".to_string())?
         .to_owned();
@@ -778,45 +868,62 @@ async fn connect_and_run(
     let mut upgraded_framed = ironrdp_tokio::TokioFramed::new(upgraded_stream);
     let mut network_client = NoopNetworkClient;
     let server_name = ServerName::new(config.host.clone());
-    let connection_result = match udp.as_mut() {
-        // 连接期的多传输请求在此内联建隧道（握手超时已压短，见 udp 模块）。
-        Some(sideband) => {
-            ironrdp_tokio::connect_finalize_with_multitransport(
-                upgraded,
-                connector,
-                &mut upgraded_framed,
-                &mut network_client,
-                server_name,
-                server_public_key,
-                None,
-                async |request, soft_sync| Ok(sideband.handle_request(&request, soft_sync).await.0),
-            )
-            .await
+    memo.logon_attempts += 1;
+    let connection_result = within(connect_deadline, async {
+        match udp.as_mut() {
+            // 连接期的多传输请求在此内联建隧道（握手超时已压短，见 udp 模块）。
+            Some(sideband) => {
+                ironrdp_tokio::connect_finalize_with_multitransport(
+                    upgraded,
+                    connector,
+                    &mut upgraded_framed,
+                    &mut network_client,
+                    server_name,
+                    server_public_key,
+                    None,
+                    async |request, soft_sync| {
+                        Ok(sideband.handle_request(&request, soft_sync).await.0)
+                    },
+                )
+                .await
+            }
+            None => {
+                ironrdp_tokio::connect_finalize(
+                    upgraded,
+                    connector,
+                    &mut upgraded_framed,
+                    &mut network_client,
+                    server_name,
+                    server_public_key,
+                    None,
+                )
+                .await
+            }
         }
-        None => {
-            ironrdp_tokio::connect_finalize(
-                upgraded,
-                connector,
-                &mut upgraded_framed,
-                &mut network_client,
-                server_name,
-                server_public_key,
-                None,
-            )
-            .await
-        }
-    }
-    .map_err(|e| format!("connect_finalize (NLA) failed: {e}"))?;
+    })
+    .await?
+    .map_err(connector_error("connect_finalize (NLA) failed"))?;
     audio_diag::log_negotiated_rdpsnd_channel(&connection_result.static_channels);
     let soft_sync = connection_result.multitransport_soft_sync();
 
     // 激活分辨率可能被服务端改；据此重建 framebuffer + DecodedImage。
     let desktop = connection_result.desktop_size;
-    {
+    let suppress_output = connection_result.suppress_output_support;
+    eprintln!("[rdp] server suppressOutputSupport={suppress_output}");
+    let resized = {
         let mut fb = framebuffer.lock();
-        if fb.width != desktop.width || fb.height != desktop.height {
+        let resized = fb.width != desktop.width || fb.height != desktop.height;
+        if resized {
             *fb = RdpFramebuffer::new(desktop.width, desktop.height);
         }
+        resized
+    };
+    // 重连后服务端给的尺寸可能变了，UI 要据此重置上传代号。
+    if resized && reconnecting {
+        let _ = event_tx.try_send(RdpEvent::Resized {
+            width: desktop.width,
+            height: desktop.height,
+        });
     }
     let mut image = DecodedImage::new(PixelFormat::RgbA32, desktop.width, desktop.height);
     // 重激活序列工厂（上游 session 已与 connector 解耦，DeactivateAll 后由应用自建序列）。
@@ -839,6 +946,21 @@ async fn connect_and_run(
             .enable_reliable_udp_dvc_tunnel()
             .map_err(|e| format!("enable UDP tunnel failed: {e}"))?;
     }
+    // 重连或刚连上时 UI 已不可见：立即让服务端停发。
+    if suppress_output && !memo.visible {
+        suppress::send(
+            &active_stage,
+            &mut upgraded_framed,
+            false,
+            desktop.width,
+            desktop.height,
+        )
+        .await?;
+    }
+    // 断线期间攒下的键鼠输入已过时。
+    while input_rx.try_recv().is_ok() {}
+    memo.on_activated();
+    let mut wake_rx = reconnect::wake_events();
     let _ = event_tx.try_send(RdpEvent::Connected);
     // 本地剪贴板轮询挪出帧循环：独立 OS 线程按 POLL_INTERVAL 查变化，有变化经 channel 回递。
     // 事件循环收到才编码发送，期间不再因读剪贴板卡住收帧。receiver 随本函数返回 drop → 线程下个 tick 自退。
@@ -868,8 +990,6 @@ async fn connect_and_run(
     let mut last_requested_size = (dw, dh);
     // 帧聚合状态提升到循环外持久化：acc 跨迭代累积脏区，真帧边界/兜底才发布。
     let mut acc: Option<DirtyRect> = None;
-    // 远端光标去重：记上次发出的 PointerBitmap cache_key，连续同指针不重发。
-    let mut last_pointer_key: Option<u64> = None;
     // 连接内一旦 peek 到任何 FrameMarker 即永久走 marker 模式（按真帧边界发布）。
     let mut marker_support = false;
     // acc 从空转非空时设 now+50ms；服务端只发 Begin 不发 End 的异常由它兜底发布。
@@ -893,9 +1013,10 @@ async fn connect_and_run(
         if acc.is_some() && frame_deadline.is_none() {
             frame_deadline = Some(tokio::time::Instant::now() + Duration::from_millis(50));
         }
+        let liveness_deadline = memo.liveness.deadline();
         // select：关闭 / cliprdr 回递 / 剪贴板轮询与锁回收 / 输入 / 截止兜底 / 帧。前几路自成闭环 continue。
         let (action, payload) = tokio::select! {
-            _ = close_rx.recv() => return Ok(()),
+            _ = close_rx.recv() => return Ok(SessionEnd::Closed),
             msg = clip_rx.recv() => {
                 let Ok(msg) = msg else { continue; };
                 send_clipboard_pdu(&mut active_stage, &mut upgraded_framed, msg).await?;
@@ -930,7 +1051,7 @@ async fn connect_and_run(
                 continue;
             }
             input = input_rx.recv() => {
-                let Ok(first) = input else { return Ok(()); };
+                let Ok(first) = input else { return Ok(SessionEnd::Closed); };
                 let mut events = Vec::with_capacity(8);
                 events.push(to_fastpath_input(first));
                 while events.len() < INPUT_BATCH_MAX {
@@ -944,8 +1065,8 @@ async fn connect_and_run(
                     .map_err(|e| format!("encode input failed: {e}"))?;
                 // 输入产出的脏区并入 acc，不在此发布——marker/截止兜底会兜住。
                 let mut signals = OutputSignals::default();
-                if drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, &mut last_pointer_key, &mut signals).await? {
-                    return Ok(());
+                if let Some(end) = drain_outputs(&mut upgraded_framed, outputs, &mut acc, dw, dh, event_tx, memo, &mut signals).await? {
+                    return Ok(end);
                 }
                 continue;
             }
@@ -971,6 +1092,32 @@ async fn connect_and_run(
                 }
                 continue;
             }
+            // 可见性变化：只发最新状态，未变不发。
+            visible = visible_rx.recv() => {
+                let Ok(mut visible) = visible else { continue; };
+                while let Ok(next) = visible_rx.try_recv() {
+                    visible = next;
+                }
+                if visible != memo.visible {
+                    memo.visible = visible;
+                    if suppress_output {
+                        let (w, h) = desktop_size(framebuffer);
+                        suppress::send(&active_stage, &mut upgraded_framed, visible, w, h).await?;
+                    }
+                }
+                continue;
+            }
+            Ok(()) = wake_rx.changed() => {
+                memo.woke_at = Some(tokio::time::Instant::now());
+                memo.liveness.on_wake();
+                continue;
+            }
+            // 心跳超时：TCP 上久无数据，判定断链（服务端声明过心跳才启用）。
+            _ = tokio::time::sleep_until(liveness_deadline.unwrap_or_else(tokio::time::Instant::now)),
+                if liveness_deadline.is_some() =>
+            {
+                return Err(SessionError::Network("heartbeat timed out".to_string()));
+            }
             // 截止兜底：仅在 frame_deadline 已武装时启用（if guard 保证 unwrap 安全）。
             _ = tokio::time::sleep_until(frame_deadline.unwrap_or_else(tokio::time::Instant::now)),
                 if frame_deadline.is_some() =>
@@ -980,13 +1127,19 @@ async fn connect_and_run(
                 continue;
             }
             payload = udp::recv(&mut udp) => {
-                udp::handle_recv(&mut udp, &mut active_stage, &mut upgraded_framed, payload).await?;
+                if let Err(error) =
+                    udp::handle_recv(&mut udp, &mut active_stage, &mut upgraded_framed, payload).await
+                {
+                    return linger_for_terminate(&mut upgraded_framed, &mut active_stage, &mut image, error)
+                        .await;
+                }
                 continue;
             }
             frame = upgraded_framed.read_pdu() => {
-                frame.map_err(|e| format!("read frame failed: {e}"))?
+                frame.map_err(io_error("read frame failed"))?
             }
         };
+        memo.liveness.on_traffic();
 
         stats.add_bytes(payload.len() as u64);
 
@@ -1015,19 +1168,19 @@ async fn connect_and_run(
         let outputs = active_stage
             .process(&mut image, action, &payload)
             .map_err(|e| format!("process frame failed: {e}"))?;
-        if drain_outputs(
+        if let Some(end) = drain_outputs(
             &mut upgraded_framed,
             outputs,
             &mut acc,
             dw,
             dh,
             event_tx,
-            &mut last_pointer_key,
+            memo,
             &mut signals,
         )
         .await?
         {
-            return Ok(());
+            return Ok(end);
         }
         udp::answer_requests(
             &mut udp,
@@ -1042,6 +1195,10 @@ async fn connect_and_run(
             let (nw, nh) =
                 run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image).await?;
             reset_after_resize(framebuffer, nw, nh, event_tx);
+            // 重激活后服务端按默认放行，重发当前可见性。
+            if suppress_output && !memo.visible {
+                suppress::send(&active_stage, &mut upgraded_framed, false, nw, nh).await?;
+            }
             dw = nw;
             dh = nh;
             last_requested_size = (nw, nh);
@@ -1069,25 +1226,25 @@ async fn connect_and_run(
                 };
                 match more {
                     Some(res) => {
-                        let (action, payload) =
-                            res.map_err(|e| format!("read frame failed: {e}"))?;
+                        let (action, payload) = res.map_err(io_error("read frame failed"))?;
+                        memo.liveness.on_traffic();
                         stats.add_bytes(payload.len() as u64);
                         let outputs = active_stage
                             .process(&mut image, action, &payload)
                             .map_err(|e| format!("process frame failed: {e}"))?;
-                        if drain_outputs(
+                        if let Some(end) = drain_outputs(
                             &mut upgraded_framed,
                             outputs,
                             &mut acc,
                             dw,
                             dh,
                             event_tx,
-                            &mut last_pointer_key,
+                            memo,
                             &mut signals,
                         )
                         .await?
                         {
-                            return Ok(());
+                            return Ok(end);
                         }
                         udp::answer_requests(
                             &mut udp,
@@ -1118,6 +1275,9 @@ async fn connect_and_run(
                     run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image)
                         .await?;
                 reset_after_resize(framebuffer, nw, nh, event_tx);
+                if suppress_output && !memo.visible {
+                    suppress::send(&active_stage, &mut upgraded_framed, false, nw, nh).await?;
+                }
                 dw = nw;
                 dh = nh;
                 last_requested_size = (nw, nh);
@@ -1139,7 +1299,7 @@ async fn run_reactivation<S>(
     active_stage: &mut ActiveStage,
     mut sequence: ConnectionActivationSequence,
     image: &mut DecodedImage,
-) -> Result<(u16, u16), String>
+) -> Result<(u16, u16), SessionError>
 where
     S: Send + Sync + Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite,
 {
@@ -1147,12 +1307,12 @@ where
     loop {
         let written = ironrdp_tokio::single_sequence_step_read(framed, &mut sequence, &mut buf)
             .await
-            .map_err(|e| format!("reactivation step read failed: {e}"))?;
+            .map_err(connector_error("reactivation step read failed"))?;
         if written.size().is_some() {
             framed
                 .write_all(buf.filled())
                 .await
-                .map_err(|e| format!("reactivation step write failed: {e}"))?;
+                .map_err(io_error("reactivation step write failed"))?;
         }
         if let ConnectionActivationState::Finalized {
             desktop_size,
@@ -1175,12 +1335,49 @@ where
                 pointer_software_rendering,
                 static_channel_chunk_size,
             ) {
-                return Err("reactivation: invalid static channel chunk size".to_string());
+                return Err(SessionError::Fatal(
+                    "reactivation: invalid static channel chunk size".to_string(),
+                ));
             }
             active_stage.set_window_support_level(window_support_level);
             return Ok((desktop_size.width, desktop_size.height));
         }
     }
+}
+
+/// UDP 隧道报错后给 TCP 1 s 交出可能已在路上的 Terminate：服务端断开时 UDP 可能先报错，
+/// 不等一下就会把服务端断开（如被别处登录挤掉）当网络故障重连回去。没等到就返回原错误。
+async fn linger_for_terminate<S>(
+    framed: &mut ironrdp_tokio::TokioFramed<S>,
+    active_stage: &mut ActiveStage,
+    image: &mut DecodedImage,
+    error: SessionError,
+) -> Result<SessionEnd, SessionError>
+where
+    S: Send + Sync + Unpin + tokio::io::AsyncRead + tokio::io::AsyncWrite,
+{
+    if !matches!(error, SessionError::Network(_)) {
+        return Err(error);
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    while let Ok(Ok((action, payload))) = tokio::time::timeout_at(deadline, framed.read_pdu()).await
+    {
+        let Ok(outputs) = active_stage.process(image, action, &payload) else {
+            break;
+        };
+        for output in outputs {
+            if let ActiveStageOutput::Terminate(reason) = output {
+                return Ok(SessionEnd::Server(reason.to_string()));
+            }
+        }
+    }
+    Err(error)
+}
+
+/// 当前桌面尺寸（EGFX 动态分辨率在 handler 里改 framebuffer，以它为准）。
+fn desktop_size(framebuffer: &Arc<Mutex<RdpFramebuffer>>) -> (u16, u16) {
+    let fb = framebuffer.lock();
+    (fb.width, fb.height)
 }
 
 /// 分辨率变更后按新尺寸重建共享 framebuffer 并通知 UI（重激活路径用；EGFX 路径在 handler 内做）。
@@ -1204,7 +1401,7 @@ async fn send_clipboard_pdu<W: FramedWrite>(
     active_stage: &mut ActiveStage,
     framed: &mut W,
     msg: ClipboardMessage,
-) -> Result<(), String> {
+) -> Result<(), SessionError> {
     let Some(cliprdr) = active_stage.get_svc_processor_mut::<CliprdrClient>() else {
         return Ok(());
     };
@@ -1217,7 +1414,7 @@ async fn write_cliprdr<W: FramedWrite>(
     active_stage: &mut ActiveStage,
     framed: &mut W,
     messages: ironrdp_pdu::PduResult<CliprdrSvcMessages<CliprdrRole>>,
-) -> Result<(), String> {
+) -> Result<(), SessionError> {
     let messages = match messages {
         Ok(messages) => messages,
         Err(e) => {
@@ -1234,207 +1431,16 @@ async fn write_cliprdr<W: FramedWrite>(
     framed
         .write_all(&data)
         .await
-        .map_err(|e| format!("write cliprdr failed: {e}"))
+        .map_err(io_error("write cliprdr failed"))
 }
 
 /// drain 时单帧最多累积的 PDU 数：防服务端持续推流饿死 input/close 分支。
 const DRAIN_MAX: usize = 32;
 
-/// InclusiveRectangle（右/下含端）→ DirtyRect，clamp 到桌面尺寸。
-fn inclusive_to_dirty(rect: &InclusiveRectangle, max_w: u16, max_h: u16) -> DirtyRect {
-    if max_w == 0 || max_h == 0 {
-        return DirtyRect {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-        };
-    }
-    let left = rect.left.min(max_w - 1);
-    let top = rect.top.min(max_h - 1);
-    let right = rect.right.min(max_w - 1).max(left);
-    let bottom = rect.bottom.min(max_h - 1).max(top);
-    DirtyRect {
-        x: left,
-        y: top,
-        width: right - left + 1,
-        height: bottom - top + 1,
-    }
-}
-
-/// 两脏矩形的包围盒（累积一逻辑帧内多个 GraphicsUpdate）。
-fn union_dirty(a: DirtyRect, b: DirtyRect) -> DirtyRect {
-    let x0 = a.x.min(b.x);
-    let y0 = a.y.min(b.y);
-    let x1 = (a.x + a.width).max(b.x + b.width);
-    let y1 = (a.y + a.height).max(b.y + b.height);
-    DirtyRect {
-        x: x0,
-        y: y0,
-        width: x1 - x0,
-        height: y1 - y0,
-    }
-}
-
-/// 处理一批 outputs：ResponseFrame 立即写回；GraphicsUpdate 转脏区并入 acc（不拷贝像素）；
-/// Terminate 发 Disconnected 并返回 true（需退出）。
-/// drain_outputs 交回主循环处理的事件（需要 ActiveStage / UDP 状态，drain 内拿不到）。
-#[derive(Default)]
-struct OutputSignals {
-    /// 服务端要求 Deactivation-Reactivation。
-    reactivate: bool,
-    /// 会话期到达的 Initiate Multitransport Request。
-    multitransport: Vec<ironrdp_pdu::rdp::multitransport::MultitransportRequestPdu>,
-}
-
-async fn drain_outputs<W: FramedWrite>(
-    framed: &mut W,
-    outputs: Vec<ActiveStageOutput>,
-    acc: &mut Option<DirtyRect>,
-    desktop_w: u16,
-    desktop_h: u16,
-    event_tx: &async_channel::Sender<RdpEvent>,
-    last_pointer_key: &mut Option<u64>,
-    signals: &mut OutputSignals,
-) -> Result<bool, String> {
-    for out in outputs {
-        match out {
-            ActiveStageOutput::ResponseFrame(frame) => {
-                framed
-                    .write_all(&frame)
-                    .await
-                    .map_err(|e| format!("write response failed: {e}"))?;
-            }
-            ActiveStageOutput::GraphicsUpdate(region) => {
-                let dirty = inclusive_to_dirty(&region, desktop_w, desktop_h);
-                *acc = Some(match *acc {
-                    Some(prev) => union_dirty(prev, dirty),
-                    None => dirty,
-                });
-            }
-            ActiveStageOutput::PointerDefault => {
-                *last_pointer_key = None;
-                if ptr_trace() {
-                    eprintln!("[rdp-ptr] default");
-                }
-                let _ = event_tx.try_send(RdpEvent::PointerChanged(RdpPointer::Default));
-            }
-            ActiveStageOutput::PointerHidden => {
-                *last_pointer_key = None;
-                if ptr_trace() {
-                    eprintln!("[rdp-ptr] hidden");
-                }
-                let _ = event_tx.try_send(RdpEvent::PointerChanged(RdpPointer::Hidden));
-            }
-            ActiveStageOutput::PointerBitmap(pointer) => {
-                if let Some(p) = pointer_to_event(&pointer, last_pointer_key) {
-                    if ptr_trace() {
-                        eprintln!(
-                            "[rdp-ptr] bitmap {}x{} hs=({},{})",
-                            pointer.width, pointer.height, pointer.hotspot_x, pointer.hotspot_y
-                        );
-                    }
-                    // 发送失败（通道满）回滚去重键，下次同指针可重试，否则光标永久丢失。
-                    if event_tx.try_send(RdpEvent::PointerChanged(p)).is_err() {
-                        *last_pointer_key = None;
-                    }
-                }
-            }
-            ActiveStageOutput::Terminate(reason) => {
-                eprintln!("[rdp] server terminated session: {reason}");
-                let _ = event_tx.try_send(RdpEvent::Disconnected {
-                    reason: format!("terminated: {reason}"),
-                });
-                return Ok(true);
-            }
-            // 动态分辨率兜底：服务端以重激活换分辨率时回传序列，交主循环 run_reactivation 走完。
-            ActiveStageOutput::DeactivateAll => {
-                signals.reactivate = true;
-            }
-            ActiveStageOutput::MultitransportRequest(request) => {
-                signals.multitransport.push(request);
-            }
-            // 服务端实测的网络特征（连接类型自动探测的结果），诊断用。
-            ActiveStageOutput::AutoDetect(request) => {
-                if net_trace() {
-                    eprintln!("[rdp-net] {request:?}");
-                }
-            }
-            // PointerPosition（本地光标本就跟手）等忽略。
-            _ => {}
-        }
-    }
-    Ok(false)
-}
-
-/// 网络探测结果追踪开关（NEXSHELL_RDP_NET_TRACE=1）。
-fn net_trace() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_NET_TRACE").is_ok_and(|v| v == "1"))
-}
-
-/// 指针链路追踪开关（NEXSHELL_RDP_PTR_TRACE=1）。
-fn ptr_trace() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("NEXSHELL_RDP_PTR_TRACE").is_ok_and(|v| v == "1"))
-}
-
 /// 按键链路追踪开关（NEXSHELL_DEBUG_KEYS=1，与 warpui 平台层同开关）。
 fn key_trace() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("NEXSHELL_DEBUG_KEYS").is_ok_and(|v| v == "1"))
-}
-
-/// DecodedPointer(Arc) → RdpPointer::Bitmap；与上次同一指针（同 cache_key）则返回 None 去重。
-/// cache_key 取内容 hash 而非 Arc 地址：地址在 Arc 释放后可被新指针复用，
-/// 会让 UI 光标缓存/去重误命中旧指针。位图仅数 KB 且只在指针变化时触发，开销可忽略。
-fn pointer_to_event(
-    pointer: &std::sync::Arc<ironrdp_graphics::pointer::DecodedPointer>,
-    last_pointer_key: &mut Option<u64>,
-) -> Option<RdpPointer> {
-    let cache_key = {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (
-            pointer.width,
-            pointer.height,
-            pointer.hotspot_x,
-            pointer.hotspot_y,
-        )
-            .hash(&mut hasher);
-        pointer.bitmap_data.hash(&mut hasher);
-        hasher.finish()
-    };
-    if *last_pointer_key == Some(cache_key) {
-        return None;
-    }
-    *last_pointer_key = Some(cache_key);
-    Some(RdpPointer::Bitmap {
-        rgba: pointer.bitmap_data.clone(),
-        width: pointer.width as u32,
-        height: pointer.height as u32,
-        hotspot_x: pointer.hotspot_x as f32,
-        hotspot_y: pointer.hotspot_y as f32,
-        cache_key,
-    })
-}
-
-/// 发布累积脏区：apply_region 拷一次 + 发一条 FrameUpdated。acc 为 None 则空操作。
-fn publish_frame(
-    framebuffer: &Arc<Mutex<RdpFramebuffer>>,
-    image: &DecodedImage,
-    acc: &mut Option<DirtyRect>,
-    stats: &Arc<RdpStats>,
-    event_tx: &async_channel::Sender<RdpEvent>,
-) {
-    if let Some(dirty) = acc.take() {
-        if dirty.width == 0 || dirty.height == 0 {
-            return;
-        }
-        framebuffer.lock().apply_region(image.data(), dirty);
-        stats.inc_frame();
-        let _ = event_tx.try_send(RdpEvent::FrameUpdated { dirty });
-    }
 }
 
 #[cfg(test)]

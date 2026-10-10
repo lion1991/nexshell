@@ -135,6 +135,8 @@ pub(crate) struct RootView {
     // 且窗口有键盘焦点」增量 Push/Pop（幂等，见 HotkeyGuardSlot）；焦点态由 on_focus/on_blur 维护。
     rdp_hotkey_guard: std::cell::RefCell<crate::rdp_view::HotkeyGuardSlot>,
     window_key_focused: std::cell::Cell<bool>,
+    // 应用有窗口可见（未最小化 / 隐藏 / 被完全遮挡），RDP 画面可见性据此下发 SuppressOutput。
+    app_visible: bool,
 
     // === 主机库（host_library_section）：状态 / 内联编辑器 / 密码栏 ===
     host_state: HostManagementState,
@@ -388,6 +390,7 @@ impl RootView {
 
         // Only drives blink and bell decay while PTY is idle.
         Self::schedule_idle_refresh(ctx);
+        Self::watch_app_visibility(ctx);
 
         let (host_snapshot, host_notice) = match default_database_path() {
             Some(db_path) => {
@@ -522,6 +525,7 @@ impl RootView {
             local_ime_disabled: std::cell::Cell::new(None),
             rdp_hotkey_guard: std::cell::RefCell::new(Default::default()),
             window_key_focused: std::cell::Cell::new(true),
+            app_visible: true,
             host_state,
             host_view_states: RefCell::new(HostManagementViewStates::new()),
             host_status_fleet: HostOverviewFleet::new(),
@@ -1837,6 +1841,7 @@ impl View for RootView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         self.sync_local_ime_suppression(app);
         self.sync_rdp_hotkey_guard();
+        self.sync_rdp_visibility();
         let on_terminal_page = self.app_page == AppPage::Terminal;
         let mut tabs: Vec<TabModel> = self
             .terminal_tabs

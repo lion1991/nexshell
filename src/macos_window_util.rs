@@ -5,14 +5,19 @@ use block::ConcreteBlock;
 use cocoa::base::{id, nil, BOOL, NO};
 use cocoa::foundation::NSString;
 use objc::runtime::Class;
-use objc::{msg_send, sel, sel_impl};
-use std::sync::Once;
+use objc::{class, msg_send, sel, sel_impl};
+use std::sync::{Once, OnceLock};
 
 // NSFloatingWindowLevel = 3 (CGWindowLevelForKey(kCGFloatingWindowLevelKey))
 const NS_FLOATING_WINDOW_LEVEL: i64 = 3;
 const NS_NORMAL_WINDOW_LEVEL: i64 = 0;
 const NS_WORKSPACE_ACCESSIBILITY_DISPLAY_OPTIONS_DID_CHANGE_NOTIFICATION: &str =
     "NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification";
+
+const NS_APPLICATION_DID_CHANGE_OCCLUSION_STATE_NOTIFICATION: &str =
+    "NSApplicationDidChangeOcclusionStateNotification";
+// NSApplicationOcclusionStateVisible
+const NS_APPLICATION_OCCLUSION_STATE_VISIBLE: u64 = 1 << 1;
 
 static INSTALL_REDUCE_TRANSPARENCY_OBSERVER: Once = Once::new();
 
@@ -77,6 +82,43 @@ pub fn install_reduce_transparency_observer() {
         // The observer is process-lifetime; keep the copied block alive for it.
         std::mem::forget(block);
     });
+}
+
+fn app_occlusion_visible() -> bool {
+    unsafe {
+        let app: id = cocoa::appkit::NSApp();
+        let state: u64 = msg_send![app, occlusionState];
+        state & NS_APPLICATION_OCCLUSION_STATE_VISIBLE != 0
+    }
+}
+
+/// 应用可见性变化：任一窗口有部分在屏上即可见；全部最小化、应用隐藏、被完全遮挡、锁屏都算不可见。
+/// 观察者只装一次，进程级常驻。
+pub fn app_visibility_events() -> async_channel::Receiver<bool> {
+    static EVENTS: OnceLock<async_channel::Receiver<bool>> = OnceLock::new();
+    EVENTS
+        .get_or_init(|| {
+            let (tx, rx) = async_channel::unbounded();
+            unsafe {
+                let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
+                let name = NSString::alloc(nil)
+                    .init_str(NS_APPLICATION_DID_CHANGE_OCCLUSION_STATE_NOTIFICATION);
+                let block = ConcreteBlock::new(move |_: id| {
+                    let _ = tx.try_send(app_occlusion_visible());
+                })
+                .copy();
+                let _observer: id = msg_send![
+                    center,
+                    addObserverForName: name
+                    object: nil
+                    queue: nil
+                    usingBlock: &*block
+                ];
+                std::mem::forget(block);
+            }
+            rx
+        })
+        .clone()
 }
 
 pub fn set_window_alpha(alpha: f64) {

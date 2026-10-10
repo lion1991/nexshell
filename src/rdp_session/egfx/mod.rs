@@ -87,6 +87,7 @@ pub fn build_dvc_client(
         .with_dynamic_channel(wire_dump::wrap_if_enabled(client))
         .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));
 
+    let client = super::mouse_cursor::attach_probe(client);
     super::audio_diag::attach_audio_dvc_probes(client)
 }
 

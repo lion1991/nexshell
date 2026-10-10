@@ -44,6 +44,21 @@ impl<'a> Nv12Frame<'a> {
         })
     }
 
+    /// 原点 (x, y) 处 width×height 的子区域视图，不拷贝。色度 2×2 下采样，原点须为偶数。
+    pub fn crop(&self, x: usize, y: usize, width: usize, height: usize) -> Option<Nv12Frame<'a>> {
+        if x % 2 != 0 || y % 2 != 0 || x + width > self.width || y + height > self.height {
+            return None;
+        }
+        Nv12Frame::new(
+            width,
+            height,
+            self.y.get(y * self.y_stride + x..)?,
+            self.y_stride,
+            self.uv.get(y / 2 * self.uv_stride + x..)?,
+            self.uv_stride,
+        )
+    }
+
     fn y_row(&self, row: usize) -> &[u8] {
         &self.y[row * self.y_stride..row * self.y_stride + self.width]
     }
