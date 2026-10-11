@@ -1008,6 +1008,7 @@ impl RootView {
         // 每帧只刷一次：这里统一给所有本地 tab（含 active tab 与后台 tab）刷，
         // 下面读 shell_is_foreground、以及后面的 dispatch_* 用的都是这一次的结果。
         self.refresh_local_foreground_status();
+        self.flush_startup_inputs();
         let (title, should_clear_editor) = if let Ok(rt) = self.terminal.lock() {
             let snap = rt.snapshot();
             let clear = !rt.shell_is_foreground()
@@ -2924,6 +2925,7 @@ impl RootView {
                 code_viewer_save_generation: None,
                 code_viewer_remote_meta: None,
                 rdp: None,
+                startup_input: None,
             },
         );
         self.tab_states

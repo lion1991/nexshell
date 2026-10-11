@@ -24,3 +24,9 @@ if [[ "$actual" != "$expected" ]]; then
     printf 'expected NSAppleEventsUsageDescription=%q, got %q\n' "$expected" "$actual" >&2
     exit 1
 fi
+
+# 其他应用按「能打开 .command」筛终端，缺了这条 NexShell 不会出现在候选里。
+if ! plutil -extract CFBundleDocumentTypes xml1 -o - "$PLIST" | grep -q '<string>com.apple.terminal.shell-script</string>'; then
+    echo 'expected CFBundleDocumentTypes to claim com.apple.terminal.shell-script' >&2
+    exit 1
+fi

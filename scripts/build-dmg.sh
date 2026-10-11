@@ -93,6 +93,47 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <string>NexShell 需要访问局域网，以便连接你的 SSH / RDP / Telnet / Serial 主机。</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>NexShell 中运行的程序可能使用 AppleScript 来控制其他应用。</string>
+    <!-- 声明能打开 .command / 可执行文件 / 文件夹，其他应用的「终端」候选和 Finder「打开方式」才列出 NexShell；
+         Alternate 不抢 Terminal 的默认打开方式。 -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Terminal shell script</string>
+            <key>CFBundleTypeRole</key>
+            <string>Shell</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.apple.terminal.shell-script</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Unix Executable File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Shell</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.unix-executable</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Folder</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.folder</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

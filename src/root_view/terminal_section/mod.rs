@@ -6,8 +6,10 @@
 //   render  终端 body / 分屏 body / 光标投影 + 键盘/overlay 输入判定（主机监控侧栏 assembler 归 host_monitor_section）
 //   actions #1-3 复制/粘贴/清屏 + #7-9 字号 + #40 TerminalMouseDown
 //   split   #85-98 分屏：split/close/navigate pane、focus、resize、maximize
+//   launch  系统交来的文件 / 目录（.command 等）开本地标签执行
 // 注：终端右键菜单内容（show_terminal_context_menu / terminal_context_menu_items）已于 step 9 归 context_menus_section。
 
 mod actions;
+mod launch;
 mod render;
 mod split;

@@ -654,6 +654,8 @@ struct TerminalSessionTab {
     code_viewer_remote_meta: Option<(u64, Option<std::time::SystemTime>)>,
     /// RDP 整页会话状态（仅 Rdp kind 持有；drop 即断开）。
     rdp: Option<RdpTabState>,
+    /// 系统交来的脚本（.command 等）：shell 就绪后作为一行输入发出去。
+    startup_input: Option<Vec<u8>>,
 }
 
 impl TerminalSessionTab {
@@ -1117,6 +1119,7 @@ fn main() -> Result<()> {
     let flags_for_close = Arc::clone(&foreground_flags);
     let flags_for_quit = Arc::clone(&foreground_flags);
     let flags_for_reopen = Arc::clone(&foreground_flags);
+    let flags_for_open = Arc::clone(&foreground_flags);
 
     let mut callbacks = platform::AppCallbacks::default();
 
@@ -1229,6 +1232,29 @@ fn main() -> Result<()> {
     // 点 Dock 图标且无可见窗口时，重新打开主窗口
     callbacks.on_new_window_requested = Some(Box::new(move |ctx| {
         open_main_window(ctx, Arc::clone(&flags_for_reopen));
+    }));
+
+    // Finder「打开方式」/ 其他应用 open .command：delegate 实现了 application:openURLs:，
+    // macOS 就不再调 openFiles:，文件也以 file:// URL 从这里进来。
+    callbacks.on_open_urls = Some(Box::new(move |urls, ctx| {
+        let paths: Vec<PathBuf> = urls
+            .iter()
+            .filter(|url| url.starts_with("file://"))
+            .filter_map(|url| nexshell::osc7::parse_osc7_payload(url.as_bytes(), ""))
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let has_main_window = ctx
+            .window_ids()
+            .into_iter()
+            .any(|window_id| ctx.root_view::<RootView>(window_id).is_some());
+        if !has_main_window {
+            open_main_window(ctx, Arc::clone(&flags_for_open));
+        }
+        dispatch_to_root_view(ctx, move |view, ctx| {
+            view.open_paths_from_system(paths, ctx)
+        });
     }));
 
     let mut app_builder = platform::AppBuilder::new(callbacks, Box::new(EmbeddedAssets), None);
