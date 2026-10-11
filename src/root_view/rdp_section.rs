@@ -451,9 +451,23 @@ impl RootView {
                     rdp.current_pointer,
                 )
                 .finish();
-                Container::new(element)
+                let page = Container::new(element)
                     .with_background_color(ColorU::new(0, 0, 0, 255))
-                    .finish()
+                    .finish();
+                if rdp.has_frame {
+                    page
+                } else {
+                    // 首帧到之前继续盖着「连接中」，免得 文字 → 黑屏 → 画面 连切两次。
+                    // 画面元素仍在底下参与布局，视口尺寸照常上报。
+                    let mut stack = Stack::new();
+                    stack.add_child(page);
+                    stack.add_child(self.render_rdp_status(
+                        rust_i18n::t!("rdp_connecting").to_string(),
+                        None,
+                        &colors,
+                    ));
+                    stack.finish()
+                }
             }
         };
 

@@ -6,8 +6,8 @@ use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab};
 use nexshell::host_overview::{
-    format_bytes_short, HostOverviewSnapshot, HostOverviewStatus, ProcessMetric, ProcessSortKey,
-    SortDirection,
+    compare_processes, format_bytes_short, HostOverviewSnapshot, HostOverviewStatus, ProcessMetric,
+    ProcessSortKey, SortDirection,
 };
 use std::sync::{Arc, Mutex};
 use warpui::color::ColorU;
@@ -306,17 +306,7 @@ impl RootView {
             .into_iter()
             .filter(|p| !p.command.contains("<defunct>"))
             .collect();
-        sorted.sort_by(|a, b| match sort_key {
-            ProcessSortKey::Pid => a.pid.cmp(&b.pid),
-            ProcessSortKey::User => a.user.cmp(&b.user),
-            ProcessSortKey::Memory => a.rss_bytes.cmp(&b.rss_bytes),
-            ProcessSortKey::Cpu => a
-                .cpu_percent
-                .partial_cmp(&b.cpu_percent)
-                .unwrap_or(std::cmp::Ordering::Equal),
-            ProcessSortKey::Command => a.command.cmp(&b.command),
-            ProcessSortKey::ExePath => a.exe_path.cmp(&b.exe_path),
-        });
+        sorted.sort_by(|a, b| compare_processes(a, b, sort_key));
         if matches!(sort_dir, SortDirection::Desc) {
             sorted.reverse();
         }

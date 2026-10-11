@@ -203,8 +203,9 @@ pub(crate) fn close_button_element(
                     ctx.dispatch_typed_action(TerminalGridAction::TabHoverWidthEnd);
                 }
             })
+            // 关闭后不解冻宽度（同 warp tab.rs）：后一个标签的关闭按钮正好补到鼠标下，可连点关闭；
+            // 鼠标离开关闭按钮 / 标签栏时才解冻。
             .on_click(move |ctx, _, _| {
-                ctx.dispatch_typed_action(TerminalGridAction::TabHoverWidthEnd);
                 ctx.dispatch_typed_action(close_action.clone());
             })
             .finish(),

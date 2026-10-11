@@ -3,11 +3,14 @@
 use crate::terminal_view_helpers::terminal_tab_kind_uses_side_panel_layout;
 use crate::{AppPage, TerminalSessionKind};
 
+/// 终端页左侧主机概览栏的内容宽度（右边框另计 1px）。
+pub(crate) const OVERVIEW_SIDEBAR_WIDTH: f32 = 248.0;
+
 /// 左侧栏该显示什么。按钮显隐、侧栏渲染、概览采集三处都按它判断，
 /// 不会出现「按钮亮着却没有内容」。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SidebarContent {
-    /// 没有左侧栏，按钮留同尺寸空位。
+    /// 没有左侧栏，按钮槽收起。
     None,
     /// 主机管理页的分组导航。
     HostLibraryNav,

@@ -5,6 +5,7 @@
 //
 // 切分：
 // - mod.rs   ：面板 chrome（shell / divider / header / input_bar）+ worker 数据装配 + 入口判定
+//              + 文件 / git 面板滑动收尾（落闸、切标签落定）
 // - body.rs  ：列表 / 目录树 / 远程目录 / 传输任务区渲染
 // - actions.rs：handle_* action handler + inline 输入编辑器 + 上传/下载/reveal
 
@@ -395,6 +396,67 @@ impl RootView {
                 }
             }
         }
+    }
+
+    // === 面板滑动收尾（文件 / git 两个面板共用；16ms tick 与切标签时调用）===
+
+    /// 面板关门滑出收敛后落闸：真正关闭，并发跟随的邻居 snap(0) 无缝换基。
+    /// 返回是否发生落闸（需要重绘）。
+    pub(in crate::root_view) fn finalize_panel_closes(&mut self) -> bool {
+        let mut changed = false;
+        // file 落闸：git 布局将左移 F，补 +F→0（向左滑回补位）。
+        let file_done = self
+            .file_panel_closing
+            .borrow()
+            .clone()
+            .filter(|_| !self.file_panel_slide.borrow().is_animating());
+        if let Some(tab_id) = file_done {
+            *self.file_panel_closing.borrow_mut() = None;
+            self.file_panel_slide.borrow_mut().snap(0.0);
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                // 槽位释放归 terminal（flex），git 作为最右元素位置不变，无需联动。
+                tab.file_panel_open = false;
+            }
+            changed = true;
+        }
+        // git 落闸：file 布局将右移 G，补 -G→0（向右滑回）。
+        let git_done = self
+            .git_panel_closing
+            .borrow()
+            .clone()
+            .filter(|_| !self.git_panel_slide.borrow().is_animating());
+        if let Some(tab_id) = git_done {
+            *self.git_panel_closing.borrow_mut() = None;
+            self.git_panel_slide.borrow_mut().snap(0.0);
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.git_panel_open = false;
+                if tab.file_panel_open {
+                    // 并发跟随已把 file 滑到 +G（旧基准），槽位消失基准右移 G，snap(0) 无缝换基。
+                    self.file_panel_slide.borrow_mut().snap(0.0);
+                }
+            }
+            changed = true;
+        }
+        changed
+    }
+
+    /// 切标签时落定在途的面板滑动：滑动状态全窗口共用，留着会带到新标签的面板上
+    /// （B 的面板跟着 A 的关门滑出，A 落闸时又 snap 回来）。
+    pub(in crate::root_view) fn settle_panel_slides(&mut self) {
+        if let Some(tab_id) = self.file_panel_closing.borrow_mut().take() {
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.file_panel_open = false;
+            }
+        }
+        if let Some(tab_id) = self.git_panel_closing.borrow_mut().take() {
+            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
+                tab.git_panel_open = false;
+            }
+        }
+        self.file_panel_slide.borrow_mut().snap(0.0);
+        self.git_panel_slide.borrow_mut().snap(0.0);
+        self.file_panel_slide_pending.set(false);
+        self.git_panel_slide_pending.set(false);
     }
 }
 

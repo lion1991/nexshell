@@ -17,6 +17,7 @@ mod rdp_section;
 mod settings_section;
 mod tab_bar_section;
 mod terminal_section;
+mod toast_section;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -108,7 +109,7 @@ use crate::ui_settings::{
 };
 use crate::{settings_view, warp_dropdown_view, warp_filterable_dropdown};
 use nexshell::design_tokens::DesignTokens;
-use nexshell::ui_anim::{SpringAnim, TransitionMap};
+use nexshell::ui_anim::{SlotReveal, SpringAnim, ToastTimeline, TransitionMap};
 
 // crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
@@ -337,9 +338,14 @@ pub(crate) struct RootView {
     tab_accent_bar_w: RefCell<SpringAnim>,
     /// 底条弹簧是否已首帧落位（未落位前 snap 不滑动）。
     tab_accent_bar_init: std::cell::Cell<bool>,
-    /// 标题栏侧栏按钮槽宽弹簧：没有侧栏时收成 0，主页按钮和标签滑过去；init 同底条。
-    sidebar_toggle_slot: RefCell<SpringAnim>,
-    sidebar_toggle_slot_init: std::cell::Cell<bool>,
+    /// 标题栏按钮收展槽：侧栏按钮没有侧栏时收成 0（主页按钮和标签滑过去）；
+    /// 文件 / git 按钮在不支持的标签上收起（右侧按钮跟着滑）。
+    sidebar_toggle_slot: SlotReveal,
+    /// 左侧概览栏推入推出 + 最后显示的概览所属标签（收起滑出途中照它画）。
+    sidebar_slide: SlotReveal,
+    sidebar_shown_tab: RefCell<Option<String>>,
+    file_button_slot: SlotReveal,
+    git_button_slot: SlotReveal,
     /// 底条 y（相对 tab 行）：直接取活动 tab 底边，缓存供缺位帧沿用。
     tab_accent_bar_y: std::cell::Cell<f32>,
     /// 面板开门滑入弹簧（内容右侧滑入偏移 px）+ 开门待起帧标志（首帧按实际宽度起搏）。
@@ -350,6 +356,8 @@ pub(crate) struct RootView {
     /// 关门滑出在途（值 = 目标 tab id）；滑出收敛后由 tick 落闸真正关闭。
     file_panel_closing: RefCell<Option<String>>,
     git_panel_closing: RefCell<Option<String>>,
+    /// 底部提示条：host_state.notice 接走后的文案 + 淡入淡出时间线。
+    toast: Option<(String, ToastTimeline)>,
     /// 16ms 过渡 tick 在跑标志，防重复调度。
     anim_tick_running: bool,
 }
@@ -796,8 +804,11 @@ impl RootView {
             tab_accent_bar_x: RefCell::new(SpringAnim::new(0.0)),
             tab_accent_bar_w: RefCell::new(SpringAnim::new(0.0)),
             tab_accent_bar_init: std::cell::Cell::new(false),
-            sidebar_toggle_slot: RefCell::new(SpringAnim::new(0.0)),
-            sidebar_toggle_slot_init: std::cell::Cell::new(false),
+            sidebar_toggle_slot: SlotReveal::new(),
+            sidebar_slide: SlotReveal::new(),
+            sidebar_shown_tab: RefCell::new(None),
+            file_button_slot: SlotReveal::new(),
+            git_button_slot: SlotReveal::new(),
             tab_accent_bar_y: std::cell::Cell::new(0.0),
             file_panel_slide: RefCell::new(SpringAnim::new(0.0)),
             git_panel_slide: RefCell::new(SpringAnim::new(0.0)),
@@ -805,6 +816,7 @@ impl RootView {
             git_panel_slide_pending: std::cell::Cell::new(false),
             file_panel_closing: RefCell::new(None),
             git_panel_closing: RefCell::new(None),
+            toast: None,
             anim_tick_running: false,
         };
         view.reload_host_recent(); // 启动首屏即填充最近访问
@@ -1477,6 +1489,8 @@ impl RootView {
             if !me.anim_tick_running && me.any_ui_anim_active(now) {
                 me.wake_ui_anim(ctx);
             }
+            // 异步回调（导入导出、保存等）写的 notice 不走 action 漏斗，这里接走。
+            me.flush_notice_toast(ctx);
             Self::schedule_idle_refresh(ctx);
         });
     }
@@ -1495,7 +1509,10 @@ impl RootView {
             || self.titlebar_btn_transitions.borrow().any_animating(now)
             || self.tab_accent_bar_x.borrow().is_animating()
             || self.tab_accent_bar_w.borrow().is_animating()
-            || self.sidebar_toggle_slot.borrow().is_animating()
+            || self.sidebar_toggle_slot.is_animating()
+            || self.sidebar_slide.is_animating()
+            || self.file_button_slot.is_animating()
+            || self.git_button_slot.is_animating()
             || self.file_panel_slide.borrow().is_animating()
             || self.git_panel_slide.borrow().is_animating()
             || self
@@ -1564,6 +1581,7 @@ impl RootView {
                 .slide
                 .borrow()
                 .is_animating()
+            || self.toast_is_fading(now)
     }
 
     /// 16ms 过渡 tick：所有过渡 settled 即停表；否则重绘后尾递归。抄 rdp 停表 tick。
@@ -1580,46 +1598,6 @@ impl RootView {
             ctx.notify();
             Self::schedule_ui_anim_tick(ctx);
         });
-    }
-
-    /// 面板关门滑出收敛后落闸：真正关闭，并发跟随的邻居 snap(0) 无缝换基。
-    /// 返回是否发生落闸（需要重绘）。
-    fn finalize_panel_closes(&mut self) -> bool {
-        let mut changed = false;
-        // file 落闸：git 布局将左移 F，补 +F→0（向左滑回补位）。
-        let file_done = self
-            .file_panel_closing
-            .borrow()
-            .clone()
-            .filter(|_| !self.file_panel_slide.borrow().is_animating());
-        if let Some(tab_id) = file_done {
-            *self.file_panel_closing.borrow_mut() = None;
-            self.file_panel_slide.borrow_mut().snap(0.0);
-            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
-                // 槽位释放归 terminal（flex），git 作为最右元素位置不变，无需联动。
-                tab.file_panel_open = false;
-            }
-            changed = true;
-        }
-        // git 落闸：file 布局将右移 G，补 -G→0（向右滑回）。
-        let git_done = self
-            .git_panel_closing
-            .borrow()
-            .clone()
-            .filter(|_| !self.git_panel_slide.borrow().is_animating());
-        if let Some(tab_id) = git_done {
-            *self.git_panel_closing.borrow_mut() = None;
-            self.git_panel_slide.borrow_mut().snap(0.0);
-            if let Some(tab) = self.terminal_tabs.iter_mut().find(|t| t.id == tab_id) {
-                tab.git_panel_open = false;
-                if tab.file_panel_open {
-                    // 并发跟随已把 file 滑到 +G（旧基准），槽位消失基准右移 G，snap(0) 无缝换基。
-                    self.file_panel_slide.borrow_mut().snap(0.0);
-                }
-            }
-            changed = true;
-        }
-        changed
     }
 
     fn sync_terminal_window_title(&mut self, title: Option<&str>, ctx: &mut ViewContext<Self>) {
@@ -2134,6 +2112,18 @@ impl View for RootView {
                     terminal_context_menu_offset_bounds(),
                     ParentAnchor::TopLeft,
                     ChildAnchor::TopLeft,
+                ),
+            );
+        }
+
+        if let Some((toast, entered)) = self.render_toast() {
+            root.add_positioned_overlay_child(
+                toast,
+                OffsetPositioning::offset_from_parent(
+                    vec2f(0.0, -24.0 + toast_section::TOAST_RISE * (1.0 - entered)),
+                    ParentOffsetBounds::ParentByPosition,
+                    ParentAnchor::BottomMiddle,
+                    ChildAnchor::BottomMiddle,
                 ),
             );
         }
@@ -2714,6 +2704,7 @@ impl TypedActionView for RootView {
             TerminalGridAction::EndPaneResizing => self.handle_end_pane_resizing(),
             TerminalGridAction::ToggleMaximizePane => self.handle_toggle_maximize_pane(ctx),
         }
+        self.flush_notice_toast(ctx);
         // 统一唤醒过渡 tick：任何 action 都可能改 hover/主题等目标色（如键盘开关面板、
         // 切主题时鼠标不在元素上），不唤醒会冻在中间色。tick 无动画 16ms 自停，代价可忽略。
         self.wake_ui_anim(ctx);
@@ -2937,6 +2928,7 @@ impl RootView {
         self.tab_draggable_states
             .insert(insert_index, DraggableState::default());
         self.tab_selected_colors.insert(insert_index, None);
+        self.settle_panel_slides();
         self.active_tab_index = insert_index;
         self.terminal = terminal;
         self.new_session_menu_open = false;
@@ -2994,6 +2986,7 @@ impl RootView {
         // 切走前若离开 RDP tab，抬起远端全部修饰键防卡键。
         if self.active_tab_index != index {
             self.release_rdp_modifiers(self.active_tab_index);
+            self.settle_panel_slides();
         }
         let Some(tab) = self.terminal_tabs.get(index) else {
             return;
@@ -3038,6 +3031,10 @@ impl RootView {
             .cloned()
             .unwrap_or_else(|| Arc::clone(&active_tab.terminal));
         let title = active_tab.window_title();
+        // 只在活动标签真的换了时落定：关后台标签不该打断当前标签正在滑的面板。
+        if !Arc::ptr_eq(&self.terminal, &terminal) {
+            self.settle_panel_slides();
+        }
         self.terminal = terminal;
         self.set_app_page(AppPage::Terminal, ctx);
         ctx.focus_self();
@@ -3115,7 +3112,10 @@ impl RootView {
             return;
         }
 
-        self.tab_fixed_width = None;
+        // 关的是最后一个标签时右边没有补位的，直接解冻宽度。
+        if index + 1 == self.terminal_tabs.len() {
+            self.tab_fixed_width = None;
+        }
         self.show_tab_right_click_menu = None;
         self.remove_terminal_tab_at(index);
 

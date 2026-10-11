@@ -341,6 +341,26 @@ pub enum ProcessSortKey {
     ExePath,
 }
 
+/// 进程排序；值相同按 pid 定序，否则每次刷新同值行会来回换位。
+pub fn compare_processes(
+    a: &ProcessMetric,
+    b: &ProcessMetric,
+    key: ProcessSortKey,
+) -> std::cmp::Ordering {
+    let primary = match key {
+        ProcessSortKey::Pid => a.pid.cmp(&b.pid),
+        ProcessSortKey::User => a.user.cmp(&b.user),
+        ProcessSortKey::Memory => a.rss_bytes.cmp(&b.rss_bytes),
+        ProcessSortKey::Cpu => a
+            .cpu_percent
+            .partial_cmp(&b.cpu_percent)
+            .unwrap_or(std::cmp::Ordering::Equal),
+        ProcessSortKey::Command => a.command.cmp(&b.command),
+        ProcessSortKey::ExePath => a.exe_path.cmp(&b.exe_path),
+    };
+    primary.then_with(|| a.pid.cmp(&b.pid))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NetworkSortKey {
     Pid,
@@ -445,17 +465,7 @@ impl HostOverviewUiState {
     pub fn sorted_processes(&self) -> Vec<&ProcessMetric> {
         let mut items: Vec<&ProcessMetric> = self.snapshot.processes.iter().collect();
         let key = self.process_sort_key;
-        items.sort_by(|a, b| match key {
-            ProcessSortKey::Pid => a.pid.cmp(&b.pid),
-            ProcessSortKey::User => a.user.cmp(&b.user),
-            ProcessSortKey::Memory => a.rss_bytes.cmp(&b.rss_bytes),
-            ProcessSortKey::Cpu => a
-                .cpu_percent
-                .partial_cmp(&b.cpu_percent)
-                .unwrap_or(std::cmp::Ordering::Equal),
-            ProcessSortKey::Command => a.command.cmp(&b.command),
-            ProcessSortKey::ExePath => a.exe_path.cmp(&b.exe_path),
-        });
+        items.sort_by(|a, b| compare_processes(a, b, key));
         if matches!(self.process_sort_direction, SortDirection::Desc) {
             items.reverse();
         }
@@ -1681,8 +1691,29 @@ fn expand_tilde(path: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        split_rate, HostOverviewResume, HostOverviewSnapshot, NetworkMetric, NetworkRatePoint,
+        compare_processes, split_rate, HostOverviewResume, HostOverviewSnapshot, NetworkMetric,
+        NetworkRatePoint, ProcessMetric, ProcessSortKey,
     };
+
+    #[test]
+    fn equal_sort_values_keep_a_stable_pid_order() {
+        let process = |pid: u32| ProcessMetric {
+            pid,
+            user: "root".to_string(),
+            rss_bytes: 1024,
+            cpu_percent: 0.0,
+            command: "sshd".to_string(),
+            args: String::new(),
+            exe_path: None,
+        };
+        let mut a = vec![process(30), process(10), process(20)];
+        let mut b = vec![process(20), process(30), process(10)];
+        a.sort_by(|x, y| compare_processes(x, y, ProcessSortKey::Cpu));
+        b.sort_by(|x, y| compare_processes(x, y, ProcessSortKey::Cpu));
+        let pids = |v: &[ProcessMetric]| v.iter().map(|p| p.pid).collect::<Vec<_>>();
+        assert_eq!(pids(&a), vec![10, 20, 30]);
+        assert_eq!(pids(&a), pids(&b));
+    }
 
     #[test]
     fn resume_carries_network_history_only_when_data_was_collected() {

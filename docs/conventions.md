@@ -17,3 +17,9 @@
 
 ## rustfmt
 手动格式化必带 `--config skip_children=true`（`rustfmt --edition 2021 --config skip_children=true <files>`；stable 1.8.0 起不认 `--skip-children` 长选项）。否则传 `mod.rs`/`lib.rs` 会顺着 `mod` 声明递归格式化整棵子模块树，污染 diff/blame。
+
+## 界面动画
+- 只给有空间连续性的变化加动画：面板 / 侧栏 / 标题栏按钮的出现消失、标签底条、悬停色。页面切换、标签内容、菜单、搜索过滤、加载转内容保持瞬时。
+- 不逐帧改终端尺寸（每帧都会 resize PTY）：左侧概览栏用 `sidebar_push::SidebarPush`（正文直接按最终宽度布局，与侧栏一起平移）；右侧面板保持槽位、只平移面板内容。
+- 用 `nexshell::ui_anim` 现成的：`SpringAnim` 管位移 / 宽度，`SlotReveal` 管收展槽，`TransitionMap` 管颜色（120 ms），`FloatTransitionMap` 管数值（350 ms），`ToastTimeline` 管提示条。render 里设目标，action 漏斗统一唤醒 16 ms tick；新动画源必须计入 `any_ui_anim_active`，否则会停在中间帧。
+- 操作结果 / 报错写 `host_state.notice`，由底部提示条（`toast_section`）淡入显示几秒再淡出，别另起提示 UI。

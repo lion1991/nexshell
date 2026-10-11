@@ -343,8 +343,9 @@ impl RootView {
     }
 
     pub(in crate::root_view) fn handle_tab_hover_width_end(&mut self, ctx: &mut ViewContext<Self>) {
-        self.tab_fixed_width = None;
-        ctx.notify();
+        if self.tab_fixed_width.take().is_some() {
+            ctx.notify();
+        }
     }
 
     pub(in crate::root_view) fn handle_start_tab_drag(&mut self, ctx: &mut ViewContext<Self>) {

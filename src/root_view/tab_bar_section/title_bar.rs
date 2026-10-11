@@ -31,6 +31,7 @@ use warpui::elements::{
 use warpui::geometry::vector::vec2f;
 use warpui::{platform, AppContext, Element};
 
+use nexshell::ui_anim::{scale_alpha, SlotReveal};
 use std::time::Instant;
 
 // 标题栏图标按钮 hover 过渡 key（titlebar_btn_transitions）。
@@ -103,21 +104,39 @@ impl RootView {
 
     fn render_tab_bar_hoverable(&self, content: Box<dyn Element>) -> Box<dyn Element> {
         // warp/app/src/workspace/view.rs:16946-16953.
-        Hoverable::new(self.tab_bar_hover_state.clone(), |_| content).finish()
+        Hoverable::new(self.tab_bar_hover_state.clone(), |_| content)
+            // 关标签后冻结的宽度：鼠标没经过新补位的关闭按钮就离开时，在这里兜底解冻。
+            .on_hover(|is_hover, ctx, _, _| {
+                if !is_hover {
+                    ctx.dispatch_typed_action(TerminalGridAction::TabHoverWidthEnd);
+                }
+            })
+            .finish()
     }
 
     fn render_tab_bar_contents(&self, tabs: &[TabModel], app: &AppContext) -> Box<dyn Element> {
         let chrome_layout = title_bar_chrome_layout(current_title_bar_chrome_platform());
         // Stretch 让 tab 背景色撑满 bar 高度; icon buttons 用 Align 居中。
-        let sidebar_button = Align::new(self.render_sidebar_toggle()).finish();
+        let sidebar_button = self.render_sidebar_toggle();
         let new_tab_button = Align::new(self.render_new_tab_button()).finish();
-        let file_panel_button =
-            Container::new(Align::new(self.render_file_panel_button()).finish())
-                .with_margin_left(TAB_BAR_PADDING_LEFT)
-                .finish();
-        let git_panel_button = Container::new(Align::new(self.render_git_panel_button()).finish())
-            .with_margin_left(TAB_BAR_PADDING_LEFT)
-            .finish();
+        let file_panel_button = self.render_icon_button_slot(
+            &self.file_button_slot,
+            // 孤儿查看伪 tab（源终端已关）：与 git 面板按钮一致收起，避免点出破损空面板。
+            self.source_terminal_tab_index().is_some(),
+            ICON_PATH_FOLDER,
+            self.file_panel_tab().is_some_and(|tab| tab.file_panel_open),
+            (TAB_BAR_PADDING_LEFT, 0.0),
+            || self.render_file_panel_button(),
+        );
+        // 非 Local tab 收起，避免误开后看到 "不支持" 占位。
+        let git_panel_button = self.render_icon_button_slot(
+            &self.git_button_slot,
+            self.active_tab_supports_git_panel(),
+            ICON_PATH_GIT_BRANCH,
+            self.active_git_panel_open(),
+            (TAB_BAR_PADDING_LEFT, 0.0),
+            || self.render_git_panel_button(),
+        );
         let settings_button = Container::new(Align::new(self.render_settings_button()).finish())
             .with_margin_left(TAB_BAR_PADDING_LEFT)
             .finish();
@@ -239,51 +258,56 @@ impl RootView {
         Some((sx, self.tab_accent_bar_y.get(), sw))
     }
 
-    /// 侧栏按钮槽：有侧栏时展开，没有时收成 0 宽，主页按钮和标签跟着滑过去；
-    /// 收展途中图标随槽宽缩放淡出，不响应点击。
+    /// 侧栏按钮槽：有侧栏时展开，没有时收成 0 宽，主页按钮和标签跟着滑过去。
     fn render_sidebar_toggle(&self) -> Box<dyn Element> {
-        const SLOT_WIDTH: f32 = ICON_BUTTON_SIZE + SIDEBAR_TOGGLE_MARGIN_RIGHT;
-        let has_sidebar = self.sidebar_content() != SidebarContent::None;
-        let width = {
-            let target = if has_sidebar { SLOT_WIDTH } else { 0.0 };
-            let mut slot = self.sidebar_toggle_slot.borrow_mut();
-            if self.sidebar_toggle_slot_init.get() {
-                slot.set_target(target);
-            } else {
-                slot.snap(target);
-                self.sidebar_toggle_slot_init.set(true);
-            }
-            slot.sample(Instant::now())
-        };
-        let reveal = (width / SLOT_WIDTH).clamp(0.0, 1.0);
+        self.render_icon_button_slot(
+            &self.sidebar_toggle_slot,
+            self.sidebar_content() != SidebarContent::None,
+            ICON_PATH_SIDEBAR_OPEN,
+            self.sidebar_open,
+            (0.0, SIDEBAR_TOGGLE_MARGIN_RIGHT),
+            || self.render_sidebar_toggle_button(),
+        )
+    }
+
+    /// 标题栏图标按钮的收展槽：visible 变化时槽宽（按钮 + 外边距）弹簧收展，邻居跟着滑；
+    /// 收展途中画随槽宽缩放淡出的图标，不响应点击。
+    fn render_icon_button_slot(
+        &self,
+        slot: &SlotReveal,
+        visible: bool,
+        icon_path: &'static str,
+        is_active: bool,
+        (margin_left, margin_right): (f32, f32),
+        button: impl FnOnce() -> Box<dyn Element>,
+    ) -> Box<dyn Element> {
+        let reveal = slot.reveal(visible, ICON_BUTTON_SIZE + margin_left + margin_right);
         if reveal <= 0.0 {
             return Empty::new().finish();
         }
-        let button = if has_sidebar && reveal >= 1.0 {
-            self.render_sidebar_toggle_button()
+        let content = if visible && reveal >= 1.0 {
+            button()
         } else {
             let uc = self.ui_colors();
-            let base = if self.sidebar_open {
+            let base = if is_active {
                 uc.icon_color_active
             } else {
                 uc.icon_color_inactive
             };
-            let color = ColorU {
-                a: (base.a as f32 * reveal) as u8,
-                ..base
-            };
             let icon_size = (ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0) * reveal;
-            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_SIDEBAR_OPEN, color).finish())
-                .with_width(icon_size)
-                .with_height(icon_size)
-                .finish();
+            let icon =
+                ConstrainedBox::new(Icon::new(icon_path, scale_alpha(base, reveal)).finish())
+                    .with_width(icon_size)
+                    .with_height(icon_size)
+                    .finish();
             ConstrainedBox::new(Align::new(icon).finish())
                 .with_width(ICON_BUTTON_SIZE * reveal)
                 .with_height(ICON_BUTTON_SIZE)
                 .finish()
         };
-        Container::new(button)
-            .with_margin_right(SIDEBAR_TOGGLE_MARGIN_RIGHT * reveal)
+        Container::new(Align::new(content).finish())
+            .with_margin_left(margin_left * reveal)
+            .with_margin_right(margin_right * reveal)
             .finish()
     }
 
@@ -332,10 +356,6 @@ impl RootView {
     /// 文件面板开关按钮（settings 左侧）。
     /// active 态判定来自当前 tab 的 file_panel_open，跟 host_overview sidebar 一致。
     fn render_file_panel_button(&self) -> Box<dyn Element> {
-        // 孤儿查看伪 tab（源终端已关）：与 git 面板按钮一致隐藏，避免点出破损空面板。
-        if self.source_terminal_tab_index().is_none() {
-            return Empty::new().finish();
-        }
         let state = self.file_panel_button_state.clone();
         let is_open = self
             .file_panel_tab()
@@ -382,11 +402,7 @@ impl RootView {
     }
 
     /// git 面板开关按钮（settings 左侧、file_panel 右侧）。active 态来自 ShellModel 共用开关。
-    /// 非 Local tab 不显示按钮，避免误开后看到 "不支持" 占位。
     fn render_git_panel_button(&self) -> Box<dyn Element> {
-        if !self.active_tab_supports_git_panel() {
-            return Empty::new().finish();
-        }
         let state = self.git_panel_button_state.clone();
         let is_open = self.active_git_panel_open();
         let uc = self.ui_colors();

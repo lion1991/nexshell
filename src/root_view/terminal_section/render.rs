@@ -13,6 +13,8 @@ use warpui::elements::{
 };
 use warpui::{fonts, AppContext, CursorInfo, Element, EventContext};
 
+use crate::sidebar_helpers::OVERVIEW_SIDEBAR_WIDTH;
+use crate::sidebar_push::SidebarPush;
 use crate::terminal_grid_element::{
     CellMetrics, FindPanelState, TerminalGridAction, TerminalGridElement, TerminalShapedLineCache,
 };
@@ -42,30 +44,70 @@ impl RootView {
             return main_body;
         };
         if !terminal_tab_kind_uses_side_panel_layout(active_kind) {
+            // 详情页 / RDP 没有侧栏布局：落定，回到终端标签时不会凭空滑出上一个侧栏。
+            self.sidebar_slide.snap(false, OVERVIEW_SIDEBAR_WIDTH);
             return main_body;
         }
 
-        let show_left = self.should_render_host_overview_sidebar();
+        let body = self.render_body_with_left_sidebar(main_body, app);
         let show_file_panel = self.should_render_file_panel();
         let show_git_panel = self.should_render_git_panel();
-        if show_left || show_file_panel || show_git_panel {
-            let mut row = Flex::row()
-                .with_main_axis_size(MainAxisSize::Max)
-                .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
-            if show_left {
-                row.add_child(self.render_sidebar_panel(app));
-            }
-            row.add_child(Expanded::new(1.0, main_body).finish());
-            if show_file_panel {
-                row.add_child(self.render_file_panel(app));
-            }
-            if show_git_panel {
-                row.add_child(self.render_git_panel(app));
-            }
-            row.finish()
-        } else {
-            main_body
+        if !show_file_panel && !show_git_panel {
+            return body;
         }
+        let mut row = Flex::row()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(Expanded::new(1.0, body).finish());
+        if show_file_panel {
+            row.add_child(self.render_file_panel(app));
+        }
+        if show_git_panel {
+            row.add_child(self.render_git_panel(app));
+        }
+        row.finish()
+    }
+
+    /// 左侧概览栏：开关 / 切标签时推入推出（正文跟着平移，终端只 resize 一次）。
+    fn render_body_with_left_sidebar(
+        &self,
+        main_body: Box<dyn Element>,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let show = self.should_render_host_overview_sidebar();
+        if show {
+            *self.sidebar_shown_tab.borrow_mut() = self
+                .terminal_tabs
+                .get(self.overview_tab_index())
+                .map(|tab| tab.id.clone());
+        }
+        let reveal = self.sidebar_slide.reveal(show, OVERVIEW_SIDEBAR_WIDTH);
+        if reveal <= 0.0 {
+            return main_body;
+        }
+        // 收起途中画最后显示的那个标签的概览（可能已切走）；那个标签已关就不播了。
+        let sidebar_tab = if show {
+            Some(self.overview_tab_index())
+        } else {
+            let shown = self.sidebar_shown_tab.borrow();
+            shown
+                .as_deref()
+                .and_then(|id| self.terminal_tabs.iter().position(|tab| tab.id == id))
+        };
+        let Some(sidebar_tab) = sidebar_tab else {
+            self.sidebar_slide.snap(false, OVERVIEW_SIDEBAR_WIDTH);
+            return main_body;
+        };
+        let sidebar = self.render_sidebar_panel(sidebar_tab, app);
+        if show && reveal >= 1.0 {
+            return Flex::row()
+                .with_main_axis_size(MainAxisSize::Max)
+                .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+                .with_child(sidebar)
+                .with_child(Expanded::new(1.0, main_body).finish())
+                .finish();
+        }
+        SidebarPush::new(Some(sidebar), main_body, reveal, show).finish()
     }
 
     pub(in crate::root_view) fn render_single_terminal_body(

@@ -4,6 +4,7 @@
 use crate::host_monitor_view_helpers::{
     format_kernel_short, format_uptime, overview_status_dot_color,
 };
+use crate::sidebar_helpers::OVERVIEW_SIDEBAR_WIDTH;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab, ICON_PATH_COPY, ICON_PATH_EXPAND};
@@ -20,12 +21,16 @@ use warpui::{fonts, AppContext, Element};
 impl RootView {
     // 终端 tab 内嵌的主机监控左侧栏 assembler；与 render_file_panel / render_git_panel 对称，
     // 由 terminal_section 的 render_active_tab_body_with_side_panels 跨 section 调用。
-    pub(in crate::root_view) fn render_sidebar_panel(&self, app: &AppContext) -> Box<dyn Element> {
-        const SIDEBAR_WIDTH: f32 = 248.0;
+    // tab_index 通常是 overview_tab_index()（Git Diff / 代码查看器显示来源终端的概览）；
+    // 侧栏收起滑出途中可能是已切走的上一个标签。
+    pub(in crate::root_view) fn render_sidebar_panel(
+        &self,
+        tab_index: usize,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
         let colors = self.design_tokens.overview;
         let waiting_snapshot;
-        // Git Diff / 代码查看器显示来源终端的概览。
-        let active_tab = self.terminal_tabs.get(self.overview_tab_index());
+        let active_tab = self.terminal_tabs.get(tab_index);
         let snapshot = if let Some(tab) = active_tab {
             &tab.host_overview.snapshot
         } else {
@@ -61,7 +66,7 @@ impl RootView {
                     .with_padding_bottom(10.0)
                     .finish(),
             )
-            .with_width(SIDEBAR_WIDTH)
+            .with_width(OVERVIEW_SIDEBAR_WIDTH)
             .finish(),
         )
         .with_background_color(colors.panel_bg)

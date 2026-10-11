@@ -21,6 +21,7 @@ use crate::{warp_dropdown_view, AppPage, RootView};
 use nexshell::terminal_runtime::TerminalPalette;
 use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::appearance::Appearance;
+use warpui::units::Pixels;
 use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
 
 impl RootView {
@@ -138,7 +139,13 @@ impl RootView {
         section: NexSettingsSection,
         ctx: &mut ViewContext<Self>,
     ) {
-        self.settings_view_state.borrow_mut().current_page = section;
+        let mut state = self.settings_view_state.borrow_mut();
+        if state.current_page != section {
+            // 各分区共用一个滚动状态，换区从顶部开始。
+            state.content_scroll_state.scroll_to(Pixels::zero());
+            state.current_page = section;
+        }
+        drop(state);
         ctx.notify();
     }
 

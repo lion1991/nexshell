@@ -1,6 +1,7 @@
 //! eased 颜色过渡：render 驱动重定向 + 采样。
 //! 语义：每帧 render 按当前目标色 retarget，tick 每 16ms 采样重绘，全部 settled 即停表。
 
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::time::Instant;
@@ -14,6 +15,14 @@ pub const TRANSITION_MS: f32 = 120.0;
 pub fn ease_out_cubic(t: f32) -> f32 {
     let inv = 1.0 - t.clamp(0.0, 1.0);
     1.0 - inv * inv * inv
+}
+
+/// 按不透明度缩放 alpha（淡入淡出）。
+pub fn scale_alpha(color: ColorU, opacity: f32) -> ColorU {
+    ColorU {
+        a: (color.a as f32 * opacity.clamp(0.0, 1.0)).round() as u8,
+        ..color
+    }
 }
 
 /// 四通道线性插值。
@@ -273,6 +282,144 @@ impl SpringAnim {
             self.velocity = 0.0;
         }
         self.value
+    }
+}
+
+/// 收展槽：宽度在 0 / full 间弹簧切换（邻居跟着滑），render 里按 visible 采样出展开比例；
+/// 首次采样直接落位，开窗时不补间。
+pub struct SlotReveal {
+    spring: RefCell<SpringAnim>,
+    initialized: Cell<bool>,
+}
+
+impl Default for SlotReveal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SlotReveal {
+    pub fn new() -> Self {
+        Self {
+            spring: RefCell::new(SpringAnim::new(0.0)),
+            initialized: Cell::new(false),
+        }
+    }
+
+    /// 返回 0..=1 的展开比例。
+    pub fn reveal(&self, visible: bool, full: f32) -> f32 {
+        let target = if visible { full } else { 0.0 };
+        let mut spring = self.spring.borrow_mut();
+        if self.initialized.replace(true) {
+            spring.set_target(target);
+        } else {
+            spring.snap(target);
+        }
+        (spring.sample(Instant::now()) / full).clamp(0.0, 1.0)
+    }
+
+    /// 直接落位（不该补间的场合）。
+    pub fn snap(&self, visible: bool, full: f32) {
+        self.initialized.set(true);
+        self.spring
+            .borrow_mut()
+            .snap(if visible { full } else { 0.0 });
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.spring.borrow().is_animating()
+    }
+}
+
+// ── 提示条时间线 ───────────────────────────────────────────────
+
+const TOAST_FADE_IN: f32 = 0.16;
+const TOAST_FADE_OUT: f32 = 0.22;
+
+/// 提示条：淡入 → 停留 → 淡出，按出现时刻算当前不透明度。
+/// 停留时长随字数加长（长报错要读得完），封顶 6s。
+#[derive(Clone, Copy)]
+pub struct ToastTimeline {
+    shown_at: Instant,
+    hold: f32,
+}
+
+impl ToastTimeline {
+    pub fn new(text: &str, now: Instant) -> Self {
+        let hold = (2.2 + text.chars().count() as f32 * 0.04).min(6.0);
+        Self {
+            shown_at: now,
+            hold,
+        }
+    }
+
+    fn elapsed(&self, now: Instant) -> f32 {
+        now.saturating_duration_since(self.shown_at).as_secs_f32()
+    }
+
+    /// 0..=1，已缓动。
+    pub fn opacity(&self, now: Instant) -> f32 {
+        let t = self.elapsed(now);
+        if t < TOAST_FADE_IN {
+            ease_out_cubic(t / TOAST_FADE_IN)
+        } else if t < TOAST_FADE_IN + self.hold {
+            1.0
+        } else {
+            1.0 - ease_out_cubic((t - TOAST_FADE_IN - self.hold) / TOAST_FADE_OUT)
+        }
+    }
+
+    /// 淡入进度 0..=1（已缓动）：只用于入场上浮，淡出时原地消失。
+    pub fn entered(&self, now: Instant) -> f32 {
+        ease_out_cubic(self.elapsed(now) / TOAST_FADE_IN)
+    }
+
+    /// 处于淡入 / 淡出段（需要逐帧重绘）。停留段静止，不占 tick。
+    pub fn is_fading(&self, now: Instant) -> bool {
+        let t = self.elapsed(now);
+        t < TOAST_FADE_IN || (t >= TOAST_FADE_IN + self.hold && !self.is_finished(now))
+    }
+
+    pub fn is_finished(&self, now: Instant) -> bool {
+        self.elapsed(now) >= TOAST_FADE_IN + self.hold + TOAST_FADE_OUT
+    }
+
+    /// 从出现到开始淡出的时长：到点唤醒 tick。
+    pub fn fade_out_delay(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f32(TOAST_FADE_IN + self.hold)
+    }
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn fades_in_holds_then_fades_out() {
+        let t0 = Instant::now();
+        let toast = ToastTimeline::new("已保存", t0);
+        assert_eq!(toast.opacity(t0), 0.0);
+        assert!(toast.is_fading(t0));
+        let mid = t0 + Duration::from_secs(1);
+        assert_eq!(toast.opacity(mid), 1.0);
+        assert!(!toast.is_fading(mid));
+        let out = t0 + toast.fade_out_delay() + Duration::from_millis(110);
+        assert!(toast.is_fading(out));
+        assert!((0.0..1.0).contains(&toast.opacity(out)));
+        let end = t0 + toast.fade_out_delay() + Duration::from_secs(1);
+        assert!(toast.is_finished(end));
+        assert!(!toast.is_fading(end));
+    }
+
+    #[test]
+    fn long_text_holds_longer_but_capped() {
+        let t0 = Instant::now();
+        let short = ToastTimeline::new("ok", t0).fade_out_delay();
+        let long = ToastTimeline::new(&"错".repeat(60), t0).fade_out_delay();
+        let huge = ToastTimeline::new(&"错".repeat(1000), t0).fade_out_delay();
+        assert!(long > short);
+        assert!(huge <= Duration::from_secs_f32(6.0 + TOAST_FADE_IN + 0.001));
     }
 }
 

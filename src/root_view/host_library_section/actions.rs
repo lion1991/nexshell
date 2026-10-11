@@ -12,6 +12,7 @@ use nexshell::host_management::{
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 use pathfinder_geometry::rect::RectF;
+use warpui::units::Pixels;
 use warpui::ViewContext;
 
 impl RootView {
@@ -291,6 +292,13 @@ impl RootView {
         mode: HostViewMode,
         ctx: &mut ViewContext<Self>,
     ) {
+        if self.host_state.view_mode != mode {
+            // 卡片 / 列表 / 容器等视图共用一个滚动状态，换视图从顶部开始。
+            self.host_view_states
+                .borrow()
+                .scroll_state
+                .scroll_to(Pixels::zero());
+        }
         self.host_state.set_view_mode(mode);
         // 切换视图复位密钥页瞬时态，避免再回来停在确认 / 展开 / 编辑态
         self.host_state.copy_cmd_expanded = false;
