@@ -8,6 +8,7 @@ mod audio_diag;
 mod clipboard;
 mod egfx;
 mod frame_marker;
+mod framebuffer;
 mod mouse_cursor;
 mod outputs;
 mod rdpdr;
@@ -23,6 +24,7 @@ pub use egfx::{
     replay_wire_dump, vt_replay_dir, ChecksumRect, WatchEvent, WatchPoint, WirePduInfo,
     WirePduRecord, WirePipelineError, WireReplayFrame, WireReplayOptions, WireReplaySummary,
 };
+pub use framebuffer::RdpFramebuffer;
 pub use reconnect::notify_system_wake;
 pub use stats::{format_duration_hms, fps, mbps, RdpStats};
 pub use udp::default_enable_udp;
@@ -296,119 +298,10 @@ fn to_fastpath_input(event: RdpInputEvent) -> FastPathInputEvent {
 /// 一次 FastPath 包最多攒的事件数（协议上限 255，取保守值频繁 flush）。
 const INPUT_BATCH_MAX: usize = 64;
 
-/// RGBA framebuffer。字节序与 warpui `CustomImageFormat::Rgba` 一致（R,G,B,A）。
-pub struct RdpFramebuffer {
-    pub width: u16,
-    pub height: u16,
-    pub rgba: Vec<u8>,
-    /// 帧代号：每次内容变更 +1。渲染侧据此判断是否有新帧、避免重复上传纹理。
-    generation: u64,
-}
-
-impl RdpFramebuffer {
-    pub fn new(width: u16, height: u16) -> Self {
-        Self {
-            width,
-            height,
-            rgba: vec![0; usize::from(width) * usize::from(height) * 4],
-            generation: 0,
-        }
-    }
-
-    /// 当前帧代号（0 = 尚无任何帧）。
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// 整帧覆盖（src 必须是同尺寸 RGBA）。返回整帧脏矩形。
-    pub fn apply_full(&mut self, src: &[u8]) -> DirtyRect {
-        let len = self.rgba.len().min(src.len());
-        self.rgba[..len].copy_from_slice(&src[..len]);
-        self.generation = self.generation.wrapping_add(1);
-        DirtyRect {
-            x: 0,
-            y: 0,
-            width: self.width,
-            height: self.height,
-        }
-    }
-
-    /// 把 src（整帧 RGBA）中 rect 覆盖的行拷进本 framebuffer 对应位置。
-    /// 供后续增量更新用；本步事件循环走 apply_full，但单测覆盖此路径。
-    pub fn apply_region(&mut self, src: &[u8], rect: DirtyRect) {
-        let stride = usize::from(self.width) * 4;
-        let x0 = usize::from(rect.x);
-        let x1 = usize::from(rect.x + rect.width).min(usize::from(self.width));
-        if x1 <= x0 {
-            return;
-        }
-        self.generation = self.generation.wrapping_add(1);
-        let row_bytes = (x1 - x0) * 4;
-        for row in rect.y..rect.y.saturating_add(rect.height) {
-            if row >= self.height {
-                break;
-            }
-            let off = usize::from(row) * stride + x0 * 4;
-            if off + row_bytes > self.rgba.len() || off + row_bytes > src.len() {
-                break;
-            }
-            self.rgba[off..off + row_bytes].copy_from_slice(&src[off..off + row_bytes]);
-        }
-    }
-
-    /// EGFX 合成：把已映射 surface（src=src_w×src_h RGBA，映射原点 origin）落进 framebuffer，
-    /// 只写 `clip`（output 坐标）范围内、且被 surface 覆盖的行。不 +generation（发布前统一 bump）。
-    pub fn compose_surface(
-        &mut self,
-        origin_x: i32,
-        origin_y: i32,
-        src: &[u8],
-        src_w: u16,
-        src_h: u16,
-        clip: DirtyRect,
-    ) {
-        let fb_w = i32::from(self.width);
-        let fb_h = i32::from(self.height);
-        let sw = i32::from(src_w);
-        let sh = i32::from(src_h);
-        // clip ∩ surface-output-rect ∩ framebuffer。
-        let cx0 = i32::from(clip.x).max(origin_x).max(0);
-        let cy0 = i32::from(clip.y).max(origin_y).max(0);
-        let cx1 = (i32::from(clip.x) + i32::from(clip.width))
-            .min(origin_x + sw)
-            .min(fb_w);
-        let cy1 = (i32::from(clip.y) + i32::from(clip.height))
-            .min(origin_y + sh)
-            .min(fb_h);
-        if cx1 <= cx0 || cy1 <= cy0 {
-            return;
-        }
-        let fb_stride = usize::from(self.width) * 4;
-        let src_stride = usize::from(src_w) * 4;
-        let n = (cx1 - cx0) as usize * 4;
-        for row in cy0..cy1 {
-            let sy = (row - origin_y) as usize;
-            let sx = (cx0 - origin_x) as usize;
-            let so = sy * src_stride + sx * 4;
-            let dofs = row as usize * fb_stride + cx0 as usize * 4;
-            if so + n > src.len() || dofs + n > self.rgba.len() {
-                continue;
-            }
-            self.rgba[dofs..dofs + n].copy_from_slice(&src[so..so + n]);
-        }
-    }
-
-    /// 手动推进帧代号（EGFX 合成一帧后统一调一次）。
-    pub fn bump_generation(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-    }
-}
-
 /// UI 侧持有的会话句柄。drop 或 close() 时优雅断开。
 pub struct RdpSessionHandle {
     /// 会话事件流。unbounded 是为协议线程永不阻塞；FrameUpdated 是纯通知（像素在共享
-    /// framebuffer，generation 为权威），UI 侧靠 generation 早退吞掉不前进的积压，但每条
-    /// 前进事件仍触发一次全帧上传。后续可改容量 1 + 满则丢（见 code-review-2026-07-23 P2-10）。
+    /// framebuffer，generation 为权威），UI 只触发重绘，渲染器按帧代号只上传脏区。
     pub frame_rx: async_channel::Receiver<RdpEvent>,
     /// 共享 framebuffer，UI 重绘时读快照。
     pub framebuffer: Arc<Mutex<RdpFramebuffer>>,
@@ -914,12 +807,12 @@ async fn connect_and_run(
         let mut fb = framebuffer.lock();
         let resized = fb.width != desktop.width || fb.height != desktop.height;
         if resized {
-            *fb = RdpFramebuffer::new(desktop.width, desktop.height);
+            fb.resize(desktop.width, desktop.height);
         }
         resized
     };
-    // 重连后服务端给的尺寸可能变了，UI 要据此重置上传代号。
-    if resized && reconnecting {
+    // UI 按事件跟踪桌面尺寸，不在 UI 线程锁 framebuffer。
+    if resized {
         let _ = event_tx.try_send(RdpEvent::Resized {
             width: desktop.width,
             height: desktop.height,
@@ -1390,7 +1283,7 @@ fn reset_after_resize(
     {
         let mut fb = framebuffer.lock();
         if fb.width != width || fb.height != height {
-            *fb = RdpFramebuffer::new(width, height);
+            fb.resize(width, height);
         }
     }
     let _ = event_tx.try_send(RdpEvent::Resized { width, height });

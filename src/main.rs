@@ -469,7 +469,7 @@ enum RdpConnectionPhase {
 impl RdpConnectionPhase {
     fn on_transport_connected(&mut self) {
         // 自动重连沿用同一 framebuffer，旧画面就是本会话的，直接恢复。
-        // 首次连接则等首帧上传，避免稳定 asset key 暴露上一会话的缓存画面。
+        // 首次连接则等首帧到达再显示画面。
         if matches!(self, Self::Reconnecting { .. }) {
             *self = Self::Connected;
         }
@@ -491,10 +491,12 @@ struct RdpTabState {
     config: nexshell::rdp_session::RdpSessionConfig,
     session_generation: Generation,
     phase: RdpConnectionPhase,
-    /// image cache 稳定键（每会话一个，逐帧覆盖同一条目，不堆积不泄漏）。
-    asset_id: String,
-    /// 已上传纹理对应的帧代号；新帧代号更大才重传，避免重复上传。
-    last_uploaded_generation: u64,
+    /// 画面像素源（包住会话 framebuffer）。Arc 身份要稳定，渲染器才能保留常驻纹理；换会话时重建。
+    live_image: Arc<dyn warpui::rendering::live_image::LiveImageSource>,
+    /// 本会话收到过帧；没有就不画画面（重连中只显示文字）。
+    has_frame: bool,
+    /// 远端桌面尺寸，按 Resized 事件跟踪，UI 线程不锁 framebuffer。
+    desktop_size: (u16, u16),
     /// 当前 letterbox 几何（Element 每帧回写），第 ④ 步鼠标→远端坐标反算用。
     viewport: std::sync::Arc<std::sync::Mutex<Option<rdp_view::RdpViewport>>>,
     /// 上次发往远端的鼠标坐标；相同则不重发 MouseMove（Element 每帧重建，故存共享层）。

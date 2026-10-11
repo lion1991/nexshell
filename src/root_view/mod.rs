@@ -3063,7 +3063,7 @@ impl RootView {
         self.sync_host_overview_monitor(ctx);
     }
 
-    fn remove_terminal_tab_at(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+    fn remove_terminal_tab_at(&mut self, index: usize) {
         // 关 tab 会丢掉全部 pane 的 runtime，先把录制中的内容落盘。
         if let Some(tab) = self.terminal_tabs.get(index) {
             let runtimes: Vec<_> = std::iter::once(&tab.terminal)
@@ -3073,11 +3073,9 @@ impl RootView {
             let label = tab.window_title();
             self.flush_recordings(&runtimes, &label);
         }
-        let mut rdp_asset_id = None;
         let mut glass_keys: Vec<String> = Vec::new();
         if let Some(tab) = self.terminal_tabs.get(index) {
             self.code_viewer_pending_post.remove(&tab.id);
-            rdp_asset_id = tab.rdp.as_ref().map(|r| r.asset_id.clone());
             for rt in std::iter::once(&tab.terminal).chain(tab.pane_terminals.values()) {
                 if let Ok(rt) = rt.lock() {
                     glass_keys.push(rt.snapshot().session_id.clone());
@@ -3085,10 +3083,6 @@ impl RootView {
             }
         }
         self.terminal_tabs.remove(index);
-        // RDP tab：同 key 覆盖插入透明帧，释放滞留的最后一帧 CPU/GPU 资产。
-        if let Some(asset_id) = rdp_asset_id {
-            Self::evict_rdp_frame_asset(asset_id, ctx);
-        }
         // 清掉该 tab 全部会话的玻璃脏区指纹，避免单例 tracker 残留。
         if let Ok(mut tracker) = self.terminal_glass_dirty_tracker.lock() {
             for key in &glass_keys {
@@ -3141,7 +3135,7 @@ impl RootView {
 
         self.tab_fixed_width = None;
         self.show_tab_right_click_menu = None;
-        self.remove_terminal_tab_at(index, ctx);
+        self.remove_terminal_tab_at(index);
 
         if self.terminal_tabs.is_empty() {
             self.active_tab_index = 0;

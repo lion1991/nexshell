@@ -191,7 +191,14 @@ Windows App 在 `OffscreenSurface::Flush` 里按 dirty rect 逐个 `CopyRect`，
 - `FrameUpdated` 本来就带 dirty（目前被丢弃），改成只拷脏区。
 - dirty region 可以从单个包围盒升级为矩形列表，rect 裁剪到 surface 边界，flush 后清空。
 - 动手前先用 `NEXSHELL_RDP_EGFX_DIAG=1` 量出当前每帧的拷贝和合成耗时，改完再对比。
-- **未做**。设想：在 warpui_core 的 Scene 新增"常驻图片"图元，像素源直接用会话的 framebuffer，UI 侧不再拷贝；渲染器为它保留常驻纹理，每帧只上传脏区。Metal、wgpu、headless 三个渲染器都要实现，是这批改动里最大的一项，等基线测量后再定。
+- **已实现**（ADR 0014 决策 17，Warp fork 保全清单 W-022）：
+  - warpui_core 新增常驻图片：`LiveImageSource::try_read`（非阻塞读像素，并给出某帧代号以来的脏区，None 表示整帧）、`Scene::draw_live_image`、`LiveTextureCache`（按 source 的 Arc 身份保留纹理；source 释放或 10 帧未画就回收）。
+  - Metal 两份纹理轮流写，避开上一帧可能仍在 GPU 上读的那份；wgpu 用一份。headless 渲染器不画东西，不用改。
+  - `RdpFramebuffer` 记最近 32 次发布的脏区，换分辨率帧代号不归零；`rdp_view/live_image.rs` 把它接成像素源。UI 收到 `FrameUpdated` 只触发重绘，关 tab 也不用再覆盖透明帧释放资产。
+  - 脏区：会话每帧仍只发布一个包围盒，渲染器拿到的是自己帧代号之后各帧包围盒的列表，逐个上传。
+  - 效果：UI 线程不再有整帧拷贝；GPU 只上传脏区，全屏视频时也只剩一次整帧上传（原来是两次 CPU 拷贝加一次新建纹理整帧上传）。
+  - 测量：`WARPUI_FRAME_STATS=1` 看 `gpu.live_image_upload` 和 `cpu.encode_commit`。原 `NEXSHELL_RDP_EGFX_DIAG=1` 下的 `[rdp-ui]` 整帧拷贝统计随旧路径删除。
+  - 真机短测（2026-10-10，约 16 s）：`gpu.live_image_upload` p50 0.08 ms / p95 0.82 ms / max 3.24 ms，`cpu.encode_commit` p50 约 0.2 ms，EGFX 无解码错误。
 
 ### 4.2 非阻塞纹理锁
 
@@ -206,6 +213,11 @@ Windows App 的 `drawRect:` 用 `MetalGraphicsHandle::TryLockTexture` 非阻塞�
 
 - 4.1 把锁内拷贝缩到脏区以后，持锁时间自然变短，可能就不需要这一项了。
 - 如果仍要用 try_lock，拿不到锁时必须留到下次补上，不能直接丢掉，否则画面会停在旧帧。
+
+**已实现**（随 4.1）：
+- 渲染器用 try_lock 读 framebuffer，拿不到就画旧纹理；纹理记着自己的帧代号，下次读到时补上落下的脏区。
+- 写帧方解锁后才发 `FrameUpdated`，会再触发重绘；锁被只读方占着时没有后续事件，`RdpLiveImage` 读不到就经 redraw 通道请求一次重绘。
+- UI 线程原有三处阻塞地锁 framebuffer 读桌面尺寸（页面渲染、动态分辨率轮询、连接信息面板），改为按 `Resized` 事件跟踪；首次连接激活时尺寸变了也发 `Resized`。
 
 ### 4.3 Compute shader 缩放：不需要
 
@@ -231,7 +243,7 @@ VT 输出 NV12，现在每帧都用 vImage 把整帧转成 RGBA、写进一个�
 | 0. fork 能力位 | 已做，真机已验证 | fork `f7da0a6e` |
 | 1. SuppressOutput + "session ended" 覆盖 bug | 已做；真机见到 suppress / allow 收发 | `rdp_session/suppress.rs`、`root_view/rdp_section.rs`、`macos_window_util.rs` |
 | 2. Auto Reconnect | 已做，未做真机验证 | fork `f7da0a6e`；`rdp_session/reconnect.rs` |
-| 3. EGFX 4.1 | 未做，等基线测量 | — |
+| 3. EGFX 4.1 / 4.2 | 已做，真机短测通过（改分辨率、重连未测） | Warp `f1cf81c31`（`warpui_core/src/rendering/live_image.rs`、Metal / wgpu 渲染器）；`rdp_view/live_image.rs`、`rdp_session/framebuffer.rs` |
 | 3. EGFX 4.4 | 已做 | fork `287f337d`；`egfx/decoder_vt.rs`、`egfx/vimage.rs` |
 | 4. MouseCursor | 已做，真机已验证 | `rdp_session/mouse_cursor.rs` |
 

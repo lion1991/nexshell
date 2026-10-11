@@ -1,6 +1,6 @@
 # RDP 弱网优化：可靠 UDP 旁路（连接类型自动探测已否决）
 
-Status: proposed (2026-09-28，2026-10-10 增补决策 11–16)；Win11 真机验证 UDP 迁移与弱网表现后转 accepted
+Status: proposed (2026-09-28，2026-10-10 增补决策 11–17)；Win11 真机验证 UDP 迁移与弱网表现后转 accepted
 
 ## 背景
 
@@ -93,6 +93,13 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
     - 与 Windows App 不同：CapsConfirm 不合法时不关通道，只记日志。ironrdp-dvc 的处理器没法主动关通道，且服务端确认后已改走这条通道发光标。
     - 错误不上抛（DVC 层会当致命错误）：坏包只记日志，解码失败退回系统箭头。
     - 真机（Win11）：服务端创建该通道并确认能力，Soft-Sync 把它迁进隧道；此后光标变化全部经 DVC 下发，FastPath 指针停发。
+17. **RDP 画面改用 warpui 常驻图片，只上传脏区**（跨仓：Warp fork 新增 `LiveImageSource` / `Scene::draw_live_image`，保全清单 W-022）。
+    - 原路径每帧在 UI 线程整帧拷两次（framebuffer → Vec → `RgbaImage`），Metal 再按 `Arc<StaticImage>` 新建纹理、整帧上传；HiDPI 一帧约 30 MB。
+    - 现在渲染器为会话保留常驻纹理，按帧代号向 `RdpFramebuffer` 要「该代号之后的脏区」（最近 32 次发布的包围盒，更早或换过分辨率就整帧），只上传这些矩形。UI 收到 `FrameUpdated` 只触发重绘。
+    - Metal 异步提交，上一帧可能仍在 GPU 上读纹理，所以用两份纹理轮流写，本帧只写另一份并补上它落下的脏区；wgpu 的 `write_texture` 有排序保证，用一份。
+    - 读像素用 try_lock（方案 4.2），拿不到就画旧纹理：写帧方解锁后才发帧事件，会再触发重绘；锁被只读方占着时 `RdpLiveImage` 自己请求一次重绘，保证不停在旧帧。
+    - UI 线程不再锁 framebuffer：桌面尺寸改按 `Resized` 事件跟踪，首次连接激活时尺寸变了也发 `Resized`。
+    - 真机短测（2026-10-10）：上传 p50 0.08 ms / p95 0.82 ms，Matt 试用后确认；改分辨率、重连未测。
 
 ## 影响与风险
 
@@ -100,7 +107,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
 - 丢包若随发送速率上升（限速 / QoS），换 UDP 也救不了；应先在隧道里按不同速率测丢包。
 - UDP 3389 被挡时，连接多等最多约 3s 后回落 TCP。
 - Soft-Sync 之后隧道断开会让会话断开（与上游一致），由决策 13 自动重连。
-- `rdp_session/mod.rs` 两次超过 1500 行：先把单测移到 `rdp_session/tests.rs`；决策 13–16 又把帧输出处理拆到 `outputs.rs`，重连、SuppressOutput、MouseCursor 各自独立成文件，主文件约 1440 行。
+- `rdp_session/mod.rs` 两次超过 1500 行：先把单测移到 `rdp_session/tests.rs`；决策 13–16 又把帧输出处理拆到 `outputs.rs`，重连、SuppressOutput、MouseCursor 各自独立成文件；决策 17 把 `RdpFramebuffer` 拆到 `framebuffer.rs`，主文件约 1340 行。
 
 ## 真机排查记录（Windows 11，UDP 3390，经 MTU 1160 的 UDP 隧道）
 
@@ -147,4 +154,4 @@ Windows 侧诊断：`Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operation
 
 ## 回退
 
-运行期设 `NEXSHELL_RDP_DISABLE_UDP=1`；或 revert 合入提交回到纯 TCP。光标设 `NEXSHELL_RDP_MOUSE_CURSOR_DVC=0` 退回 FastPath 指针。
+运行期设 `NEXSHELL_RDP_DISABLE_UDP=1`；或 revert 合入提交回到纯 TCP。光标设 `NEXSHELL_RDP_MOUSE_CURSOR_DVC=0` 退回 FastPath 指针。决策 17 无运行期开关，revert NexShell 与 Warp fork 两边的提交。

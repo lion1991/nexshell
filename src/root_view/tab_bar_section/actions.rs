@@ -568,7 +568,7 @@ impl RootView {
         }
         for remove_index in (0..self.terminal_tabs.len()).rev() {
             if remove_index != index {
-                self.remove_terminal_tab_at(remove_index, ctx);
+                self.remove_terminal_tab_at(remove_index);
             }
         }
         self.active_tab_index = 0;
@@ -600,7 +600,7 @@ impl RootView {
             return;
         }
         for remove_index in ((index + 1)..self.terminal_tabs.len()).rev() {
-            self.remove_terminal_tab_at(remove_index, ctx);
+            self.remove_terminal_tab_at(remove_index);
         }
         if self.active_tab_index > index {
             self.active_tab_index = index;

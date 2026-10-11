@@ -7,19 +7,18 @@ use std::time::{Duration, Instant};
 
 use pathfinder_geometry::vector::{vec2f, Vector2F, Vector2I};
 
-use warpui::assets::asset_cache::AssetCache;
 use warpui::color::ColorU;
 use warpui::elements::{
     Align, Border, ChildAnchor, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
     DispatchEventResult, Draggable, Empty, EventHandler, Flex, MainAxisAlignment, MainAxisSize,
     OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Stack, Text,
 };
-use warpui::image_cache::{CustomImageFormat, CustomImageHeader, ImageType};
 use warpui::r#async::Timer;
-use warpui::{fonts, AppContext, Element, SingletonEntity, ViewContext};
+use warpui::{fonts, AppContext, Element, ViewContext};
 
 use crate::rdp_view::{
-    rdp_desktop_scale_factor, rdp_desktop_size, rdp_fixed_desktop_size, RdpPageElement,
+    rdp_desktop_scale_factor, rdp_desktop_size, rdp_fixed_desktop_size, RdpLiveImage,
+    RdpPageElement,
 };
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
@@ -35,46 +34,6 @@ use nexshell::rdp_session::{
     RdpResizeRequest, RdpSessionConfig,
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
-
-thread_local! {
-    /// NEXSHELL_RDP_EGFX_DIAG：UI 线程每 ~3s 打一行整帧拷贝上传的次数与耗时（不含 GPU 纹理上传）。
-    static UPLOAD_DIAG: std::cell::RefCell<Option<UploadDiag>> = std::cell::RefCell::new(
-        std::env::var_os("NEXSHELL_RDP_EGFX_DIAG").map(|_| UploadDiag::new()),
-    );
-}
-
-struct UploadDiag {
-    since: Instant,
-    frames: u32,
-    busy: Duration,
-}
-
-impl UploadDiag {
-    fn new() -> Self {
-        Self {
-            since: Instant::now(),
-            frames: 0,
-            busy: Duration::ZERO,
-        }
-    }
-
-    fn record(&mut self, elapsed: Duration, bytes: usize) {
-        self.frames += 1;
-        self.busy += elapsed;
-        let window = self.since.elapsed();
-        if window >= Duration::from_secs(3) {
-            eprintln!(
-                "[rdp-ui] {:.1}s uploads={} ({:.1} fps) copy={:.1}ms/frame {:.1}MB",
-                window.as_secs_f64(),
-                self.frames,
-                f64::from(self.frames) / window.as_secs_f64(),
-                self.busy.as_secs_f64() * 1000.0 / f64::from(self.frames),
-                bytes as f64 / 1_048_576.0
-            );
-            *self = Self::new();
-        }
-    }
-}
 
 /// 连接信息面板默认贴页面右上角的内缩距离。
 const CONN_INFO_MARGIN: f32 = 16.0;
@@ -133,16 +92,18 @@ impl RootView {
         );
 
         let tab_id = self.terminal_tabs[self.active_tab_index].id.clone();
-        let asset_id = format!("rdp:{tab_id}");
         let stats = Arc::clone(&handle.stats);
+        let live_image = self.rdp_live_image(&handle, ctx);
+        let desktop_size = (rdp_config.width, rdp_config.height);
         if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
             tab.rdp = Some(RdpTabState {
                 handle,
                 config: rdp_config,
                 session_generation,
                 phase: RdpConnectionPhase::Connecting,
-                asset_id,
-                last_uploaded_generation: 0,
+                live_image,
+                has_frame: false,
+                desktop_size,
                 viewport: Arc::new(Mutex::new(None)),
                 last_mouse: Arc::new(Mutex::new(None)),
                 mod_tracker: Arc::new(Mutex::new(Default::default())),
@@ -184,6 +145,7 @@ impl RootView {
         let handle = spawn_rdp_session(config.clone());
         let frame_rx = handle.frame_rx.clone();
         let session_generation = self.async_generations.allocate();
+        let live_image = self.rdp_live_image(&handle, ctx);
         if let Some(rdp) = self
             .terminal_tabs
             .get_mut(index)
@@ -197,13 +159,29 @@ impl RootView {
             rdp.clipboard_transfer = None;
             rdp.handle = handle; // 旧 handle 被替换后 drop → 优雅断开旧会话。
             rdp.phase = RdpConnectionPhase::Connecting;
-            rdp.last_uploaded_generation = 0;
+            rdp.live_image = live_image;
+            rdp.has_frame = false;
+            rdp.desktop_size = (config.width, config.height);
             if let Ok(mut vp) = rdp.viewport.lock() {
                 *vp = None;
             }
         }
         self.attach_rdp_frame_stream(tab_id, session_generation, frame_rx, ctx);
         ctx.notify();
+    }
+
+    /// 会话画面的像素源。渲染器读不到（会话线程正在写）时经 redraw 通道补一次重绘。
+    fn rdp_live_image(
+        &mut self,
+        handle: &nexshell::rdp_session::RdpSessionHandle,
+        ctx: &mut ViewContext<Self>,
+    ) -> Arc<dyn warpui::rendering::live_image::LiveImageSource> {
+        let (redraw_tx, redraw_rx) = async_channel::bounded(1);
+        ctx.spawn_stream_local(redraw_rx, |_, (), ctx| ctx.notify(), |_, _| {});
+        Arc::new(RdpLiveImage::new(
+            Arc::clone(&handle.framebuffer),
+            redraw_tx,
+        ))
     }
 
     /// 内容区逻辑尺寸（窗口逻辑高减去标题栏）+ 窗口 scale factor。取不到窗口时给保守默认。
@@ -237,26 +215,6 @@ impl RootView {
         );
     }
 
-    /// 关 tab 后用同 key 覆盖插入 1×1 透明帧：AssetCache 同 key 替换释放旧全帧字节，
-    /// 并顺带 evict 对应 GPU 纹理；否则最后一帧滞留到 320MB 淘汰水位才释放。
-    pub(in crate::root_view) fn evict_rdp_frame_asset(
-        asset_id: String,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let header = CustomImageHeader {
-            width: 1,
-            height: 1,
-            image_format: CustomImageFormat::Rgba,
-        }
-        .create_header();
-        let mut bytes = Vec::with_capacity(header.len() + 4);
-        bytes.extend_from_slice(header.as_bytes());
-        bytes.extend_from_slice(&[0u8; 4]);
-        AssetCache::handle(ctx).update(ctx, |cache, ctx| {
-            cache.insert_raw_asset_bytes::<ImageType>(asset_id, &bytes, ctx);
-        });
-    }
-
     fn handle_rdp_event_for_tab(
         &mut self,
         tab_id: &str,
@@ -285,11 +243,11 @@ impl RootView {
                 }
                 ctx.notify();
             }
-            RdpEvent::Resized { .. } => {
-                // 远端分辨率已换（framebuffer 已按新尺寸重建）：复位上传代号强制重传，
-                // 复位防抖使新分辨率成为「当前」基线。桌面分辨率显示随 framebuffer 自动更新。
+            RdpEvent::Resized { width, height } => {
+                // 远端分辨率已换（framebuffer 已按新尺寸重建）：记下新尺寸，
+                // 复位防抖使新分辨率成为「当前」基线。
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
-                    rdp.last_uploaded_generation = 0;
+                    rdp.desktop_size = (width, height);
                     rdp.resize_debounce = Default::default();
                 }
                 ctx.notify();
@@ -322,50 +280,10 @@ impl RootView {
                 }
                 ctx.notify();
             }
+            // 只触发重绘：渲染器从 framebuffer 按帧代号上传脏区。
             RdpEvent::FrameUpdated { .. } => {
-                let started = Instant::now();
-                // 取最新帧：仅当 generation 前进时打包带自定义头的 RGBA。
-                let upload = self
-                    .terminal_tabs
-                    .iter()
-                    .find(|t| t.id == tab_id)
-                    .and_then(|t| t.rdp.as_ref())
-                    .and_then(|rdp| {
-                        let fb = rdp.handle.framebuffer.lock();
-                        let generation = fb.generation();
-                        if generation <= rdp.last_uploaded_generation {
-                            return None;
-                        }
-                        // 一次分配带头构造：绕开 clone+splice 的两次全帧搬运（len 恒 = w*h*4，无需校验）。
-                        // 但每帧仍有两次全帧拷贝：此处 Vec 一次、AssetCache 内 try_from_bytes 再拷成
-                        // RgbaImage 一次；根因是 warpui_core AssetCache::insert_raw_asset_bytes 只收
-                        // &[u8]、无原地更新入口，零拷贝需跨仓在 warpui_core 加复用缓冲/直写纹理 API。
-                        let header = CustomImageHeader {
-                            width: fb.width as u32,
-                            height: fb.height as u32,
-                            image_format: CustomImageFormat::Rgba,
-                        }
-                        .create_header();
-                        let mut bytes = Vec::with_capacity(header.len() + fb.rgba.len());
-                        bytes.extend_from_slice(header.as_bytes());
-                        bytes.extend_from_slice(&fb.rgba);
-                        Some((rdp.asset_id.clone(), generation, bytes))
-                    });
-
-                let Some((asset_id, generation, bytes)) = upload else {
-                    return;
-                };
-                // 稳定 key 覆盖同一条目：单会话仅一条 raw asset，逐帧替换，不堆积。
-                AssetCache::handle(ctx).update(ctx, |cache, ctx| {
-                    cache.insert_raw_asset_bytes::<ImageType>(asset_id, &bytes, ctx);
-                });
-                UPLOAD_DIAG.with_borrow_mut(|d| {
-                    if let Some(d) = d {
-                        d.record(started.elapsed(), bytes.len());
-                    }
-                });
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
-                    rdp.last_uploaded_generation = generation;
+                    rdp.has_frame = true;
                     rdp.phase.on_frame_uploaded();
                 }
                 ctx.notify();
@@ -517,16 +435,13 @@ impl RootView {
                 &colors,
             ),
             // 还没传过帧就没有旧画面可留，只显示文字。
-            RdpConnectionPhase::Reconnecting { .. } if rdp.last_uploaded_generation == 0 => {
+            RdpConnectionPhase::Reconnecting { .. } if !rdp.has_frame => {
                 self.render_rdp_status(Self::rdp_reconnecting_message(&rdp.phase), None, &colors)
             }
             RdpConnectionPhase::Connected | RdpConnectionPhase::Reconnecting { .. } => {
-                let (w, h) = {
-                    let fb = rdp.handle.framebuffer.lock();
-                    (fb.width, fb.height)
-                };
+                let (w, h) = rdp.desktop_size;
                 let element = RdpPageElement::new(
-                    rdp.asset_id.clone(),
+                    rdp.has_frame.then(|| Arc::clone(&rdp.live_image)),
                     Vector2I::new(w as i32, h as i32),
                     ColorU::new(0, 0, 0, 255),
                     rdp.viewport.clone(),
@@ -544,9 +459,7 @@ impl RootView {
 
         let mut stack = Stack::new();
         stack.add_child(body);
-        if matches!(rdp.phase, RdpConnectionPhase::Reconnecting { .. })
-            && rdp.last_uploaded_generation != 0
-        {
+        if matches!(rdp.phase, RdpConnectionPhase::Reconnecting { .. }) && rdp.has_frame {
             let card = Container::new(
                 Text::new_inline(
                     Self::rdp_reconnecting_message(&rdp.phase),
@@ -738,10 +651,7 @@ impl RootView {
                     continue;
                 }
                 let target = rdp_desktop_size(content_area, scale, rdp.hidpi);
-                let current = {
-                    let fb = rdp.handle.framebuffer.lock();
-                    (fb.width, fb.height)
-                };
+                let current = rdp.desktop_size;
                 // 4 tick ≈ 400ms 稳定才发。
                 if let Some((width, height)) = rdp.resize_debounce.tick(target, current, 4) {
                     let _ = rdp.handle.resize_tx.try_send(RdpResizeRequest {
@@ -769,10 +679,7 @@ impl RootView {
             .unwrap_or_else(|| na.clone());
         let recv = format!("{:.1} Mbps", rdp.conn_info_mbps);
         let fps = format!("{:.0} fps", rdp.conn_info_fps);
-        let (w, h) = {
-            let fb = rdp.handle.framebuffer.lock();
-            (fb.width, fb.height)
-        };
+        let (w, h) = rdp.desktop_size;
         let quality = if rdp.hidpi {
             rust_i18n::t!("rdp_quality_hidpi")
         } else {

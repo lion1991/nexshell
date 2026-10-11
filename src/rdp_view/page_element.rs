@@ -1,7 +1,6 @@
 // rdp_view::page_element — RDP 整页画面 Element。
-// paint 里取 image cache 里按 asset_id 缓存的当前帧位图，letterbox 居中绘制。
-// 纹理上传不在这里做（由 root_view 帧事件按 generation 触发 insert_raw_asset_bytes）；
-// 本 Element 只读缓存 + 计算几何 + draw_image，并把 letterbox 矩形回写供第 ④ 步鼠标反算。
+// paint 里把会话画面作为常驻图片 letterbox 居中绘制，纹理由渲染器按帧代号只上传脏区；
+// 本 Element 只算几何 + draw_live_image，并把 letterbox 矩形回写供鼠标反算。
 
 use std::sync::{Arc, Mutex};
 
@@ -9,23 +8,22 @@ use pathfinder_color::ColorU;
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::{Vector2F, Vector2I};
 
-use warpui_core::assets::asset_cache::{AssetCache, AssetSource, AssetState};
 use warpui_core::elements::{
     AfterLayoutContext, CornerRadius, Element, EventContext, LayoutContext, Point, SizeConstraint,
 };
 use warpui_core::event::{DispatchedEvent, Event, KeyEventDetails, KeyState};
-use warpui_core::image_cache::{AnimatedImageBehavior, CacheOption, FitType, Image, ImageCache};
 use warpui_core::keymap::Keystroke;
 use warpui_core::platform::keyboard::KeyCode;
-use warpui_core::{AppContext, PaintContext, SingletonEntity};
+use warpui_core::rendering::live_image::LiveImageSource;
+use warpui_core::{AppContext, PaintContext};
 
 use crate::rdp_view::geometry::{letterbox_rect, viewport_device_coords, RdpViewport};
 use crate::rdp_view::keymap;
 use nexshell::rdp_session::{RdpButton, RdpInputEvent};
 
 pub struct RdpPageElement {
-    /// image cache 中当前帧的稳定键（每 RDP 会话一个，逐帧覆盖，不堆积）。
-    asset_id: String,
+    /// 会话画面；None = 还没收到帧，只画背景。
+    frame: Option<Arc<dyn LiveImageSource>>,
     /// 远端桌面像素尺寸（= framebuffer 宽高），letterbox 的源尺寸。
     desktop_size: Vector2I,
     /// 无帧 / letterbox 黑边填充色。
@@ -46,7 +44,7 @@ pub struct RdpPageElement {
 
 impl RdpPageElement {
     pub fn new(
-        asset_id: String,
+        frame: Option<Arc<dyn LiveImageSource>>,
         desktop_size: Vector2I,
         background: ColorU,
         viewport_out: Arc<Mutex<Option<RdpViewport>>>,
@@ -56,7 +54,7 @@ impl RdpPageElement {
         cursor: warpui_core::platform::Cursor,
     ) -> Self {
         Self {
-            asset_id,
+            frame,
             desktop_size,
             background,
             viewport_out,
@@ -364,7 +362,7 @@ impl Element for RdpPageElement {
 
     fn after_layout(&mut self, _: &mut AfterLayoutContext, _: &AppContext) {}
 
-    fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, app: &AppContext) {
+    fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, _: &AppContext) {
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
         let size = self.size.unwrap_or_default();
 
@@ -386,27 +384,10 @@ impl Element for RdpPageElement {
             scale: vp.scale,
         });
 
-        // 取当前帧位图。CacheOption::Original：不做 CPU 缩放缓存，每帧读最新字节，
-        // 由 GPU 采样到 letterbox 矩形——避免「稳定 key + 已缩放缓存」返回旧帧。
-        let asset_cache = AssetCache::as_ref(app);
-        let image = ImageCache::as_ref(app).image(
-            AssetSource::Raw {
-                id: self.asset_id.clone(),
-            },
-            self.desktop_size,
-            FitType::Contain,
-            AnimatedImageBehavior::FullAnimation,
-            CacheOption::Original,
-            ctx.max_texture_dimension_2d,
-            asset_cache,
-        );
-
-        // 首帧到达前 / 被逐出时读不到位图：只留背景，等下一帧重传。
-        if let AssetState::Loaded { data } = image {
-            if let Image::Static(static_image) = data.as_ref() {
-                ctx.scene
-                    .draw_image(abs_rect, static_image.clone(), 1.0, CornerRadius::default());
-            }
+        // GPU 把整张桌面采样到 letterbox 矩形。
+        if let Some(frame) = &self.frame {
+            ctx.scene
+                .draw_live_image(abs_rect, Arc::clone(frame), 1.0, CornerRadius::default());
         }
     }
 
@@ -608,7 +589,7 @@ mod tests {
     fn element() -> (RdpPageElement, async_channel::Receiver<RdpInputEvent>) {
         let (tx, rx) = async_channel::bounded(16);
         let el = RdpPageElement::new(
-            "rdp:test".into(),
+            None,
             Vector2I::new(800, 600),
             ColorU::new(0, 0, 0, 255),
             Arc::new(Mutex::new(None)),

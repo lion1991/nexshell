@@ -289,6 +289,19 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 证据 | NexShell `page_element` wheel focused tests；真实 RDP 2026-10-03：`NEXSHELL_RDP_INPUT_LOG` 记 33 次普通滚轮，delta 0.1~0.589 均为 ticks ±1 → ±120；触控板路径未实测 |
 | 状态 | `Pass`（2026-10-03 Matt 真机 RDP 验证普通滚轮） |
 
+### W-022 常驻图片（RDP 画面只传脏区）
+
+| 字段 | 内容 |
+| --- | --- |
+| 来源 | `f1cf81c31` |
+| 契约 | `Scene::draw_live_image` 把 `Arc<dyn LiveImageSource>` 放进 `Layer.live_images`，先于本层其他图片绘制；`LiveImageSource::try_read(since)` 非阻塞，拿不到返回 false，读到时给出像素、帧代号和 `since` 之后的脏区（None = 整帧）；`LiveTextureCache` 按 source 的 Arc 身份保留纹理，source 释放或 10 帧未画就回收；Metal 两份纹理轮流写，wgpu 一份 |
+| 消费端 | `src/rdp_view/live_image.rs`、`src/rdp_view/page_element.rs`（ADR 0014 决策 17） |
+| 风险 | 上游重构图片管线或 `TextureCache` 时漏接 `live_images`，RDP 画面变黑；Metal 若允许超过一帧的 GPU 工作同时在途，两份轮写不再足以避开读写竞争 |
+| 必需证据 | `S A M R` |
+| 候选位置 | `crates/warpui_core/src/rendering/live_image.rs`、`crates/warpui_core/src/scene.rs`、`crates/warpui/src/platform/mac/rendering/metal/renderer.rs`、`crates/warpui/src/rendering/wgpu/renderer/image.rs` |
+| 证据 | `live_image_tests.rs` 5 项（单份 / 两份轮写的脏区上传、读不到沿用旧纹理、换尺寸重建、回收）；wgpu 在 macOS 用 `experimental-wgpu-renderer` 编译通过；真实 RDP 2026-10-10 短测：`gpu.live_image_upload` p50 0.08 ms / p95 0.82 ms / max 3.24 ms，EGFX 无解码错误；改分辨率、重连未测 |
+| 状态 | `Pass`（2026-10-10 Matt 真机试用后确认） |
+
 ## 3. 官方历史接管项
 
 这些提交当前以 cherry-pick 形式位于私有分支。目标不是保留重复提交，而是证明目标官方历史包含等价或更新实现。
@@ -359,10 +372,10 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 
 | 行为域 | 关联保护项 | 必查路径 |
 | --- | --- | --- |
-| Metal pass 与 Glass | W-013, W-014, W-020 | renderer、glass、shader_types、shaders |
-| Scene 原语 | W-010, W-012, W-014, W-016, W-018, W-019, W-020 | scene、elements、scene tests |
+| Metal pass 与 Glass | W-013, W-014, W-020, W-022 | renderer、glass、shader_types、shaders |
+| Scene 原语 | W-010, W-012, W-014, W-016, W-018, W-019, W-020, W-022 | scene、elements、scene tests |
 | Objective-C bridge | W-004, W-005, W-007, W-009 | app.h、window.m、host_view.m |
-| wgpu/Windows | W-014, W-019, N-009 | wgpu rect、winit cursor/window |
+| wgpu/Windows | W-014, W-019, W-022, N-009 | wgpu rect / image、winit cursor/window |
 | 文本与编辑器 | U-002, U-004, U-005, U-006 | text、layout、languages、editor、vim |
 | Cargo/toolchain | 全部 | workspace manifests、Cargo.lock、Rust 2024、wgpu 30 |
 

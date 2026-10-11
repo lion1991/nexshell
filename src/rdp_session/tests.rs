@@ -204,6 +204,46 @@ fn generation_advances_on_each_apply() {
 }
 
 #[test]
+fn dirty_since_returns_damage_after_a_generation() {
+    let rect = |x| DirtyRect {
+        x,
+        y: 0,
+        width: 1,
+        height: 1,
+    };
+    let mut fb = RdpFramebuffer::new(4, 4);
+    fb.mark_dirty(rect(0));
+    fb.mark_dirty(rect(1));
+    assert_eq!(fb.dirty_since(0), Some(vec![rect(0), rect(1)]));
+    assert_eq!(fb.dirty_since(1), Some(vec![rect(1)]));
+    assert_eq!(fb.dirty_since(2), Some(vec![]));
+    assert_eq!(fb.dirty_since(3), None);
+}
+
+#[test]
+fn dirty_since_needs_a_full_upload_when_history_is_gone() {
+    let full = DirtyRect {
+        x: 0,
+        y: 0,
+        width: 2,
+        height: 2,
+    };
+    let mut fb = RdpFramebuffer::new(2, 2);
+    for _ in 0..40 {
+        fb.mark_dirty(full);
+    }
+    assert_eq!(fb.dirty_since(0), None);
+    assert_eq!(fb.dirty_since(39).map(|d| d.len()), Some(1));
+
+    // 换分辨率：帧代号不归零，此前的代号一律整帧重传。
+    fb.resize(3, 1);
+    assert_eq!(fb.generation(), 41);
+    assert_eq!(fb.rgba.len(), 3 * 4);
+    assert_eq!(fb.dirty_since(40), None);
+    assert_eq!(fb.dirty_since(41), Some(vec![]));
+}
+
+#[test]
 fn key_press_and_release_flags() {
     use ironrdp_pdu::input::fast_path::KeyboardFlags;
     match to_fastpath_input(RdpInputEvent::Key {

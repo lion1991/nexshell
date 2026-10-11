@@ -233,7 +233,7 @@ impl EgfxHandler {
         });
     }
 
-    /// EndFrame：把本帧脏区包围盒内的已映射 surface 合成进 framebuffer，+generation，发一条
+    /// EndFrame：把本帧脏区包围盒内的已映射 surface 合成进 framebuffer，记脏区，发一条
     /// FrameUpdated。帧内中间态不发布。
     fn publish(&mut self) {
         let Some((x0, y0, x1, y1)) = self.acc.take() else {
@@ -271,7 +271,7 @@ impl EgfxHandler {
             for (ox, oy, surf) in self.compositor.mapped_surfaces() {
                 fb.compose_surface(ox, oy, &surf.pixels, surf.width, surf.height, compose_dirty);
             }
-            fb.bump_generation();
+            fb.mark_dirty(compose_dirty);
         }
         self.diag.on_compose(started.elapsed());
         self.stats.inc_frame();
@@ -351,7 +351,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
             let mut fb = self.framebuffer.lock();
             let changed = fb.width != w || fb.height != h;
             if changed {
-                *fb = RdpFramebuffer::new(w, h);
+                fb.resize(w, h);
             }
             changed
         };
