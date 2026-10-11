@@ -24,7 +24,8 @@ impl RootView {
         const SIDEBAR_WIDTH: f32 = 248.0;
         let colors = self.design_tokens.overview;
         let waiting_snapshot;
-        let active_tab = self.terminal_tabs.get(self.active_tab_index);
+        // Git Diff / 代码查看器显示来源终端的概览。
+        let active_tab = self.terminal_tabs.get(self.overview_tab_index());
         let snapshot = if let Some(tab) = active_tab {
             &tab.host_overview.snapshot
         } else {

@@ -20,6 +20,7 @@ mod input_cursor;
 #[cfg(target_os = "macos")]
 mod macos_window_util;
 mod settings_view;
+mod sidebar_helpers;
 mod terminal_grid_glass_dirty;
 mod terminal_view_helpers;
 mod throttle;

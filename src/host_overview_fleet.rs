@@ -8,7 +8,7 @@ use crate::generation::{accepts_generation, Generation, GenerationAllocator};
 use crate::host_management::{connection_fingerprint, HostConnectionConfig};
 use crate::host_overview::{
     remote_ssh_config_from_host_config, spawn_host_overview_monitor, HostOverviewEvent,
-    HostOverviewMonitorHandle, HostOverviewUiState,
+    HostOverviewMonitorHandle, HostOverviewResume, HostOverviewUiState,
 };
 
 /// 各主机采集刷新周期（与单主机一致量级）。
@@ -59,6 +59,7 @@ impl HostOverviewFleet {
             match spawn_host_overview_monitor(
                 remote_ssh_config_from_host_config(config),
                 REFRESH_INTERVAL,
+                HostOverviewResume::default(),
             ) {
                 Ok((handle, receiver)) => {
                     let generation = self.generations.allocate();

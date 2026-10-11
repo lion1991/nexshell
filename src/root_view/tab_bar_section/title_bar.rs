@@ -4,13 +4,14 @@
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。
 
+use crate::sidebar_helpers::SidebarContent;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::title_bar_chrome::{
     current_title_bar_chrome_platform, render_windows_window_control_icon, title_bar_chrome_layout,
     TitleBarChromePlatform, WindowControlKind,
 };
 use crate::{
-    AppPage, RootView, TabBarDropTargetData, TabBarLocation, TabModel, TerminalSessionKind,
+    AppPage, RootView, TabBarDropTargetData, TabBarLocation, TabModel,
     FILE_PANEL_BUTTON_POSITION_ID, GIT_PANEL_BUTTON_POSITION_ID, ICON_BUTTON_PADDING,
     ICON_BUTTON_SIZE, ICON_PATH_CHEVRON_DOWN, ICON_PATH_FOLDER, ICON_PATH_GEAR,
     ICON_PATH_GIT_BRANCH, ICON_PATH_HOME, ICON_PATH_PLUS, ICON_PATH_SIDEBAR_OPEN,
@@ -108,9 +109,7 @@ impl RootView {
     fn render_tab_bar_contents(&self, tabs: &[TabModel], app: &AppContext) -> Box<dyn Element> {
         let chrome_layout = title_bar_chrome_layout(current_title_bar_chrome_platform());
         // Stretch 让 tab 背景色撑满 bar 高度; icon buttons 用 Align 居中。
-        let sidebar_button = Container::new(Align::new(self.render_sidebar_toggle()).finish())
-            .with_margin_right(SIDEBAR_TOGGLE_MARGIN_RIGHT)
-            .finish();
+        let sidebar_button = Align::new(self.render_sidebar_toggle()).finish();
         let new_tab_button = Align::new(self.render_new_tab_button()).finish();
         let file_panel_button =
             Container::new(Align::new(self.render_file_panel_button()).finish())
@@ -240,21 +239,55 @@ impl RootView {
         Some((sx, self.tab_accent_bar_y.get(), sw))
     }
 
+    /// 侧栏按钮槽：有侧栏时展开，没有时收成 0 宽，主页按钮和标签跟着滑过去；
+    /// 收展途中图标随槽宽缩放淡出，不响应点击。
     fn render_sidebar_toggle(&self) -> Box<dyn Element> {
-        // 串口 / Telnet 没有主机概览，隐藏按钮；留同尺寸占位，切标签时 tab 行不左右跳。
-        if self.app_page == AppPage::Terminal
-            && matches!(
-                self.terminal_tabs
-                    .get(self.active_tab_index)
-                    .map(|tab| tab.kind),
-                Some(TerminalSessionKind::Serial | TerminalSessionKind::Telnet)
-            )
-        {
-            return ConstrainedBox::new(Empty::new().finish())
-                .with_width(ICON_BUTTON_SIZE)
-                .with_height(ICON_BUTTON_SIZE)
-                .finish();
+        const SLOT_WIDTH: f32 = ICON_BUTTON_SIZE + SIDEBAR_TOGGLE_MARGIN_RIGHT;
+        let has_sidebar = self.sidebar_content() != SidebarContent::None;
+        let width = {
+            let target = if has_sidebar { SLOT_WIDTH } else { 0.0 };
+            let mut slot = self.sidebar_toggle_slot.borrow_mut();
+            if self.sidebar_toggle_slot_init.get() {
+                slot.set_target(target);
+            } else {
+                slot.snap(target);
+                self.sidebar_toggle_slot_init.set(true);
+            }
+            slot.sample(Instant::now())
+        };
+        let reveal = (width / SLOT_WIDTH).clamp(0.0, 1.0);
+        if reveal <= 0.0 {
+            return Empty::new().finish();
         }
+        let button = if has_sidebar && reveal >= 1.0 {
+            self.render_sidebar_toggle_button()
+        } else {
+            let uc = self.ui_colors();
+            let base = if self.sidebar_open {
+                uc.icon_color_active
+            } else {
+                uc.icon_color_inactive
+            };
+            let color = ColorU {
+                a: (base.a as f32 * reveal) as u8,
+                ..base
+            };
+            let icon_size = (ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0) * reveal;
+            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_SIDEBAR_OPEN, color).finish())
+                .with_width(icon_size)
+                .with_height(icon_size)
+                .finish();
+            ConstrainedBox::new(Align::new(icon).finish())
+                .with_width(ICON_BUTTON_SIZE * reveal)
+                .with_height(ICON_BUTTON_SIZE)
+                .finish()
+        };
+        Container::new(button)
+            .with_margin_right(SIDEBAR_TOGGLE_MARGIN_RIGHT * reveal)
+            .finish()
+    }
+
+    fn render_sidebar_toggle_button(&self) -> Box<dyn Element> {
         let icon_path = ICON_PATH_SIDEBAR_OPEN;
         let is_active = self.sidebar_open;
         let state = self.sidebar_button_state.clone();

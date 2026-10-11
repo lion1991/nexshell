@@ -714,33 +714,6 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
-    fn host_overview_sidebar_only_shows_for_supported_ssh_tabs() {
-        assert!(host_overview::should_show_host_overview_sidebar(true, true));
-        assert!(!host_overview::should_show_host_overview_sidebar(
-            false, true
-        ));
-        assert!(!host_overview::should_show_host_overview_sidebar(
-            true, false
-        ));
-    }
-
-    #[test]
-    fn host_overview_monitor_only_runs_while_terminal_is_connected() {
-        assert!(host_overview::should_run_host_overview_monitor(
-            true, true, true
-        ));
-        assert!(!host_overview::should_run_host_overview_monitor(
-            true, true, false
-        ));
-        assert!(!host_overview::should_run_host_overview_monitor(
-            false, true, true
-        ));
-        assert!(!host_overview::should_run_host_overview_monitor(
-            true, false, true
-        ));
-    }
-
-    #[test]
     fn default_shell_scope_matches_first_native_spike() {
         let shell = ShellModel::nexshell_default();
 

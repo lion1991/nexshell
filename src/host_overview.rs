@@ -52,6 +52,8 @@ const HISTORY_LIMIT: usize = 150;
 const COLLECT_TIMEOUT: Duration = Duration::from_secs(8);
 /// RTT 探测超时
 const RTT_TIMEOUT: Duration = Duration::from_secs(4);
+/// 续采时首轮与第二轮的间隔，第二轮才有速率。
+const RESUME_PROBE_DELAY: Duration = Duration::from_secs(1);
 /// 连续采集失败多少次才判定连接已死、拆连接重连（单次抖动不拆）
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
@@ -512,21 +514,6 @@ impl HostOverviewUiState {
     }
 }
 
-pub fn should_show_host_overview_sidebar(
-    sidebar_open: bool,
-    active_tab_supports_host_overview: bool,
-) -> bool {
-    sidebar_open && active_tab_supports_host_overview
-}
-
-pub fn should_run_host_overview_monitor(
-    sidebar_open: bool,
-    active_tab_supports_host_overview: bool,
-    terminal_connected: bool,
-) -> bool {
-    sidebar_open && active_tab_supports_host_overview && terminal_connected
-}
-
 pub fn should_show_empty_overview_status(snapshot: &HostOverviewSnapshot) -> bool {
     !snapshot.has_collected_data()
 }
@@ -622,9 +609,35 @@ pub fn spawn_remote_exec(
     rx
 }
 
+/// 重启采集时接上的状态：网速曲线接着画；UI 已有数据时不发缺速率的首帧，CPU / 网速不会闪成空。
+#[derive(Debug, Default)]
+pub struct HostOverviewResume {
+    histories: HashMap<String, VecDeque<NetworkRatePoint>>,
+    has_data: bool,
+}
+
+impl HostOverviewResume {
+    pub fn from_snapshot(snapshot: &HostOverviewSnapshot) -> Self {
+        Self {
+            histories: snapshot
+                .networks
+                .iter()
+                .map(|network| {
+                    (
+                        network.interface.clone(),
+                        network.history.iter().cloned().collect(),
+                    )
+                })
+                .collect(),
+            has_data: snapshot.has_collected_data(),
+        }
+    }
+}
+
 pub fn spawn_host_overview_monitor(
     config: RemoteSshConfig,
     refresh_interval: Duration,
+    resume: HostOverviewResume,
 ) -> Result<
     (
         HostOverviewMonitorHandle,
@@ -656,6 +669,7 @@ pub fn spawn_host_overview_monitor(
             runtime.block_on(run_host_overview_monitor(
                 config,
                 refresh_interval.max(Duration::from_secs(1)),
+                resume,
                 thread_shutdown,
                 tx,
             ));
@@ -855,6 +869,7 @@ pub fn split_rate(bytes_per_sec: u64) -> (String, String) {
 async fn run_host_overview_monitor(
     config: RemoteSshConfig,
     refresh_interval: Duration,
+    resume: HostOverviewResume,
     shutdown: Arc<AtomicBool>,
     tx: async_channel::Sender<HostOverviewEvent>,
 ) {
@@ -864,7 +879,10 @@ async fn run_host_overview_monitor(
         config.host.trim(),
         config.port
     );
-    let mut histories = HashMap::<String, VecDeque<NetworkRatePoint>>::new();
+    let HostOverviewResume {
+        mut histories,
+        mut has_data,
+    } = resume;
 
     while !shutdown.load(Ordering::Relaxed) {
         if tx
@@ -926,6 +944,12 @@ async fn run_host_overview_monitor(
                 Ok(output) => match parse_probe_output(&String::from_utf8_lossy(&output.stdout)) {
                     Ok(probe) => {
                         consecutive_failures = 0;
+                        // 已有数据时，连上后的首轮没有上一帧、算不出速率：先记下，隔一会儿再采。
+                        if has_data && previous_probe.is_none() {
+                            previous_probe = Some((probe, started));
+                            sleep_or_shutdown(RESUME_PROBE_DELAY, &shutdown).await;
+                            continue;
+                        }
                         let previous = previous_probe.as_ref().map(|(previous, at)| {
                             (previous, started.saturating_duration_since(*at))
                         });
@@ -963,6 +987,7 @@ async fn run_host_overview_monitor(
                         {
                             return;
                         }
+                        has_data = true;
                     }
                     Err(error) => {
                         ho_debug!("parse err host={host_label} error={error}");
@@ -1655,7 +1680,31 @@ fn expand_tilde(path: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::split_rate;
+    use super::{
+        split_rate, HostOverviewResume, HostOverviewSnapshot, NetworkMetric, NetworkRatePoint,
+    };
+
+    #[test]
+    fn resume_carries_network_history_only_when_data_was_collected() {
+        let empty = HostOverviewResume::from_snapshot(&HostOverviewSnapshot::waiting("h"));
+        assert!(!empty.has_data);
+        assert!(empty.histories.is_empty());
+
+        let point = NetworkRatePoint {
+            rx_bytes_per_sec: 10,
+            tx_bytes_per_sec: 20,
+        };
+        let mut snapshot = HostOverviewSnapshot::waiting("h");
+        snapshot.networks.push(NetworkMetric {
+            interface: "eth0".into(),
+            rx_bytes_per_sec: 10,
+            tx_bytes_per_sec: 20,
+            history: vec![point.clone(), point.clone()],
+        });
+        let resume = HostOverviewResume::from_snapshot(&snapshot);
+        assert!(resume.has_data);
+        assert_eq!(resume.histories["eth0"].len(), 2);
+    }
 
     #[test]
     fn split_rate_covers_b_to_t() {

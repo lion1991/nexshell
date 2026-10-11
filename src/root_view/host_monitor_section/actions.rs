@@ -110,7 +110,7 @@ impl RootView {
         ctx: &mut ViewContext<Self>,
     ) {
         self.show_process_list_context_menu = None;
-        let Some(tab) = self.terminal_tabs.get(self.active_tab_index) else {
+        let Some(tab) = self.terminal_tabs.get(self.overview_tab_index()) else {
             return;
         };
         let Some(host_id) = tab.host_id.as_deref() else {
@@ -142,7 +142,8 @@ impl RootView {
         &mut self,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
+        let index = self.overview_tab_index();
+        if let Some(tab) = self.terminal_tabs.get_mut(index) {
             if tab.host_overview.snapshot.networks.len() > 1 {
                 tab.host_overview.network_dropdown_open = !tab.host_overview.network_dropdown_open;
             } else {
@@ -157,7 +158,8 @@ impl RootView {
         interface: String,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
+        let index = self.overview_tab_index();
+        if let Some(tab) = self.terminal_tabs.get_mut(index) {
             tab.host_overview.select_network(interface);
         }
         ctx.notify();
@@ -168,7 +170,8 @@ impl RootView {
         key: ProcessSortKey,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
+        let index = self.overview_tab_index();
+        if let Some(tab) = self.terminal_tabs.get_mut(index) {
             tab.host_overview.cycle_process_sort(key);
         }
         ctx.notify();
@@ -179,7 +182,8 @@ impl RootView {
         key: NetworkSortKey,
         ctx: &mut ViewContext<Self>,
     ) {
-        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
+        let index = self.overview_tab_index();
+        if let Some(tab) = self.terminal_tabs.get_mut(index) {
             tab.host_overview.cycle_network_sort(key);
         }
         ctx.notify();
@@ -196,9 +200,9 @@ impl RootView {
         }
     }
 
-    // 当前活动 tab 的主机 id 与展示名（hostname 缺省回退到 tab 标签）。
+    // 概览所在 tab 的主机 id 与展示名（hostname 缺省回退到 tab 标签）。
     fn active_host_id_and_label(&self) -> Option<(String, String)> {
-        let active_tab = self.terminal_tabs.get(self.active_tab_index)?;
+        let active_tab = self.terminal_tabs.get(self.overview_tab_index())?;
         let host_id = active_tab.host_id.clone()?;
         let host_label = active_tab
             .host_overview

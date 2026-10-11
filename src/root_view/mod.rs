@@ -60,9 +60,8 @@ use nexshell::host_management::{
     HostManagementState, HostViewMode, RecentHostSnapshot,
 };
 use nexshell::host_overview::{
-    should_run_host_overview_monitor, should_show_host_overview_sidebar,
-    spawn_host_overview_monitor, HostOverviewEvent, HostOverviewSnapshot, HostOverviewStatus,
-    HostOverviewUiState,
+    spawn_host_overview_monitor, HostOverviewEvent, HostOverviewResume, HostOverviewSnapshot,
+    HostOverviewStatus, HostOverviewUiState,
 };
 use nexshell::host_overview_fleet::HostOverviewFleet;
 use nexshell::pane_state::NexPaneId;
@@ -88,6 +87,7 @@ use crate::host_edit_window::HostEditModel;
 use crate::host_management_view::HostManagementViewStates;
 #[cfg(target_os = "macos")]
 use crate::macos_window_util;
+use crate::sidebar_helpers::SidebarContent;
 use crate::terminal_grid_element::{
     CursorStyleChoice, FindPanelState, GlassQualityChoice, LanguageChoice, ScrollbarDrag,
     TerminalGridAction, TerminalImeLayout, TerminalShapedLineCache, ThemeChoice,
@@ -337,6 +337,9 @@ pub(crate) struct RootView {
     tab_accent_bar_w: RefCell<SpringAnim>,
     /// 底条弹簧是否已首帧落位（未落位前 snap 不滑动）。
     tab_accent_bar_init: std::cell::Cell<bool>,
+    /// 标题栏侧栏按钮槽宽弹簧：没有侧栏时收成 0，主页按钮和标签滑过去；init 同底条。
+    sidebar_toggle_slot: RefCell<SpringAnim>,
+    sidebar_toggle_slot_init: std::cell::Cell<bool>,
     /// 底条 y（相对 tab 行）：直接取活动 tab 底边，缓存供缺位帧沿用。
     tab_accent_bar_y: std::cell::Cell<f32>,
     /// 面板开门滑入弹簧（内容右侧滑入偏移 px）+ 开门待起帧标志（首帧按实际宽度起搏）。
@@ -793,6 +796,8 @@ impl RootView {
             tab_accent_bar_x: RefCell::new(SpringAnim::new(0.0)),
             tab_accent_bar_w: RefCell::new(SpringAnim::new(0.0)),
             tab_accent_bar_init: std::cell::Cell::new(false),
+            sidebar_toggle_slot: RefCell::new(SpringAnim::new(0.0)),
+            sidebar_toggle_slot_init: std::cell::Cell::new(false),
             tab_accent_bar_y: std::cell::Cell::new(0.0),
             file_panel_slide: RefCell::new(SpringAnim::new(0.0)),
             git_panel_slide: RefCell::new(SpringAnim::new(0.0)),
@@ -1305,7 +1310,7 @@ impl RootView {
         ctx.notify();
     }
 
-    /// app_page 统一入口：改页后联动 Status / Containers fleet，不可见即暂停采集。
+    /// app_page 统一入口：改页后联动 Status / Containers fleet 与概览侧栏，不可见即暂停采集。
     pub(in crate::root_view) fn set_app_page(
         &mut self,
         page: AppPage,
@@ -1313,65 +1318,49 @@ impl RootView {
     ) {
         self.app_page = page;
         self.sync_host_fleets(ctx);
+        self.sync_host_overview_monitor(ctx);
     }
 
+    /// 侧栏的概览采集只跟着显示中的侧栏跑：收起侧栏或切走时停掉，保留最后一帧，
+    /// 再显示时接着采（`HostOverviewResume`）。详情页的采集就是页面本身，不跟侧栏走。
     fn sync_host_overview_monitor(&mut self, ctx: &mut ViewContext<Self>) {
-        let active_tab_supports_host_overview = self.active_tab_supports_host_overview();
-        if self.app_page != AppPage::Terminal || !active_tab_supports_host_overview {
-            return;
+        let sidebar_tab = match self.sidebar_content() {
+            SidebarContent::HostOverview { source_tab } if self.sidebar_open => Some(source_tab),
+            _ => None,
+        };
+        let detail_tab = (self.app_page == AppPage::Terminal)
+            .then_some(self.active_tab_index)
+            .filter(|&index| {
+                self.terminal_tabs
+                    .get(index)
+                    .is_some_and(Self::tab_is_host_overview_page)
+                    && self.tab_is_saved_ssh(index)
+            });
+        for (index, tab) in self.terminal_tabs.iter_mut().enumerate() {
+            if Some(index) != sidebar_tab && !Self::tab_is_host_overview_page(tab) {
+                tab.host_overview_monitor = None;
+            }
         }
-        let Some(tab) = self.terminal_tabs.get(self.active_tab_index) else {
+        let Some(index) = detail_tab.or(sidebar_tab) else {
             return;
         };
-        // 详情页：终端是占位 runtime 且不依赖侧栏开关，跳过这两项门控
-        let is_overview_page = Self::tab_is_host_overview_page(tab);
-        let terminal_connected = is_overview_page || Self::terminal_tab_is_connected(tab);
-        if !terminal_connected {
+
+        let tab = &self.terminal_tabs[index];
+        // 详情页的终端是占位 runtime，连接状态看 monitor 自己的事件。
+        if !Self::tab_is_host_overview_page(tab) && !Self::terminal_tab_is_connected(tab) {
             let tab_id = tab.id.clone();
             self.stop_host_overview_monitor_for_tab(&tab_id, "终端已断开");
-            return;
-        }
-        if !is_overview_page
-            && !should_run_host_overview_monitor(
-                self.sidebar_open,
-                active_tab_supports_host_overview,
-                terminal_connected,
-            )
-        {
             return;
         }
         if tab.host_overview_monitor.is_some() {
             return;
         }
-
         let tab_id = tab.id.clone();
-        let host_id = tab.host_id.clone();
-        let Some(host_id) = host_id else {
-            if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-                tab.host_overview
-                    .set_waiting_snapshot(HostOverviewSnapshot::waiting("未连接"));
-            }
-            return;
-        };
-        let Some(plan) = self.host_state.connection_plan_for(&host_id) else {
-            if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-                tab.host_overview
-                    .set_waiting_snapshot(HostOverviewSnapshot::error(
-                        "未知主机",
-                        "无法读取主机连接配置",
-                    ));
-            }
-            return;
-        };
-
-        let HostConnectionPlan::SavedSsh { config, title, .. } = plan else {
-            if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-                tab.host_overview
-                    .set_waiting_snapshot(HostOverviewSnapshot::error(
-                        "非 SSH 主机",
-                        "当前连接暂不支持主机概览",
-                    ));
-            }
+        let Some(HostConnectionPlan::SavedSsh { config, title, .. }) = tab
+            .host_id
+            .as_deref()
+            .and_then(|host_id| self.host_state.connection_plan_for(host_id))
+        else {
             return;
         };
         let host_label = format!(
@@ -1380,23 +1369,22 @@ impl RootView {
             config.host.trim(),
             config.port
         );
-        if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-            if !tab.host_overview.snapshot.has_collected_data() {
-                let mut waiting = HostOverviewSnapshot::waiting(host_label.clone());
-                waiting.hostname = Some(title);
-                tab.host_overview.set_waiting_snapshot(waiting);
-                tab.host_overview_network_item_states.borrow_mut().clear();
-            }
+        let tab = &mut self.terminal_tabs[index];
+        if !tab.host_overview.snapshot.has_collected_data() {
+            let mut waiting = HostOverviewSnapshot::waiting(host_label.clone());
+            waiting.hostname = Some(title);
+            tab.host_overview.set_waiting_snapshot(waiting);
+            tab.host_overview_network_item_states.borrow_mut().clear();
         }
+        let resume = HostOverviewResume::from_snapshot(&tab.host_overview.snapshot);
 
         match spawn_host_overview_monitor(
             Self::remote_ssh_config_from_host_config(&config),
             Duration::from_secs(3),
+            resume,
         ) {
             Ok((handle, receiver)) => {
-                if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-                    tab.host_overview_monitor = Some(handle);
-                }
+                self.terminal_tabs[index].host_overview_monitor = Some(handle);
                 ctx.spawn_stream_local(
                     receiver,
                     move |view, event, ctx| {
@@ -1406,19 +1394,14 @@ impl RootView {
                 );
             }
             Err(error) => {
-                if let Some(tab) = self.terminal_tabs.get_mut(self.active_tab_index) {
-                    tab.host_overview
-                        .set_waiting_snapshot(HostOverviewSnapshot::error(host_label, error));
-                }
+                self.terminal_tabs[index]
+                    .host_overview
+                    .set_waiting_snapshot(HostOverviewSnapshot::error(host_label, error));
             }
         }
     }
-
     fn should_render_host_overview_sidebar(&self) -> bool {
-        should_show_host_overview_sidebar(
-            self.sidebar_open,
-            self.active_tab_supports_host_overview(),
-        )
+        self.sidebar_open && matches!(self.sidebar_content(), SidebarContent::HostOverview { .. })
     }
 
     /// 查看伪 tab（CodeViewer / GitDiff）回溯到 host_id 指向的源终端 tab index；普通 tab 即 active 自身。
@@ -1511,6 +1494,7 @@ impl RootView {
             || self.titlebar_btn_transitions.borrow().any_animating(now)
             || self.tab_accent_bar_x.borrow().is_animating()
             || self.tab_accent_bar_w.borrow().is_animating()
+            || self.sidebar_toggle_slot.borrow().is_animating()
             || self.file_panel_slide.borrow().is_animating()
             || self.git_panel_slide.borrow().is_animating()
             || self
@@ -2959,7 +2943,6 @@ impl RootView {
         ctx.focus_self();
         self.reset_active_terminal_view_state();
         self.sync_terminal_window_title(Some(&fallback_label), ctx);
-        self.sync_host_overview_monitor(ctx);
     }
 
     fn open_local_terminal_tab(&mut self, ctx: &mut ViewContext<Self>) {
@@ -3028,7 +3011,6 @@ impl RootView {
         }
         self.reset_active_terminal_view_state();
         self.sync_terminal_window_title(Some(&title), ctx);
-        self.sync_host_overview_monitor(ctx);
     }
 
     fn sync_active_terminal_after_tab_list_change(&mut self, ctx: &mut ViewContext<Self>) {
@@ -3041,7 +3023,6 @@ impl RootView {
             self.set_app_page(AppPage::HostManagement, ctx);
             self.reload_host_recent();
             self.sync_terminal_window_title(None, ctx);
-            self.sync_host_overview_monitor(ctx);
             return;
         }
 
@@ -3060,7 +3041,6 @@ impl RootView {
         ctx.focus_self();
         self.reset_active_terminal_view_state();
         self.sync_terminal_window_title(Some(&title), ctx);
-        self.sync_host_overview_monitor(ctx);
     }
 
     fn remove_terminal_tab_at(&mut self, index: usize) {
