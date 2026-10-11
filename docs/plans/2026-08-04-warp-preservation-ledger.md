@@ -293,13 +293,13 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 
 | 字段 | 内容 |
 | --- | --- |
-| 来源 | `f1cf81c31` |
-| 契约 | `Scene::draw_live_image` 把 `Arc<dyn LiveImageSource>` 放进 `Layer.live_images`，先于本层其他图片绘制；`LiveImageSource::try_read(since)` 非阻塞，拿不到返回 false，读到时给出像素、帧代号和 `since` 之后的脏区（None = 整帧）；`LiveTextureCache` 按 source 的 Arc 身份保留纹理，source 释放或 10 帧未画就回收；Metal 两份纹理轮流写，wgpu 一份 |
+| 来源 | `f1cf81c31`、`b900419d7`（帧栅栏） |
+| 契约 | `Scene::draw_live_image` 把 `Arc<dyn LiveImageSource>` 放进 `Layer.live_images`，先于本层其他图片绘制；`LiveImageSource::try_read(since)` 非阻塞，拿不到返回 false，读到时给出像素、帧代号和 `since` 之后的脏区（None = 整帧）；`LiveTextureCache` 按 source 的 Arc 身份保留纹理，source 释放或 10 帧未画就回收；Metal 两份纹理轮流写，每帧命令缓冲末尾向帧栅栏（`MTLSharedEvent`）写帧号，CPU 写纹理前等最后读它的帧执行完（50 ms 超时）；wgpu 一份 |
 | 消费端 | `src/rdp_view/live_image.rs`、`src/rdp_view/page_element.rs`（ADR 0014 决策 17） |
-| 风险 | 上游重构图片管线或 `TextureCache` 时漏接 `live_images`，RDP 画面变黑；Metal 若允许超过一帧的 GPU 工作同时在途，两份轮写不再足以避开读写竞争 |
+| 风险 | 上游重构图片管线或 `TextureCache` 时漏接 `live_images`，RDP 画面变黑；上游改写 `Renderer::render` 的提交流程时漏掉 `signal_frame_done`，每次写常驻纹理都要等满超时，RDP 画面明显卡顿 |
 | 必需证据 | `S A M R` |
 | 候选位置 | `crates/warpui_core/src/rendering/live_image.rs`、`crates/warpui_core/src/scene.rs`、`crates/warpui/src/platform/mac/rendering/metal/renderer.rs`、`crates/warpui/src/rendering/wgpu/renderer/image.rs` |
-| 证据 | `live_image_tests.rs` 5 项（单份 / 两份轮写的脏区上传、读不到沿用旧纹理、换尺寸重建、回收）；wgpu 在 macOS 用 `experimental-wgpu-renderer` 编译通过；真实 RDP 2026-10-10 短测：`gpu.live_image_upload` p50 0.08 ms / p95 0.82 ms / max 3.24 ms，EGFX 无解码错误；改分辨率、重连未测 |
+| 证据 | `live_image_tests.rs` 5 项（单份 / 两份轮写的脏区上传、读不到沿用旧纹理、换尺寸重建、回收）；`renderer_tests.rs` `wait_for_gpu_frame_follows_the_fence`（真实 Metal 设备上的栅栏）；wgpu 在 macOS 用 `experimental-wgpu-renderer` 编译通过；真实 RDP 2026-10-10 短测：`gpu.live_image_upload` p50 0.08 ms / p95 0.82 ms / max 3.24 ms，EGFX 无解码错误；改分辨率、重连未测；加帧栅栏后再测约 3 分钟（含 AVC420 视频、反复最小化）：上传含等待 max 3.49 ms，未触发超时，画面正常 |
 | 状态 | `Pass`（2026-10-10 Matt 真机试用后确认） |
 
 ## 3. 官方历史接管项

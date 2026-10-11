@@ -193,7 +193,7 @@ Windows App 在 `OffscreenSurface::Flush` 里按 dirty rect 逐个 `CopyRect`，
 - 动手前先用 `NEXSHELL_RDP_EGFX_DIAG=1` 量出当前每帧的拷贝和合成耗时，改完再对比。
 - **已实现**（ADR 0014 决策 17，Warp fork 保全清单 W-022）：
   - warpui_core 新增常驻图片：`LiveImageSource::try_read`（非阻塞读像素，并给出某帧代号以来的脏区，None 表示整帧）、`Scene::draw_live_image`、`LiveTextureCache`（按 source 的 Arc 身份保留纹理；source 释放或 10 帧未画就回收）。
-  - Metal 两份纹理轮流写，避开上一帧可能仍在 GPU 上读的那份；wgpu 用一份。headless 渲染器不画东西，不用改。
+  - Metal 两份纹理轮流写，避开上一帧可能仍在 GPU 上读的那份；写入前再按帧栅栏确认最后读它的帧已在 GPU 上执行完（drawable 池刚建时可能有两帧在途）。wgpu 用一份。headless 渲染器不画东西，不用改。
   - `RdpFramebuffer` 记最近 32 次发布的脏区，换分辨率帧代号不归零；`rdp_view/live_image.rs` 把它接成像素源。UI 收到 `FrameUpdated` 只触发重绘，关 tab 也不用再覆盖透明帧释放资产。
   - 脏区：会话每帧仍只发布一个包围盒，渲染器拿到的是自己帧代号之后各帧包围盒的列表，逐个上传。
   - 效果：UI 线程不再有整帧拷贝；GPU 只上传脏区，全屏视频时也只剩一次整帧上传（原来是两次 CPU 拷贝加一次新建纹理整帧上传）。
