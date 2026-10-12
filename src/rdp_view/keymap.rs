@@ -7,7 +7,7 @@
 
 use warpui_core::platform::keyboard::KeyCode;
 
-use nexshell::rdp_session::RdpInputEvent;
+use nexshell::rdp_session::{RdpButton, RdpInputEvent};
 
 /// 需 0xE0 前缀发送的扩展键（extended=true），scancode 取基础字节（不含 0xE0）。
 const EXT: bool = true;
@@ -225,11 +225,13 @@ impl ModifierFlags {
 
 /// 修饰键持续对账器：记「已发 down 未发 up」的 8 键；本地 flags 显示某类未按而 tracker 记为按下时，
 /// 补发该键 release。左右无法从 flags 区分，故按类别（该类 flag=false 则左右都补）。
-/// 兼记普通键按下集合（KeyDown 发 press / KeyUp 发 release），失焦全量抬起时一并清空。
+/// 兼记普通键按下集合（KeyDown 发 press / KeyUp 发 release）和左键按下态，失焦全量抬起时一并清空。
 #[derive(Default)]
 pub struct ModifierTracker {
     down: [bool; 6],
     held: std::collections::HashSet<(u8, bool)>,
+    /// 左键按着；右/中键按下即合成整次点击，不会停在按下态。
+    left_button: bool,
     command: CommandRole,
     /// 按下的是右 ⌘，当 Win 用时发 RWin。
     command_right: bool,
@@ -257,6 +259,25 @@ impl ModifierTracker {
                 pressed: false,
             })
             .collect()
+    }
+
+    /// 左键按下 / 抬起记账。
+    pub fn set_left_button(&mut self, pressed: bool) {
+        self.left_button = pressed;
+    }
+
+    pub fn left_button_held(&self) -> bool {
+        self.left_button
+    }
+
+    /// 左键还按着就取出落在 `at` 的抬起事件并清账（失焦 / 切 tab）。
+    pub fn drain_left_button(&mut self, (x, y): (u16, u16)) -> Option<RdpInputEvent> {
+        std::mem::take(&mut self.left_button).then_some(RdpInputEvent::MouseButton {
+            button: RdpButton::Left,
+            pressed: false,
+            x,
+            y,
+        })
     }
 
     fn win_key(&self) -> (u8, bool) {
@@ -371,6 +392,7 @@ impl ModifierTracker {
     pub fn clear(&mut self) {
         self.down = [false; 6];
         self.held.clear();
+        self.left_button = false;
         self.command = CommandRole::Idle;
     }
 }

@@ -78,7 +78,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
       - UDP 隧道先报错时等 TCP 1 s，看服务端会不会发来 Terminate，免得把被挤下线当成断网重连回去。
     - cookie 只存内存、取最新一个，被拒后退回凭据登录。UI 保留旧画面，叠加"正在重连 n/20"。
     - 修掉服务端 Terminate 后真实原因被 "session ended" 覆盖的问题。
-14. **SuppressOutput**（`src/rdp_session/suppress.rs`）。
+14. **SuppressOutput**：**已撤销（2026-10-11，ADR 0020）**。Windows 服务端收到 suppress 后会话进入无 GUI 模式，远端截图、自动化程序失败。以下为原方案，留作记录。
     - 服务端声明 `suppressOutputSupport` 时：画面不可见发 allowDisplayUpdates = 0；恢复时发 1，并带含端点的桌面矩形，这条 PDU 本身会触发整屏刷新。
     - 不可见的情况：不是活动 tab、不在终端页，或应用不可见。应用可见性取自 `NSApplicationDidChangeOcclusionStateNotification`，全部窗口最小化、应用隐藏、被完全遮挡、锁屏都算不可见。
     - 重激活、重连后按当前可见性重发。
@@ -108,7 +108,7 @@ TCP 单流在 5% 随机丢包下的理论吞吐上限（Mathis 模型，MSS 1380
 - 丢包若随发送速率上升（限速 / QoS），换 UDP 也救不了；应先在隧道里按不同速率测丢包。
 - UDP 3389 被挡时，连接多等最多约 3s 后回落 TCP。
 - Soft-Sync 之后隧道断开会让会话断开（与上游一致），由决策 13 自动重连。
-- `rdp_session/mod.rs` 两次超过 1500 行：先把单测移到 `rdp_session/tests.rs`；决策 13–16 又把帧输出处理拆到 `outputs.rs`，重连、SuppressOutput、MouseCursor 各自独立成文件；决策 17 把 `RdpFramebuffer` 拆到 `framebuffer.rs`，主文件约 1340 行。
+- `rdp_session/mod.rs` 两次超过 1500 行：先把单测移到 `rdp_session/tests.rs`；决策 13–16 又把帧输出处理拆到 `outputs.rs`，重连、SuppressOutput（已随 ADR 0020 删除）、MouseCursor 各自独立成文件；决策 17 把 `RdpFramebuffer` 拆到 `framebuffer.rs`，主文件约 1340 行。
 
 ## 真机排查记录（Windows 11，UDP 3390，经 MTU 1160 的 UDP 隧道）
 

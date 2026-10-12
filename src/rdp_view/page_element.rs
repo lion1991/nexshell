@@ -17,7 +17,9 @@ use warpui_core::platform::keyboard::KeyCode;
 use warpui_core::rendering::live_image::LiveImageSource;
 use warpui_core::{AppContext, PaintContext};
 
-use crate::rdp_view::geometry::{letterbox_rect, viewport_device_coords, RdpViewport};
+use crate::rdp_view::geometry::{
+    letterbox_rect, viewport_device_coords, viewport_device_coords_clamped, RdpViewport,
+};
 use crate::rdp_view::keymap;
 use nexshell::rdp_session::{RdpButton, RdpInputEvent};
 
@@ -112,9 +114,19 @@ impl RdpPageElement {
         viewport_device_coords(&vp, position, self.desktop_size)
     }
 
+    /// 左键在画面上按着时画面外夹到边缘，否则画面外返回 None。
+    fn pointer_coords(&self, position: Vector2F) -> Option<(u16, u16)> {
+        let held = self.mod_tracker.lock().is_ok_and(|t| t.left_button_held());
+        if !held {
+            return self.device_coords(position);
+        }
+        let vp = (*self.viewport_out.lock().ok()?)?;
+        viewport_device_coords_clamped(&vp, position, self.desktop_size)
+    }
+
     /// 鼠标移动 → 远端 MouseMove。远端坐标未变则不重发（去抖 + 省流）。返回是否已消费。
     fn send_mouse_move(&self, position: Vector2F) -> bool {
-        let Some((x, y)) = self.device_coords(position) else {
+        let Some((x, y)) = self.pointer_coords(position) else {
             return false;
         };
         if let Ok(mut last) = self.last_mouse.lock() {
@@ -130,6 +142,62 @@ impl RdpPageElement {
         ));
         self.send(RdpInputEvent::MouseMove { x, y });
         true
+    }
+
+    /// 左键按下：记账并更新远端坐标，抬起和切走时据此补发。
+    fn send_left_down(&self, position: Vector2F) -> bool {
+        let Some((x, y)) = self.device_coords(position) else {
+            return false;
+        };
+        if let Ok(mut last) = self.last_mouse.lock() {
+            *last = Some((x, y));
+        }
+        if let Ok(mut tracker) = self.mod_tracker.lock() {
+            tracker.set_left_button(true);
+        }
+        self.send(RdpInputEvent::MouseButton {
+            button: RdpButton::Left,
+            pressed: true,
+            x,
+            y,
+        });
+        true
+    }
+
+    /// 左键抬起：在画面上按下、拖出画面才松手时夹到边缘照发，远端不能停在按下态；
+    /// 只有落在画面内才算消费。
+    fn send_left_up(&self, position: Vector2F) -> bool {
+        let Some((x, y)) = self.pointer_coords(position) else {
+            return false;
+        };
+        if let Ok(mut tracker) = self.mod_tracker.lock() {
+            tracker.set_left_button(false);
+        }
+        self.send(RdpInputEvent::MouseButton {
+            button: RdpButton::Left,
+            pressed: false,
+            x,
+            y,
+        });
+        self.device_coords(position).is_some()
+    }
+
+    /// 真实 MouseMoved 只在没按键时出现：左键还记着按下，说明抬起事件没送到这里，补发一次。
+    fn release_stale_left_button(&self) {
+        let at = self
+            .last_mouse
+            .lock()
+            .ok()
+            .and_then(|m| *m)
+            .unwrap_or_default();
+        let event = self
+            .mod_tracker
+            .lock()
+            .ok()
+            .and_then(|mut t| t.drain_left_button(at));
+        if let Some(event) = event {
+            self.send(event);
+        }
     }
 
     /// 右/中键：warpui 不派发其抬起事件，按下即合成完整 click（down+up）。
@@ -476,6 +544,7 @@ impl Element for RdpPageElement {
                 }
                 // 真实移动只带 cmd/shift（无 ctrl/alt）：仅对账这两类，避免误抬 Alt。
                 self.reconcile_modifiers(keymap::ModifierFlags::cmd_shift(*cmd, *shift));
+                self.release_stale_left_button();
                 self.send_mouse_move(*position)
             }
             // 左键拖拽。丢弃平台层合成拖拽（静止自动滚动泵：坐标冻结、每 16ms 重发）。
@@ -502,32 +571,14 @@ impl Element for RdpPageElement {
                     return false;
                 }
                 self.reconcile_modifiers(mods_flags(*modifiers));
-                let Some((x, y)) = self.device_coords(*position) else {
-                    return false;
-                };
-                self.send(RdpInputEvent::MouseButton {
-                    button: RdpButton::Left,
-                    pressed: true,
-                    x,
-                    y,
-                });
-                true
+                self.send_left_down(*position)
             }
             Event::LeftMouseUp {
                 position,
                 modifiers,
             } => {
                 self.reconcile_modifiers(mods_flags(*modifiers));
-                let Some((x, y)) = self.device_coords(*position) else {
-                    return false;
-                };
-                self.send(RdpInputEvent::MouseButton {
-                    button: RdpButton::Left,
-                    pressed: false,
-                    x,
-                    y,
-                });
-                true
+                self.send_left_up(*position)
             }
             Event::RightMouseDown {
                 position,
@@ -713,6 +764,59 @@ mod tests {
         assert_eq!(tracker.drain_held_keys(), vec![key(false)]);
         tracker.clear();
         assert!(tracker.drain_held_keys().is_empty());
+    }
+
+    fn left(pressed: bool, x: u16, y: u16) -> RdpInputEvent {
+        RdpInputEvent::MouseButton {
+            button: RdpButton::Left,
+            pressed,
+            x,
+            y,
+        }
+    }
+
+    #[test]
+    fn left_drag_out_of_the_picture_still_releases_at_the_edge() {
+        let (el, rx) = element();
+        *el.viewport_out.lock().unwrap() =
+            Some(letterbox_rect(Vector2F::new(800.0, 600.0), el.desktop_size));
+        assert!(el.send_left_down(Vector2F::new(10.0, 10.0)));
+        assert!(el.send_mouse_move(Vector2F::new(-50.0, 10.0)));
+        assert!(!el.send_left_up(Vector2F::new(-50.0, 10.0)));
+        assert_eq!(
+            drain(&rx),
+            vec![
+                left(true, 10, 10),
+                RdpInputEvent::MouseMove { x: 0, y: 10 },
+                left(false, 0, 10),
+            ]
+        );
+        // 已抬起：画面外的移动不再发。
+        assert!(!el.send_mouse_move(Vector2F::new(-60.0, 10.0)));
+        assert!(drain(&rx).is_empty());
+    }
+
+    #[test]
+    fn plain_move_heals_a_missed_left_up() {
+        let (el, rx) = element();
+        *el.viewport_out.lock().unwrap() =
+            Some(letterbox_rect(Vector2F::new(800.0, 600.0), el.desktop_size));
+        el.send_left_down(Vector2F::new(10.0, 10.0));
+        el.release_stale_left_button();
+        el.release_stale_left_button();
+        assert_eq!(drain(&rx), vec![left(true, 10, 10), left(false, 10, 10)]);
+    }
+
+    #[test]
+    fn release_all_lifts_a_held_left_button() {
+        let (el, rx) = element();
+        *el.viewport_out.lock().unwrap() =
+            Some(letterbox_rect(Vector2F::new(800.0, 600.0), el.desktop_size));
+        el.send_left_down(Vector2F::new(10.0, 10.0));
+        drain(&rx);
+        let mut tracker = el.mod_tracker.lock().unwrap();
+        assert_eq!(tracker.drain_left_button((3, 4)), Some(left(false, 3, 4)));
+        assert_eq!(tracker.drain_left_button((3, 4)), None);
     }
 
     #[test]

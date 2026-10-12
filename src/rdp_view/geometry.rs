@@ -51,6 +51,16 @@ pub fn viewport_device_coords(
     {
         return None;
     }
+    viewport_device_coords_clamped(vp, mouse, desktop)
+}
+
+/// 同上，但画面外夹到最近的边缘像素：左键按着拖出画面时远端照样跟手，松手也能抬起。
+pub fn viewport_device_coords_clamped(
+    vp: &RdpViewport,
+    mouse: Vector2F,
+    desktop: Vector2I,
+) -> Option<(u16, u16)> {
+    let rect = vp.content_rect;
     if vp.scale <= 0.0 {
         return None;
     }
@@ -229,6 +239,23 @@ mod tests {
         assert_eq!(
             viewport_device_coords(&vp, vec2f(700.0, 400.0), desktop),
             None
+        );
+    }
+
+    #[test]
+    fn clamped_device_coords_pin_outside_points_to_the_edge() {
+        let vp = RdpViewport {
+            content_rect: RectF::new(vec2f(100.0, 50.0), vec2f(500.0, 250.0)),
+            scale: 0.5,
+        };
+        let desktop = Vector2I::new(1000, 500);
+        assert_eq!(
+            viewport_device_coords_clamped(&vp, vec2f(50.0, 20.0), desktop),
+            Some((0, 0))
+        );
+        assert_eq!(
+            viewport_device_coords_clamped(&vp, vec2f(700.0, 175.0), desktop),
+            Some((999, 250))
         );
     }
 

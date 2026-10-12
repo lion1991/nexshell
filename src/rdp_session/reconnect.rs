@@ -115,14 +115,13 @@ pub(super) async fn within<T>(
 }
 
 /// 跨重连保留的会话状态，只在内存：cookie 等同会话凭据（MS-RDPBCGR 5.5）。
+#[derive(Default)]
 pub(super) struct SessionMemo {
     /// 最近一次 Auto-Reconnect Cookie；服务端每次连接与每小时更换，被拒后丢弃。
     pub arc_cookie: Option<ServerAutoReconnect>,
     /// 服务端最近测得的带宽（kbps）与平均 RTT（ms），重连时经 NETCHAR_SYNC 回传。
     bandwidth_kbps: Option<u32>,
     rtt_ms: Option<u32>,
-    /// UI 是否可见；不可见时用 SuppressOutput 让服务端停发图形更新。
-    pub visible: bool,
     /// 本轮连接进过活动期，重连计数据此清零。
     pub activated: bool,
     /// 曾进过活动期；首连失败不重连。
@@ -135,23 +134,6 @@ pub(super) struct SessionMemo {
     pub last_pointer_key: Option<u64>,
     /// 本轮连接的心跳看门狗。
     pub liveness: Liveness,
-}
-
-impl Default for SessionMemo {
-    fn default() -> Self {
-        Self {
-            arc_cookie: None,
-            bandwidth_kbps: None,
-            rtt_ms: None,
-            visible: true,
-            activated: false,
-            ever_activated: false,
-            logon_attempts: 0,
-            woke_at: None,
-            last_pointer_key: None,
-            liveness: Liveness::default(),
-        }
-    }
 }
 
 impl SessionMemo {

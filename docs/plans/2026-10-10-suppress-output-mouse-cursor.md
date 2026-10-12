@@ -10,11 +10,13 @@
 
 ## 1. SuppressOutput PDU
 
+> **已撤销（2026-10-11，ADR 0020）**：Windows 服务端收到 suppress 后会话进入无 GUI 模式，远端截图、自动化程序失败。现在任何情况都不发；后台 RDP 标签只停本地重绘。下文留作记录。
+
 窗口最小化时通知服务端停止发送图形更新，恢复时带上桌面矩形重新请求。NexShell 还要覆盖 RDP tab 不可见的情况。
 
 ### 要实现
 
-- **前提**：服务端 General 能力集的 `suppressOutputSupport`（2.2.7.1.1，仅服务端设置）为真才发。fork 在 `ConnectionResult.suppress_output_support` 透出，NexShell 连接时读取并打日志（真机为 true）。
+- **前提**：服务端 General 能力集的 `suppressOutputSupport`（2.2.7.1.1，仅服务端设置）为真才发。IronRDP 上游在 `ConnectionResult.suppress_output_support` 透出（不是 fork 补丁），NexShell 连接时读取并打日志（真机为 true）。
 - **发送**：`ActiveStage::encode_static` + `ShareDataPdu::SuppressOutput(SuppressOutputPdu { desktop_rect })`，走 TCP I/O 通道，fork 不用改。
 - **触发**：
   - Windows App 只在最小化时发：受 `SuppressWhenMinimized` 开关控制，入口是 `CoreFSM::SuppressScreenUpdate`。遮挡、应用隐藏是否也触发，未核实。
@@ -160,7 +162,7 @@ Windows App 实发字节：`01 00 00 00 43 41 50 53 01 00 00 00 0C 00 00 00`。
   - 读写 I/O 错误中 InvalidData（帧解析失败、TLS 记录损坏）算致命，其余（断开、重置、超时）算网络类。connector 的认证、协商错误算致命，错误链里带 I/O 错误的按同一规则分。
   - 证书变化算致命。
 - **重连循环**：放在 `run_rdp_event_loop`，它持有 SessionInputs、framebuffer 和 event_tx。`connect_and_run` 加一个 cookie 参数。UI 加"重连中"状态，用覆盖层显示重试次数，同时保留旧画面。
-- **重建状态**：重建 UDP 隧道和 EGFX 状态，重发 SuppressOutput 状态。另外沿用断开时的桌面尺寸，并丢弃断线期间攒下的键鼠输入。
+- **重建状态**：重建 UDP 隧道和 EGFX 状态，重发 SuppressOutput 状态（已随 ADR 0020 删除）。另外沿用断开时的桌面尺寸，并丢弃断线期间攒下的键鼠输入。
 - **实现补充的保护**：
   - 次数上限取 20，同 .rdp 文件 `autoreconnect max retries` 的默认值。连接阶段（TCP → TLS → NLA → 激活）总时限 60 s，断网时读写会一直挂着，靠它进入下一次尝试。
   - 连续 3 次走到 NLA 却没进入活动期就停：服务端认证失败时可能直接断 TCP，看起来像网络错误，一直重试会锁账户。
@@ -241,7 +243,7 @@ VT 输出 NV12，现在每帧都用 vImage 把整帧转成 RGBA、写进一个�
 | 步骤 | 状态 | 位置 |
 |---|---|---|
 | 0. fork 能力位 | 已做，真机已验证 | fork `f7da0a6e` |
-| 1. SuppressOutput + "session ended" 覆盖 bug | 已做；真机见到 suppress / allow 收发 | `rdp_session/suppress.rs`、`root_view/rdp_section.rs`、`macos_window_util.rs` |
+| 1. SuppressOutput + "session ended" 覆盖 bug | 已做；真机见到 suppress / allow 收发。2026-10-11 撤销 SuppressOutput（ADR 0020） | `root_view/rdp_section.rs`、`macos_window_util.rs` |
 | 2. Auto Reconnect | 已做，未做真机验证 | fork `f7da0a6e`；`rdp_session/reconnect.rs` |
 | 3. EGFX 4.1 / 4.2 | 已做，真机短测通过（改分辨率、重连未测） | Warp `f1cf81c31`（`warpui_core/src/rendering/live_image.rs`、Metal / wgpu 渲染器）；`rdp_view/live_image.rs`、`rdp_session/framebuffer.rs` |
 | 3. EGFX 4.4 | 已做 | fork `287f337d`；`egfx/decoder_vt.rs`、`egfx/vimage.rs` |

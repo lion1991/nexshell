@@ -280,15 +280,21 @@ impl RootView {
                 }
                 ctx.notify();
             }
-            // 只触发重绘：渲染器从 framebuffer 按帧代号上传脏区。
+            // 只触发重绘：渲染器从 framebuffer 按帧代号上传脏区。画面不在屏上时只在首帧重绘（状态翻转）。
             RdpEvent::FrameUpdated { .. } => {
+                let on_screen = self.rdp_tab_on_screen(tab_id);
                 if let Some(rdp) = self.rdp_state_mut(tab_id) {
+                    let first =
+                        !rdp.has_frame || matches!(rdp.phase, RdpConnectionPhase::Connecting);
                     rdp.has_frame = true;
                     rdp.phase.on_frame_uploaded();
+                    if on_screen || first {
+                        ctx.notify();
+                    }
                 }
-                ctx.notify();
             }
             RdpEvent::PointerChanged(pointer) => {
+                let on_screen = self.rdp_tab_on_screen(tab_id);
                 let Some(rdp) = self.rdp_state_mut(tab_id) else {
                     return;
                 };
@@ -320,7 +326,9 @@ impl RootView {
                 if rdp.current_pointer != cursor {
                     rdp.current_pointer = cursor;
                     // 鼠标可能正悬停画面内：重绘触发合成 MouseMoved → 重设光标。
-                    ctx.notify();
+                    if on_screen {
+                        ctx.notify();
+                    }
                 }
             }
         }
@@ -345,15 +353,16 @@ impl RootView {
         self.rdp_hotkey_guard.borrow_mut().set_engaged(desired);
     }
 
-    /// 下发各 RDP 会话的画面可见性：终端页的活动 tab 且应用可见。render 每帧调，句柄内去重。
-    pub(in crate::root_view) fn sync_rdp_visibility(&self) {
-        let page_visible = self.app_visible && self.app_page == crate::AppPage::Terminal;
-        for (index, tab) in self.terminal_tabs.iter().enumerate() {
-            if let Some(rdp) = tab.rdp.as_ref() {
-                rdp.handle
-                    .set_visible(page_visible && index == self.active_tab_index);
-            }
-        }
+    /// RDP 画面正显示在屏上：终端页的活动 tab 且应用可见。
+    /// 远端始终照常出画面（SuppressOutput 会让 Windows 会话停止渲染，见 ADR 0020），
+    /// 只是画面不在屏上时新帧不触发重绘，切回时渲染器整帧补传。
+    fn rdp_tab_on_screen(&self, tab_id: &str) -> bool {
+        self.app_visible
+            && self.app_page == crate::AppPage::Terminal
+            && self
+                .terminal_tabs
+                .get(self.active_tab_index)
+                .is_some_and(|tab| tab.id == tab_id)
     }
 
     /// 订阅应用可见性（macOS 遮挡状态）；其他平台没有这个信号，视为始终可见。
@@ -363,7 +372,6 @@ impl RootView {
             crate::macos_window_util::app_visibility_events(),
             |view, visible, ctx| {
                 view.app_visible = visible;
-                view.sync_rdp_visibility();
                 ctx.notify();
             },
             |_, _| {},
@@ -395,9 +403,9 @@ impl RootView {
         true
     }
 
-    /// 切走/关闭某 tab 前，若它是 RDP tab 则抬起全部远端修饰键与仍按住的普通键，防卡键（尤其 Win 键）。
-    /// 非 RDP tab 或已断开静默跳过（try_send 满/断开也丢弃不阻塞）。
-    pub(in crate::root_view) fn release_rdp_modifiers(&self, index: usize) {
+    /// 离开某 RDP tab（切 tab / 切页 / 新建 tab / 失焦）前抬起远端全部修饰键、仍按住的普通键和左键，
+    /// 防卡键（尤其 Win 键）和远端停在拖拽态。非 RDP tab 或已断开静默跳过（try_send 满/断开也丢弃不阻塞）。
+    pub(in crate::root_view) fn release_rdp_held_input(&self, index: usize) {
         let Some(rdp) = self.terminal_tabs.get(index).and_then(|t| t.rdp.as_ref()) else {
             return;
         };
@@ -407,6 +415,15 @@ impl RootView {
         // 全量抬起后清账，tracker 与远端复位同步（避免残留状态误判后续对账）。
         if let Ok(mut tracker) = rdp.mod_tracker.lock() {
             for event in tracker.drain_held_keys() {
+                let _ = rdp.handle.input_tx.try_send(event);
+            }
+            let at = rdp
+                .last_mouse
+                .lock()
+                .ok()
+                .and_then(|m| *m)
+                .unwrap_or_default();
+            if let Some(event) = tracker.drain_left_button(at) {
                 let _ = rdp.handle.input_tx.try_send(event);
             }
             tracker.clear();
@@ -603,7 +620,7 @@ impl RootView {
         ctx.notify();
     }
 
-    /// 1s 自重排定时器：无打开面板即停表；否则各打开面板差分算 Mbps/fps 后重绘。
+    /// 1s 自重排定时器：无打开面板即停表；否则各打开面板差分算 Mbps/fps，屏上那个开着才重绘。
     fn schedule_rdp_conn_info_tick(ctx: &mut ViewContext<Self>) {
         ctx.spawn(Timer::after(Duration::from_secs(1)), |me, _, ctx| {
             let any_open = me
@@ -630,7 +647,12 @@ impl RootView {
                 }
                 rdp.conn_info_last_sample = Some((bytes, frames, now));
             }
-            ctx.notify();
+            let on_screen_open = me.terminal_tabs.get(me.active_tab_index).is_some_and(|t| {
+                t.rdp.as_ref().is_some_and(|r| r.conn_info_open) && me.rdp_tab_on_screen(&t.id)
+            });
+            if on_screen_open {
+                ctx.notify();
+            }
             Self::schedule_rdp_conn_info_tick(ctx);
         });
     }

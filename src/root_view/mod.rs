@@ -136,7 +136,7 @@ pub(crate) struct RootView {
     // 且窗口有键盘焦点」增量 Push/Pop（幂等，见 HotkeyGuardSlot）；焦点态由 on_focus/on_blur 维护。
     rdp_hotkey_guard: std::cell::RefCell<crate::rdp_view::HotkeyGuardSlot>,
     window_key_focused: std::cell::Cell<bool>,
-    // 应用有窗口可见（未最小化 / 隐藏 / 被完全遮挡），RDP 画面可见性据此下发 SuppressOutput。
+    // 应用有窗口可见（未最小化 / 隐藏 / 被完全遮挡）；不可见时 RDP 新帧不触发重绘。
     app_visible: bool,
 
     // === 主机库（host_library_section）：状态 / 内联编辑器 / 密码栏 ===
@@ -386,7 +386,7 @@ impl RootView {
             let WindowStateEvent::ValueChanged { current, previous } = event;
             let window = Some(ctx.window_id());
             if (current.active_window == window) != (previous.active_window == window) {
-                me.release_rdp_modifiers(me.active_tab_index);
+                me.release_rdp_held_input(me.active_tab_index);
             }
         });
         Self::sync_titlebar_height(ctx);
@@ -1323,12 +1323,15 @@ impl RootView {
         ctx.notify();
     }
 
-    /// app_page 统一入口：改页后联动 Status / Containers fleet 与概览侧栏，不可见即暂停采集。
+    /// app_page 统一入口：离开终端页先抬起 RDP 远端按键；改页后联动 Status / Containers fleet 与概览侧栏，不可见即暂停采集。
     pub(in crate::root_view) fn set_app_page(
         &mut self,
         page: AppPage,
         ctx: &mut ViewContext<Self>,
     ) {
+        if self.app_page == AppPage::Terminal && page != AppPage::Terminal {
+            self.release_rdp_held_input(self.active_tab_index);
+        }
         self.app_page = page;
         self.sync_host_fleets(ctx);
         self.sync_host_overview_monitor(ctx);
@@ -1775,7 +1778,7 @@ impl View for RootView {
             self.report_terminal_focus(false);
             self.window_key_focused.set(false);
             self.sync_rdp_hotkey_guard(); // 失焦：主动 Pop 兜底（不只靠系统前台自动恢复）。
-            self.release_rdp_modifiers(self.active_tab_index); // 失焦兜底抬起远端修饰键，防卡键（非 RDP tab 内部静默跳过）。
+            self.release_rdp_held_input(self.active_tab_index); // 失焦兜底抬起远端按键，防卡键（非 RDP tab 内部静默跳过）。
         }
     }
 
@@ -1804,7 +1807,6 @@ impl View for RootView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         self.sync_local_ime_suppression(app);
         self.sync_rdp_hotkey_guard();
-        self.sync_rdp_visibility();
         let on_terminal_page = self.app_page == AppPage::Terminal;
         let mut tabs: Vec<TabModel> = self
             .terminal_tabs
@@ -2787,6 +2789,8 @@ impl RootView {
             .ok()
             .map(|rt| rt.shell_is_foreground_handle())
             .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
+        // 新 tab 直接成为活动 tab，不走 activate_terminal_tab，切走前在这里抬键。
+        self.release_rdp_held_input(self.active_tab_index);
         let insert_index = new_tab_insert_index(
             self.terminal_tabs.len(),
             self.active_tab_index,
@@ -2983,9 +2987,9 @@ impl RootView {
     }
 
     fn activate_terminal_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
-        // 切走前若离开 RDP tab，抬起远端全部修饰键防卡键。
+        // 切走前若离开 RDP tab，抬起远端按住的键和左键防卡键。
         if self.active_tab_index != index {
-            self.release_rdp_modifiers(self.active_tab_index);
+            self.release_rdp_held_input(self.active_tab_index);
             self.settle_panel_slides();
         }
         let Some(tab) = self.terminal_tabs.get(index) else {

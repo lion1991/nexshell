@@ -14,7 +14,6 @@ mod outputs;
 mod rdpdr;
 mod reconnect;
 mod stats;
-mod suppress;
 mod udp;
 
 #[cfg(target_os = "macos")]
@@ -32,7 +31,7 @@ pub use udp::default_enable_udp;
 use std::net::SocketAddr;
 #[cfg(target_os = "macos")]
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -311,9 +310,6 @@ pub struct RdpSessionHandle {
     pub resize_tx: async_channel::Sender<RdpResizeRequest>,
     /// 运行时统计（Arc 与协议线程共享），连接信息面板只读差分。
     pub stats: Arc<RdpStats>,
-    visible_tx: async_channel::Sender<bool>,
-    /// 上次通知会话的可见性，set_visible 据此去重（render 每帧都会调）。
-    visible: AtomicBool,
     close_tx: async_channel::Sender<()>,
     clipboard_cancel_tx: async_channel::Sender<()>,
     _thread: Option<thread::JoinHandle<()>>,
@@ -328,13 +324,6 @@ impl RdpSessionHandle {
     /// 取消正在进行的远端文件下载。
     pub fn cancel_clipboard_transfer(&self) {
         let _ = self.clipboard_cancel_tx.try_send(());
-    }
-
-    /// 画面是否可见（tab 活动、终端页、窗口未最小化/遮挡）。不可见时会话用 SuppressOutput 让服务端停发图形更新。
-    pub fn set_visible(&self, visible: bool) {
-        if self.visible.swap(visible, Ordering::Relaxed) != visible {
-            let _ = self.visible_tx.try_send(visible);
-        }
     }
 }
 
@@ -353,7 +342,6 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
     let (input_tx, input_rx) = async_channel::unbounded::<RdpInputEvent>();
     let (resize_tx, resize_rx) = async_channel::unbounded::<RdpResizeRequest>();
     let (close_tx, close_rx) = async_channel::unbounded::<()>();
-    let (visible_tx, visible_rx) = async_channel::unbounded::<bool>();
     let (clipboard_cancel_tx, clipboard_cancel_rx) = async_channel::unbounded::<()>();
     let framebuffer = Arc::new(Mutex::new(RdpFramebuffer::new(config.width, config.height)));
     let stats = Arc::new(RdpStats::new());
@@ -385,7 +373,6 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
                         close_rx,
                         input_rx,
                         resize_rx,
-                        visible_rx,
                         clipboard_cancel_rx,
                     },
                 ));
@@ -399,8 +386,6 @@ pub fn spawn_rdp_session(config: RdpSessionConfig) -> RdpSessionHandle {
         input_tx,
         resize_tx,
         stats,
-        visible_tx,
-        visible: AtomicBool::new(true),
         close_tx,
         clipboard_cancel_tx,
         _thread: thread,
@@ -412,7 +397,6 @@ struct SessionInputs {
     close_rx: async_channel::Receiver<()>,
     input_rx: async_channel::Receiver<RdpInputEvent>,
     resize_rx: async_channel::Receiver<RdpResizeRequest>,
-    visible_rx: async_channel::Receiver<bool>,
     clipboard_cancel_rx: async_channel::Receiver<()>,
 }
 
@@ -594,7 +578,6 @@ async fn connect_and_run(
         close_rx,
         input_rx,
         resize_rx,
-        visible_rx,
         clipboard_cancel_rx,
     } = inputs;
     memo.begin_connection();
@@ -801,8 +784,6 @@ async fn connect_and_run(
 
     // 激活分辨率可能被服务端改；据此重建 framebuffer + DecodedImage。
     let desktop = connection_result.desktop_size;
-    let suppress_output = connection_result.suppress_output_support;
-    eprintln!("[rdp] server suppressOutputSupport={suppress_output}");
     let resized = {
         let mut fb = framebuffer.lock();
         let resized = fb.width != desktop.width || fb.height != desktop.height;
@@ -838,17 +819,6 @@ async fn connect_and_run(
         active_stage
             .enable_reliable_udp_dvc_tunnel()
             .map_err(|e| format!("enable UDP tunnel failed: {e}"))?;
-    }
-    // 重连或刚连上时 UI 已不可见：立即让服务端停发。
-    if suppress_output && !memo.visible {
-        suppress::send(
-            &active_stage,
-            &mut upgraded_framed,
-            false,
-            desktop.width,
-            desktop.height,
-        )
-        .await?;
     }
     // 断线期间攒下的键鼠输入已过时。
     while input_rx.try_recv().is_ok() {}
@@ -985,21 +955,6 @@ async fn connect_and_run(
                 }
                 continue;
             }
-            // 可见性变化：只发最新状态，未变不发。
-            visible = visible_rx.recv() => {
-                let Ok(mut visible) = visible else { continue; };
-                while let Ok(next) = visible_rx.try_recv() {
-                    visible = next;
-                }
-                if visible != memo.visible {
-                    memo.visible = visible;
-                    if suppress_output {
-                        let (w, h) = desktop_size(framebuffer);
-                        suppress::send(&active_stage, &mut upgraded_framed, visible, w, h).await?;
-                    }
-                }
-                continue;
-            }
             Ok(()) = wake_rx.changed() => {
                 memo.woke_at = Some(tokio::time::Instant::now());
                 memo.liveness.on_wake();
@@ -1088,10 +1043,6 @@ async fn connect_and_run(
             let (nw, nh) =
                 run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image).await?;
             reset_after_resize(framebuffer, nw, nh, event_tx);
-            // 重激活后服务端按默认放行，重发当前可见性。
-            if suppress_output && !memo.visible {
-                suppress::send(&active_stage, &mut upgraded_framed, false, nw, nh).await?;
-            }
             dw = nw;
             dh = nh;
             last_requested_size = (nw, nh);
@@ -1168,9 +1119,6 @@ async fn connect_and_run(
                     run_reactivation(&mut upgraded_framed, &mut active_stage, seq, &mut image)
                         .await?;
                 reset_after_resize(framebuffer, nw, nh, event_tx);
-                if suppress_output && !memo.visible {
-                    suppress::send(&active_stage, &mut upgraded_framed, false, nw, nh).await?;
-                }
                 dw = nw;
                 dh = nh;
                 last_requested_size = (nw, nh);
