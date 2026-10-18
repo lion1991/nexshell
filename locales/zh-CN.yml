@@ -32,6 +32,11 @@ rdp_disconnected: "连接已断开：%{reason}"
 rdp_reconnecting: "连接中断，正在重连（%{attempt}/%{max}）…"
 rdp_reconnecting_after_sleep: "Mac 已从睡眠中唤醒，正在重连（%{attempt}/%{max}）…"
 rdp_reconnect: 重新连接
+rdp_cert_changed_title: 远端证书已变更
+rdp_cert_changed_body: "%{endpoint} 出示的证书与上次信任的不一致。常见原因是服务器自动续签了自签证书、重装了系统，或端口映射指向了另一台机器；无法确认来源时请不要信任。"
+rdp_cert_expected: 上次信任的指纹（SHA-256）
+rdp_cert_actual: 本次收到的指纹（SHA-256）
+rdp_cert_trust_and_connect: 信任新证书并连接
 rdp_info_title: 连接信息
 rdp_info_na: 不可用
 rdp_info_group_network: 网络
@@ -335,6 +340,8 @@ toast_saved_refresh_fail: "已保存，但刷新失败：%{error}"
 toast_feature_wip: 功能开发中...
 toast_move_wip: 移动功能开发中...
 toast_connecting: "正在连接 %{title}"
+toast_rdp_cert_trusted: 已信任新证书，正在重新连接
+toast_rdp_trust_cert_failed: "信任证书失败：%{error}"
 toast_connect_failed: "%{title}：%{reason}"
 toast_rdp_password_required: RDP 需要保存密码
 

@@ -32,6 +32,11 @@ rdp_disconnected: "Disconnected: %{reason}"
 rdp_reconnecting: "Connection lost. Reconnecting (%{attempt}/%{max})…"
 rdp_reconnecting_after_sleep: "Mac woke from sleep. Reconnecting (%{attempt}/%{max})…"
 rdp_reconnect: Reconnect
+rdp_cert_changed_title: Server certificate changed
+rdp_cert_changed_body: "The certificate presented by %{endpoint} differs from the one you trusted before. Common causes: the server renewed its self-signed certificate, the system was reinstalled, or the port forward now points to another machine. Don't trust it if you can't confirm where it came from."
+rdp_cert_expected: Previously trusted fingerprint (SHA-256)
+rdp_cert_actual: Received fingerprint (SHA-256)
+rdp_cert_trust_and_connect: Trust new certificate and connect
 rdp_info_title: Connection Information
 rdp_info_na: N/A
 rdp_info_group_network: Network
@@ -335,6 +340,8 @@ toast_saved_refresh_fail: "Saved, but refresh failed: %{error}"
 toast_feature_wip: Feature in development...
 toast_move_wip: Move feature in development...
 toast_connecting: "Connecting to %{title}"
+toast_rdp_cert_trusted: New certificate trusted, reconnecting
+toast_rdp_trust_cert_failed: "Failed to trust certificate: %{error}"
 toast_connect_failed: "%{title}: %{reason}"
 toast_rdp_password_required: "RDP requires a saved password"
 

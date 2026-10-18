@@ -30,13 +30,15 @@ use nexshell::generation::{accepts_generation, Generation};
 use nexshell::host_management::{HostConnectionConfig, RdpDisplayQuality};
 use nexshell::host_overview::format_bytes_short;
 use nexshell::rdp_session::{
-    default_enable_egfx, default_enable_udp, spawn_rdp_session, ClipboardTransfer, RdpEvent,
-    RdpResizeRequest, RdpSessionConfig,
+    default_enable_egfx, default_enable_udp, spawn_rdp_session, ClipboardTransfer, RdpCertMismatch,
+    RdpEvent, RdpResizeRequest, RdpSessionConfig,
 };
 use nexshell::terminal_runtime::LocalTerminalRuntime;
 
 /// 连接信息面板默认贴页面右上角的内缩距离。
 const CONN_INFO_MARGIN: f32 = 16.0;
+/// 居中状态文字 / 证书变更卡片的最大宽度，超出折行。
+const STATUS_MAX_WIDTH: f32 = 560.0;
 
 impl RootView {
     /// 主机库点 RDP 主机：算分辨率 → spawn 协议会话 → 开整页 tab → 起帧事件消费。
@@ -259,6 +261,13 @@ impl RootView {
                 }
                 ctx.notify();
             }
+            RdpEvent::CertificateChanged(mismatch) => {
+                if let Some(rdp) = self.rdp_state_mut(tab_id) {
+                    rdp.phase = RdpConnectionPhase::CertificateChanged(mismatch);
+                    rdp.clipboard_transfer = None;
+                }
+                ctx.notify();
+            }
             RdpEvent::Reconnecting {
                 attempt,
                 max,
@@ -451,6 +460,9 @@ impl RootView {
                 Some(self.active_tab_index),
                 &colors,
             ),
+            RdpConnectionPhase::CertificateChanged(mismatch) => {
+                self.render_rdp_cert_changed(mismatch, self.active_tab_index, &colors)
+            }
             // 还没传过帧就没有旧画面可留，只显示文字。
             RdpConnectionPhase::Reconnecting { .. } if !rdp.has_frame => {
                 self.render_rdp_status(Self::rdp_reconnecting_message(&rdp.phase), None, &colors)
@@ -565,6 +577,30 @@ impl RootView {
         if let Some(rdp) = self.terminal_tabs.get(index).and_then(|t| t.rdp.as_ref()) {
             rdp.handle.cancel_clipboard_transfer();
         }
+    }
+
+    /// 证书变更页「信任新证书并连接」：固定用户看到的那枚新指纹（而非清空后信任下次收到的），再重连。
+    pub(in crate::root_view) fn handle_trust_rdp_certificate(
+        &mut self,
+        index: usize,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(RdpConnectionPhase::CertificateChanged(mismatch)) = self
+            .terminal_tabs
+            .get(index)
+            .and_then(|t| t.rdp.as_ref())
+            .map(|rdp| &rdp.phase)
+        else {
+            return;
+        };
+        if let Err(error) = nexshell::rdp_cert_store::pin(&mismatch.endpoint, &mismatch.actual) {
+            self.host_state.notice =
+                Some(rust_i18n::t!("toast_rdp_trust_cert_failed", error = error).to_string());
+            ctx.notify();
+            return;
+        }
+        self.host_state.notice = Some(rust_i18n::t!("toast_rdp_cert_trusted").to_string());
+        self.reconnect_rdp_tab(index, ctx);
     }
 
     /// 连接信息面板拖动结束：累加位移，并夹在内容区内（窗口缩小后也能拖回来）。
@@ -918,7 +954,7 @@ impl RootView {
             .finish()
     }
 
-    /// 连接中 / 断开态的居中提示；断开态附「重连」按钮（dispatch ReconnectTab）。
+    /// 连接中 / 断开态的居中提示（过长折行）；断开态附「重连」按钮（dispatch ReconnectTab）。
     fn render_rdp_status(
         &self,
         message: String,
@@ -929,16 +965,24 @@ impl RootView {
             .with_main_axis_size(MainAxisSize::Min)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_child(
-                Text::new_inline(message, self.ui_font, 13.0)
-                    .with_color(colors.text_primary)
-                    .finish(),
+                ConstrainedBox::new(
+                    Text::new(message, self.ui_font, 13.0)
+                        .with_color(colors.text_primary)
+                        .finish(),
+                )
+                .with_max_width(STATUS_MAX_WIDTH)
+                .finish(),
             );
 
         if let Some(index) = reconnect_index {
             column.add_child(
-                Container::new(self.render_rdp_reconnect_button(index, colors))
-                    .with_padding_top(16.0)
-                    .finish(),
+                Container::new(self.render_rdp_button(
+                    rust_i18n::t!("rdp_reconnect").to_string(),
+                    TerminalGridAction::ReconnectTab(index),
+                    colors,
+                ))
+                .with_padding_top(16.0)
+                .finish(),
             );
         }
 
@@ -964,19 +1008,121 @@ impl RootView {
         rust_i18n::t!(key, attempt = attempt, max = max).to_string()
     }
 
-    fn render_rdp_reconnect_button(
+    /// 证书变更页：说明 + 新旧指纹 + 「信任新证书并连接」/「重新连接」。
+    fn render_rdp_cert_changed(
         &self,
+        mismatch: &RdpCertMismatch,
         index: usize,
         colors: &HostOverviewColors,
     ) -> Box<dyn Element> {
-        let label = Text::new_inline(
-            rust_i18n::t!("rdp_reconnect").to_string(),
-            self.ui_font,
-            12.0,
+        let fingerprint = |label: String, value: &str| -> Box<dyn Element> {
+            let mut column = Flex::column()
+                .with_main_axis_size(MainAxisSize::Min)
+                .with_child(
+                    Container::new(
+                        Text::new_inline(label, self.ui_font, 12.0)
+                            .with_color(colors.text_muted)
+                            .finish(),
+                    )
+                    .with_padding_bottom(4.0)
+                    .finish(),
+                );
+            // 32 字节按 16 字节一行分两行；窗口过窄时再软折行，宁折不截。
+            let bytes: Vec<&str> = value.split(':').collect();
+            for chunk in bytes.chunks(16) {
+                column.add_child(
+                    Text::new(chunk.join(":"), self.monospace_font, 12.0)
+                        .with_color(colors.text_primary)
+                        .finish(),
+                );
+            }
+            Container::new(column.finish())
+                .with_padding_top(14.0)
+                .finish()
+        };
+
+        let buttons = Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_child(self.render_rdp_button(
+                rust_i18n::t!("rdp_cert_trust_and_connect").to_string(),
+                TerminalGridAction::TrustRdpCertificate(index),
+                colors,
+            ))
+            .with_child(
+                Container::new(self.render_rdp_button(
+                    rust_i18n::t!("rdp_reconnect").to_string(),
+                    TerminalGridAction::ReconnectTab(index),
+                    colors,
+                ))
+                .with_padding_left(10.0)
+                .finish(),
+            )
+            .finish();
+
+        let card = Flex::column()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Start)
+            .with_child(
+                Text::new_inline(
+                    rust_i18n::t!("rdp_cert_changed_title").to_string(),
+                    self.ui_font,
+                    15.0,
+                )
+                .with_style(fonts::Properties::default().weight(fonts::Weight::Semibold))
+                .with_color(colors.text_primary)
+                .finish(),
+            )
+            .with_child(
+                Container::new(
+                    Text::new(
+                        rust_i18n::t!("rdp_cert_changed_body", endpoint = mismatch.endpoint)
+                            .to_string(),
+                        self.ui_font,
+                        12.5,
+                    )
+                    .with_color(colors.text_muted)
+                    .finish(),
+                )
+                .with_padding_top(8.0)
+                .finish(),
+            )
+            .with_child(fingerprint(
+                rust_i18n::t!("rdp_cert_expected").to_string(),
+                &mismatch.expected,
+            ))
+            .with_child(fingerprint(
+                rust_i18n::t!("rdp_cert_actual").to_string(),
+                &mismatch.actual,
+            ))
+            .with_child(Container::new(buttons).with_padding_top(20.0).finish())
+            .finish();
+
+        let card = Container::new(
+            ConstrainedBox::new(card)
+                .with_max_width(STATUS_MAX_WIDTH)
+                .finish(),
         )
-        .with_style(fonts::Properties::default().weight(fonts::Weight::Medium))
-        .with_color(colors.text_primary)
+        .with_uniform_padding(20.0)
+        .with_background_color(colors.card_bg)
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(8.0)))
+        .with_border(Border::all(1.0).with_border_color(colors.panel_border))
         .finish();
+
+        Container::new(Align::new(card).finish())
+            .with_background_color(colors.panel_bg)
+            .finish()
+    }
+
+    fn render_rdp_button(
+        &self,
+        label: String,
+        action: TerminalGridAction,
+        colors: &HostOverviewColors,
+    ) -> Box<dyn Element> {
+        let label = Text::new_inline(label, self.ui_font, 12.0)
+            .with_style(fonts::Properties::default().weight(fonts::Weight::Medium))
+            .with_color(colors.text_primary)
+            .finish();
 
         let button = Container::new(Align::new(label).finish())
             .with_horizontal_padding(16.0)
@@ -987,7 +1133,7 @@ impl RootView {
 
         EventHandler::new(button)
             .on_left_mouse_down(move |ctx, _, _| {
-                ctx.dispatch_typed_action(TerminalGridAction::ReconnectTab(index));
+                ctx.dispatch_typed_action(action.clone());
                 DispatchEventResult::StopPropagation
             })
             .finish()

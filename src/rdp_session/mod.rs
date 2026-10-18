@@ -146,6 +146,17 @@ pub enum RdpEvent {
     Resized { width: u16, height: u16 },
     /// 远端复制的文件正在下载到 Mac（被 Finder 等读取时触发）；None 表示结束或取消。
     ClipboardTransfer(Option<ClipboardTransfer>),
+    /// 服务端证书与已信任指纹不符，连接已中止（代替 Disconnected，不再重连）。
+    CertificateChanged(RdpCertMismatch),
+}
+
+/// 证书指纹不符的详情（SHA-256，大写冒号分隔）。
+#[derive(Clone, Debug)]
+pub struct RdpCertMismatch {
+    /// 信任库主键 `host:port`。
+    pub endpoint: String,
+    pub expected: String,
+    pub actual: String,
 }
 
 /// 远端文件下载进度。
@@ -510,7 +521,7 @@ fn attach_audio_static_channels(
 }
 
 /// 事件循环：连接 → NLA → 激活 → 收帧。进过活动期后的网络类断开自动重连
-/// （立即一次，之后每 3 s，上限 MAX_ATTEMPTS）；其余情况发 Disconnected 收尾。
+/// （立即一次，之后每 3 s，上限 MAX_ATTEMPTS）；证书变更发 CertificateChanged，其余发 Disconnected 收尾。
 async fn run_rdp_event_loop(
     config: RdpSessionConfig,
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
@@ -520,7 +531,7 @@ async fn run_rdp_event_loop(
 ) {
     let mut memo = SessionMemo::default();
     let mut attempt = 0;
-    let reason = loop {
+    let outcome = loop {
         // 重连沿用断开时的桌面尺寸（动态分辨率可能已改过）。
         let mut config = config.clone();
         if memo.ever_activated {
@@ -531,7 +542,7 @@ async fn run_rdp_event_loop(
             _ = inputs.close_rx.recv() => Ok(SessionEnd::Closed),
         };
         let error = match result {
-            Ok(end) => break end.to_string(),
+            Ok(end) => break Ok(end),
             Err(error) => error,
         };
         if memo.activated {
@@ -542,7 +553,7 @@ async fn run_rdp_event_loop(
             || attempt >= reconnect::MAX_ATTEMPTS
             || memo.logon_attempts >= reconnect::MAX_LOGON_ATTEMPTS
         {
-            break error.to_string();
+            break Err(error);
         }
         attempt += 1;
         eprintln!(
@@ -557,13 +568,21 @@ async fn run_rdp_event_loop(
         if attempt > 1 {
             tokio::select! {
                 _ = tokio::time::sleep(reconnect::RETRY_INTERVAL) => {}
-                _ = inputs.close_rx.recv() => break SessionEnd::Closed.to_string(),
+                _ = inputs.close_rx.recv() => break Ok(SessionEnd::Closed),
             }
         }
     };
+    let reason = match &outcome {
+        Ok(end) => end.to_string(),
+        Err(error) => error.to_string(),
+    };
     // 断开原因同时打到 stderr，便于命令行复现时与 IronRDP tracing 日志对齐时间线。
     eprintln!("[rdp] disconnected: {reason}");
-    let _ = event_tx.try_send(RdpEvent::Disconnected { reason });
+    let event = match outcome {
+        Err(SessionError::CertificateChanged(mismatch)) => RdpEvent::CertificateChanged(mismatch),
+        _ => RdpEvent::Disconnected { reason },
+    };
+    let _ = event_tx.try_send(event);
 }
 
 async fn connect_and_run(
@@ -683,7 +702,7 @@ async fn connect_and_run(
     // 证书优先走平台根校验；自签（RDP 常态）落到回调里按 host:port 做指纹 TOFU。
     let initial_stream = framed.into_inner_no_leftover();
     let endpoint = rdp_cert_store::endpoint_key(&config.host, config.port);
-    let trust_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let trust_error: Arc<Mutex<Option<SessionError>>> = Arc::new(Mutex::new(None));
     let callback: ironrdp_tls::CertificateValidationCallback = {
         let trust_error = Arc::clone(&trust_error);
         Arc::new(move |cert_der: &[u8], endpoint: &str, error: &str| {
@@ -691,17 +710,17 @@ async fn connect_and_run(
                 Ok(rdp_cert_store::CertTrustVerdict::Trusted)
                 | Ok(rdp_cert_store::CertTrustVerdict::Pinned) => true,
                 Ok(rdp_cert_store::CertTrustVerdict::Mismatch { expected }) => {
-                    let actual = rdp_cert_store::sha256_fingerprint(cert_der);
-                    *trust_error.lock() = Some(format!(
-                        "RDP server certificate for {endpoint} changed (expected {expected}, got {actual}); \
-                         connection aborted. Edit and save this host to trust the new certificate."
-                    ));
+                    *trust_error.lock() = Some(SessionError::CertificateChanged(RdpCertMismatch {
+                        endpoint: endpoint.to_string(),
+                        expected,
+                        actual: rdp_cert_store::sha256_fingerprint(cert_der),
+                    }));
                     false
                 }
                 Err(store_error) => {
-                    *trust_error.lock() = Some(format!(
+                    *trust_error.lock() = Some(SessionError::Fatal(format!(
                         "RDP certificate check failed for {endpoint}: {store_error} (TLS error: {error})"
-                    ));
+                    )));
                     false
                 }
             }
@@ -731,8 +750,8 @@ async fn connect_and_run(
     )
     .await?
     .map_err(|e| match trust_error.lock().take() {
-        // 证书变了：重试也一样，不重连。
-        Some(reason) => SessionError::Fatal(reason),
+        // 证书校验失败：重试也一样，不重连。
+        Some(trust_error) => trust_error,
         None => io_error("TLS upgrade failed")(e),
     })?;
     let server_public_key = ironrdp_tls::extract_tls_server_public_key(&server_cert)

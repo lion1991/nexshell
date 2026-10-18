@@ -83,15 +83,25 @@ pub fn verify_or_pin_at(
         Some(expected) if expected == fingerprint => Ok(CertTrustVerdict::Trusted),
         Some(expected) => Ok(CertTrustVerdict::Mismatch { expected }),
         None => {
-            conn.execute(
-                "INSERT OR REPLACE INTO rdp_cert_trust (endpoint, fingerprint, updated_at)
-                 VALUES (?1, ?2, ?3)",
-                params![endpoint, fingerprint, now_secs()],
-            )
-            .map_err(|e| format!("pin rdp cert for {endpoint}: {e}"))?;
+            insert_pin(&conn, endpoint, fingerprint)?;
             Ok(CertTrustVerdict::Pinned)
         }
     }
+}
+
+fn insert_pin(conn: &Connection, endpoint: &str, fingerprint: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO rdp_cert_trust (endpoint, fingerprint, updated_at)
+         VALUES (?1, ?2, ?3)",
+        params![endpoint, fingerprint, now_secs()],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("pin rdp cert for {endpoint}: {e}"))
+}
+
+/// 显式信任某指纹（覆盖旧记录）：用户确认证书变更后固定其看到的那一枚。
+pub fn pin_at(db_path: &Path, endpoint: &str, fingerprint: &str) -> Result<(), String> {
+    insert_pin(&open_rw(db_path)?, endpoint, fingerprint)
 }
 
 /// 用默认库路径做一次 TOFU 比对。
@@ -99,6 +109,13 @@ pub fn verify_or_pin(endpoint: &str, cert_der: &[u8]) -> Result<CertTrustVerdict
     let db_path = crate::host_management::default_database_path()
         .ok_or_else(|| "cannot resolve NexShell db path".to_string())?;
     verify_or_pin_at(&db_path, endpoint, &sha256_fingerprint(cert_der))
+}
+
+/// 用默认库路径显式信任某指纹。
+pub fn pin(endpoint: &str, fingerprint: &str) -> Result<(), String> {
+    let db_path = crate::host_management::default_database_path()
+        .ok_or_else(|| "cannot resolve NexShell db path".to_string())?;
+    pin_at(&db_path, endpoint, fingerprint)
 }
 
 /// 清除某 endpoint 的指纹记录：下次连接重新按首次信任固定。
@@ -163,6 +180,26 @@ mod tests {
         assert_eq!(
             verify_or_pin_at(&db_path, &endpoint_key("other", 3389), &second).unwrap(),
             CertTrustVerdict::Pinned
+        );
+    }
+
+    #[test]
+    fn explicit_pin_replaces_mismatched_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("nexshell.db");
+        let endpoint = endpoint_key("rdp.example.com", 3389);
+        let first = sha256_fingerprint(b"cert-a");
+        let second = sha256_fingerprint(b"cert-b");
+
+        verify_or_pin_at(&db_path, &endpoint, &first).unwrap();
+        pin_at(&db_path, &endpoint, &second).unwrap();
+        assert_eq!(
+            verify_or_pin_at(&db_path, &endpoint, &second).unwrap(),
+            CertTrustVerdict::Trusted
+        );
+        assert_eq!(
+            verify_or_pin_at(&db_path, &endpoint, &first).unwrap(),
+            CertTrustVerdict::Mismatch { expected: second }
         );
     }
 

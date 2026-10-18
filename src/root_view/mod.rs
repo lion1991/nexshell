@@ -2542,6 +2542,9 @@ impl TypedActionView for RootView {
             TerminalGridAction::CancelRdpClipboardTransfer(index) => {
                 self.handle_cancel_rdp_clipboard_transfer(*index)
             }
+            TerminalGridAction::TrustRdpCertificate(index) => {
+                self.handle_trust_rdp_certificate(*index, ctx)
+            }
             TerminalGridAction::MoveRdpConnectionInfo { index, delta, card } => {
                 self.handle_move_rdp_connection_info(*index, *delta, *card, ctx)
             }

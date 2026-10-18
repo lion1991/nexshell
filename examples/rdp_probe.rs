@@ -494,6 +494,13 @@ fn main() {
                 println!("[probe] disconnected: {reason}");
                 break;
             }
+            Ok(RdpEvent::CertificateChanged(m)) => {
+                println!(
+                    "[probe] certificate changed for {}: expected {}, got {}",
+                    m.endpoint, m.expected, m.actual
+                );
+                break;
+            }
             Err(_) => break, // sender 关闭
         }
     }

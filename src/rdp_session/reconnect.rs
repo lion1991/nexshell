@@ -12,6 +12,8 @@ use ironrdp_pdu::rdp::session_info::ServerAutoReconnect;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
+use super::RdpCertMismatch;
+
 /// 重连次数上限，同 .rdp 文件 `autoreconnect max retries` 的默认值。
 pub(super) const MAX_ATTEMPTS: u32 = 20;
 /// 第一次立即重试，之后的间隔（参照 Windows App）。
@@ -47,6 +49,8 @@ impl fmt::Display for SessionEnd {
 pub(super) enum SessionError {
     Network(String),
     Fatal(String),
+    /// 证书与已信任指纹不符：致命，UI 单独展示并让用户决定是否信任。
+    CertificateChanged(RdpCertMismatch),
 }
 
 impl From<String> for SessionError {
@@ -59,6 +63,11 @@ impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Network(reason) | Self::Fatal(reason) => f.write_str(reason),
+            Self::CertificateChanged(m) => write!(
+                f,
+                "RDP server certificate for {} changed (expected {}, got {})",
+                m.endpoint, m.expected, m.actual
+            ),
         }
     }
 }

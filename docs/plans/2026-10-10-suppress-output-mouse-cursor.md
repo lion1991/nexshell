@@ -160,7 +160,7 @@ Windows App 实发字节：`01 00 00 00 43 41 50 53 01 00 00 00 0C 00 00 00`。
 - **断开原因类型化**：现在只有字符串（`read frame failed` / `reliable UDP tunnel closed` / `terminated: …`）。
   - 实现在 NexShell 侧（`src/rdp_session/reconnect.rs`），fork 不用透出 ErrorInfo 码：服务端发来的 Terminate（含 ErrorInfo）一律不重连。
   - 读写 I/O 错误中 InvalidData（帧解析失败、TLS 记录损坏）算致命，其余（断开、重置、超时）算网络类。connector 的认证、协商错误算致命，错误链里带 I/O 错误的按同一规则分。
-  - 证书变化算致命。
+  - 证书变化算致命，单独走 `SessionError::CertificateChanged` → `RdpEvent::CertificateChanged`：UI 显示证书变更页（新旧 SHA-256 指纹），「信任新证书并连接」固定用户看到的那枚新指纹（`rdp_cert_store::pin`）后重连；编辑保存主机仍会清掉指纹。
 - **重连循环**：放在 `run_rdp_event_loop`，它持有 SessionInputs、framebuffer 和 event_tx。`connect_and_run` 加一个 cookie 参数。UI 加"重连中"状态，用覆盖层显示重试次数，同时保留旧画面。
 - **重建状态**：重建 UDP 隧道和 EGFX 状态，重发 SuppressOutput 状态（已随 ADR 0020 删除）。另外沿用断开时的桌面尺寸，并丢弃断线期间攒下的键鼠输入。
 - **实现补充的保护**：

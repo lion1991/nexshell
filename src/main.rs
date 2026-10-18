@@ -466,6 +466,8 @@ enum RdpConnectionPhase {
     Disconnected {
         reason: String,
     },
+    /// 证书指纹变了，等用户决定是否信任新证书。
+    CertificateChanged(nexshell::rdp_session::RdpCertMismatch),
 }
 
 impl RdpConnectionPhase {
