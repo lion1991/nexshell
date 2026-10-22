@@ -22,7 +22,10 @@ use crate::osc7::parse_osc7_payload;
 use crate::pty_event_loop;
 use crate::pty_event_loop::{EventLoopHandle, Message, PtyEvent, PtySink};
 use crate::ssh_password_prompt::{PasswordInput, PasswordLineEditor};
-use crate::ssh_session::{self, ChannelRequest, SshConnectOptions, SshHandle, SshSession};
+use crate::ssh_session::{
+    self, ChannelRequest, SshConnectError, SshConnectOptions, SshHandle, SshHostKeyMismatch,
+    SshSession,
+};
 use crate::terminal_recorder::TerminalRecorder;
 
 mod telnet;
@@ -4105,33 +4108,68 @@ async fn run_remote_ssh_event_loop(
     }
 
     let connect_timeout_secs = u64::from(config.tcp_connect_timeout.clamp(5, 60));
-    let mut session = match tokio::time::timeout(
-        Duration::from_secs(connect_timeout_secs),
-        SshSession::connect(
-            &host,
-            config.port,
-            SshConnectOptions {
-                keep_alive_enabled: config.keep_alive_enabled,
-                keep_alive_interval_secs: config.keep_alive_interval.clamp(10, 300),
-                keep_alive_max_failures: config.keep_alive_max_failures.clamp(1, 10),
-            },
-        ),
-    )
-    .await
-    {
-        Ok(Ok(session)) => session,
-        Ok(Err(error)) => {
-            remote_mark_disconnected(&state, &wakeup_tx, &event_tx, error);
-            return;
-        }
-        Err(_) => {
-            remote_mark_disconnected(
-                &state,
-                &wakeup_tx,
-                &event_tx,
-                format!("TCP connection timeout after {connect_timeout_secs}s"),
-            );
-            return;
+    let connect = || {
+        tokio::time::timeout(
+            Duration::from_secs(connect_timeout_secs),
+            SshSession::connect(
+                &host,
+                config.port,
+                SshConnectOptions {
+                    keep_alive_enabled: config.keep_alive_enabled,
+                    keep_alive_interval_secs: config.keep_alive_interval.clamp(10, 300),
+                    keep_alive_max_failures: config.keep_alive_max_failures.clamp(1, 10),
+                },
+            ),
+        )
+    };
+    // 主机密钥变更只给一次机会：用户确认后改写 known_hosts 重连，再不一致就按断开处理。
+    let mut host_key_replaced = false;
+    let mut session = loop {
+        match connect().await {
+            Ok(Ok(session)) => break session,
+            Ok(Err(SshConnectError::HostKeyChanged(mismatch))) if !host_key_replaced => {
+                let confirmed = remote_confirm_host_key_change(
+                    &mismatch,
+                    &mut request_rx,
+                    &state,
+                    &wakeup_tx,
+                    (&mut cols, &mut rows),
+                )
+                .await;
+                if confirmed != Some(true) {
+                    remote_mark_disconnected(&state, &wakeup_tx, &event_tx, mismatch.message());
+                    return;
+                }
+                if let Err(error) = ssh_session::replace_host_key_at(
+                    &mismatch.path,
+                    &mismatch.host,
+                    mismatch.port,
+                    &mismatch.actual,
+                ) {
+                    remote_mark_disconnected(&state, &wakeup_tx, &event_tx, error);
+                    return;
+                }
+                host_key_replaced = true;
+                banner(
+                    &state,
+                    &wakeup_tx,
+                    "已信任新主机密钥，正在重新连接",
+                    &target,
+                );
+            }
+            Ok(Err(error)) => {
+                remote_mark_disconnected(&state, &wakeup_tx, &event_tx, error.to_string());
+                return;
+            }
+            Err(_) => {
+                remote_mark_disconnected(
+                    &state,
+                    &wakeup_tx,
+                    &event_tx,
+                    format!("TCP connection timeout after {connect_timeout_secs}s"),
+                );
+                return;
+            }
         }
     };
 
@@ -4400,6 +4438,77 @@ async fn remote_password_auth(
         }
     }
     Err("Password authentication rejected by server".to_string())
+}
+
+/// 主机密钥变更：在终端里列出旧 / 新指纹，等用户按键。
+/// Some(true) = 信任新密钥，Some(false) = 中止，None = 标签已关闭。
+async fn remote_confirm_host_key_change(
+    mismatch: &SshHostKeyMismatch,
+    request_rx: &mut tokio::sync::mpsc::Receiver<ChannelRequest>,
+    state: &Arc<FairMutex<TerminalRuntimeState>>,
+    wakeup_tx: &async_channel::Sender<()>,
+    size: (&mut u16, &mut u16),
+) -> Option<bool> {
+    let recorded = if mismatch.recorded.is_empty() {
+        "-".to_string()
+    } else {
+        mismatch.recorded.join("\r\n              ")
+    };
+    let mut buf = String::from("\x1b[2J\x1b[3J\x1b[H\x1b[?25l\r\n");
+    buf.push_str("  \x1b[1;36m⟐ NexShell SSH\x1b[0m\r\n\r\n");
+    buf.push_str(&format!(
+        "  \x1b[1;31m⚠ {}\x1b[0m\r\n",
+        rust_i18n::t!("ssh_host_key_changed_title", host = mismatch.host)
+    ));
+    buf.push_str(&format!(
+        "  \x1b[31m{}\x1b[0m\r\n\r\n",
+        rust_i18n::t!("ssh_host_key_changed_hint")
+    ));
+    buf.push_str(&format!(
+        "  \x1b[37m{} {}\x1b[0m\r\n",
+        rust_i18n::t!("ssh_host_key_file"),
+        mismatch.path.display()
+    ));
+    buf.push_str(&format!(
+        "  \x1b[37m{} {recorded}\x1b[0m\r\n",
+        rust_i18n::t!("ssh_host_key_recorded")
+    ));
+    buf.push_str(&format!(
+        "  \x1b[37m{} {} {}\x1b[0m\r\n\r\n",
+        rust_i18n::t!("ssh_host_key_received"),
+        mismatch.actual_algorithm(),
+        mismatch.actual_fingerprint()
+    ));
+    buf.push_str(&format!(
+        "  \x1b[33m{}\x1b[0m ",
+        rust_i18n::t!("ssh_host_key_changed_prompt")
+    ));
+    remote_process_output(state, wakeup_tx, buf.as_bytes());
+
+    let (cols, rows) = size;
+    let mut apply_resize = |new_cols: u32, new_rows: u32| {
+        *cols = new_cols as u16;
+        *rows = new_rows as u16;
+        remote_handle_resize(state, wakeup_tx, *cols, *rows);
+    };
+    // 提示出现前敲的键不算回答
+    while let Ok(request) = request_rx.try_recv() {
+        match request {
+            ChannelRequest::Data(_) => {}
+            ChannelRequest::Resize(new_cols, new_rows) => apply_resize(new_cols, new_rows),
+            ChannelRequest::Close => return None,
+        }
+    }
+    loop {
+        match request_rx.recv().await? {
+            ChannelRequest::Data(data) => {
+                let Some(&byte) = data.first() else { continue };
+                return Some(matches!(byte, b'y' | b'Y'));
+            }
+            ChannelRequest::Resize(new_cols, new_rows) => apply_resize(new_cols, new_rows),
+            ChannelRequest::Close => return None,
+        }
+    }
 }
 
 /// 在终端里读一行密码（不回显，不经 term_encoding：SSH 密码按 UTF-8 发送）。

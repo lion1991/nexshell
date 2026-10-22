@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
@@ -6,7 +7,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use russh::client;
 use russh::keys::key::{self, PublicKey, SignatureHash};
-use russh::keys::known_hosts::{check_known_hosts_path, learn_known_hosts_path};
+use russh::keys::known_hosts::{
+    check_known_hosts_path, known_host_keys_path, learn_known_hosts_path,
+};
+use russh::keys::{parse_public_key_base64, PublicKeyBase64};
 use russh::{Channel, ChannelMsg, Disconnect, Preferred};
 use russh_sftp::client::SftpSession;
 use ssh_key::Certificate;
@@ -54,12 +58,146 @@ pub fn verify_host_key_at(
     }
 }
 
+/// OpenSSH 风格指纹：`SHA256:<base64>`。
+pub fn host_key_fingerprint(key: &PublicKey) -> String {
+    format!("SHA256:{}", key.fingerprint())
+}
+
+/// known_hosts 里主机名字段的写法：22 端口裸写，其他端口 `[host]:port`。
+fn known_hosts_host_field(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+/// 该主机在 known_hosts 中已记录的全部密钥指纹（含哈希条目）。
+pub fn recorded_host_key_fingerprints(path: &Path, host: &str, port: u16) -> Vec<String> {
+    known_host_keys_path(host, port, path)
+        .map(|keys| {
+            keys.into_iter()
+                .map(|(_, key)| host_key_fingerprint(&key))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 用户确认主机换过密钥后：删掉该主机的全部旧条目（等价 `ssh-keygen -R`），再记录新密钥。
+/// 明文条目按主机名字段匹配；哈希条目（`|1|…`）无法反查主机名，改按「密钥与该主机已记录密钥相同」判定。
+pub fn replace_host_key_at(
+    path: &Path,
+    host: &str,
+    port: u16,
+    key: &PublicKey,
+) -> Result<(), String> {
+    let host_field = known_hosts_host_field(host, port);
+    let recorded: Vec<String> = known_host_keys_path(host, port, path)
+        .map_err(|error| format!("known_hosts read failed: {error}"))?
+        .into_iter()
+        .map(|(_, key)| key.public_key_base64())
+        .collect();
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("known_hosts read failed: {error}")),
+    };
+    let mut rewritten = String::new();
+    for line in content.lines() {
+        if let Some(kept) = known_hosts_line_without_host(line, &host_field, &recorded) {
+            rewritten.push_str(kept.as_ref());
+            rewritten.push('\n');
+        }
+    }
+    std::fs::write(path, rewritten)
+        .map_err(|error| format!("known_hosts write failed: {error}"))?;
+    learn_known_hosts_path(host, port, key, path)
+        .map_err(|error| format!("known_hosts write failed: {error}"))
+}
+
+/// 去掉一行里属于该主机的部分：整行只有它则返回 None；多主机共用一行只摘掉它的名字。
+fn known_hosts_line_without_host<'a>(
+    line: &'a str,
+    host_field: &str,
+    recorded_keys: &[String],
+) -> Option<std::borrow::Cow<'a, str>> {
+    use std::borrow::Cow;
+    if line.starts_with('#') {
+        return Some(Cow::Borrowed(line));
+    }
+    let mut fields = line.splitn(2, ' ');
+    let (Some(hosts), Some(rest)) = (fields.next(), fields.next()) else {
+        return Some(Cow::Borrowed(line));
+    };
+    if hosts.starts_with("|1|") {
+        let key = rest.split(' ').nth(1).unwrap_or_default().trim();
+        let stale = parse_public_key_base64(key)
+            .map(|key| recorded_keys.contains(&key.public_key_base64()))
+            .unwrap_or(false);
+        return (!stale).then_some(Cow::Borrowed(line));
+    }
+    let remaining: Vec<&str> = hosts
+        .split(',')
+        .filter(|entry| *entry != host_field)
+        .collect();
+    if remaining.len() == hosts.split(',').count() {
+        return Some(Cow::Borrowed(line));
+    }
+    (!remaining.is_empty()).then(|| Cow::Owned(format!("{} {rest}", remaining.join(","))))
+}
+
+/// 主机密钥与 known_hosts 记录不符的详情，供终端标签向用户确认。
+#[derive(Debug, Clone)]
+pub struct SshHostKeyMismatch {
+    pub host: String,
+    pub port: u16,
+    pub path: PathBuf,
+    /// 已记录的指纹，可能多条（多种算法 / 哈希条目）。
+    pub recorded: Vec<String>,
+    pub actual: PublicKey,
+}
+
+impl SshHostKeyMismatch {
+    pub fn actual_fingerprint(&self) -> String {
+        host_key_fingerprint(&self.actual)
+    }
+
+    pub fn actual_algorithm(&self) -> &'static str {
+        self.actual.name()
+    }
+
+    pub fn message(&self) -> String {
+        rust_i18n::t!(
+            "ssh_host_key_changed",
+            host = self.host,
+            path = self.path.display().to_string()
+        )
+        .to_string()
+    }
+}
+
+/// connect() 失败原因：密钥变更单独成变体，其余只带可读文案。
+#[derive(Debug, Clone)]
+pub enum SshConnectError {
+    HostKeyChanged(SshHostKeyMismatch),
+    Other(String),
+}
+
+impl fmt::Display for SshConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HostKeyChanged(mismatch) => f.write_str(&mismatch.message()),
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
 /// 连接期共享的 host key 校验状态；失败原因回传给 connect() 组装可读提示。
 #[derive(Clone)]
 pub struct ClientHandler {
     host: String,
     port: u16,
-    reject_reason: Arc<StdMutex<Option<String>>>,
+    reject_reason: Arc<StdMutex<Option<SshConnectError>>>,
 }
 
 impl ClientHandler {
@@ -71,13 +209,13 @@ impl ClientHandler {
         }
     }
 
-    fn record_reject(&self, reason: String) {
+    fn record_reject(&self, reason: SshConnectError) {
         if let Ok(mut slot) = self.reject_reason.lock() {
             *slot = Some(reason);
         }
     }
 
-    fn take_reject_reason(&self) -> Option<String> {
+    fn take_reject_reason(&self) -> Option<SshConnectError> {
         self.reject_reason
             .lock()
             .ok()
@@ -100,24 +238,26 @@ impl client::Handler for ClientHandler {
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
         let Some(path) = default_known_hosts_path() else {
-            self.record_reject(rust_i18n::t!("ssh_known_hosts_unavailable").to_string());
+            self.record_reject(SshConnectError::Other(
+                rust_i18n::t!("ssh_known_hosts_unavailable").to_string(),
+            ));
             return Ok(false);
         };
         match verify_host_key_at(&path, &self.host, self.port, server_public_key) {
             Ok(HostKeyVerdict::Known) | Ok(HostKeyVerdict::Learned) => Ok(true),
             Ok(HostKeyVerdict::Changed) => {
-                self.record_reject(
-                    rust_i18n::t!(
-                        "ssh_host_key_changed",
-                        host = self.host,
-                        path = path.display().to_string()
-                    )
-                    .to_string(),
-                );
+                let recorded = recorded_host_key_fingerprints(&path, &self.host, self.port);
+                self.record_reject(SshConnectError::HostKeyChanged(SshHostKeyMismatch {
+                    host: self.host.clone(),
+                    port: self.port,
+                    path,
+                    recorded,
+                    actual: server_public_key.clone(),
+                }));
                 Ok(false)
             }
             Err(error) => {
-                self.record_reject(error);
+                self.record_reject(SshConnectError::Other(error));
                 Ok(false)
             }
         }
@@ -183,7 +323,7 @@ impl SshSession {
         host: &str,
         port: u16,
         options: SshConnectOptions,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, SshConnectError> {
         let mut cfg = client::Config::default();
         // 末位追加 ssh-rsa（SHA-1 签名），兼容只提供它的老设备（如 OpenSSH 6.x）；
         // 新服务器仍优先协商 ed25519 / ecdsa / rsa-sha2。
@@ -216,7 +356,7 @@ impl SshSession {
             .await
             .map_err(|error| match reason_probe.take_reject_reason() {
                 Some(reason) => reason,
-                None => format!("SSH connection failed: {error}"),
+                None => SshConnectError::Other(format!("SSH connection failed: {error}")),
             })?;
 
         Ok(Self {
@@ -528,5 +668,63 @@ mod tests {
             verify_host_key_at(&path, "10.0.0.1", 22, &rsa_key()).unwrap(),
             HostKeyVerdict::Changed
         );
+    }
+
+    #[test]
+    fn replace_host_key_drops_stale_entries_and_keeps_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let old = public_key();
+        let new = public_key();
+        let other = public_key();
+        // 同主机的明文、带端口、哈希条目都属旧记录；其他主机与注释保留。
+        let hashed_host = "|1|QHVpcEl5wtB7uAxtRhWVwvp8eRY=|c7A0vkJUDbRwc49GB9knV96TDLk=";
+        std::fs::write(
+            &path,
+            format!(
+                "# comment\nexample.com,10.0.0.9 {old}\nother.com {other}\n[example.com]:2222 {old}\n{hashed_host} {old}\n",
+                old = old.public_key_base64_line(),
+                other = other.public_key_base64_line(),
+            ),
+        )
+        .unwrap();
+
+        replace_host_key_at(&path, "example.com", 22, &new).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.starts_with("# comment\n10.0.0.9 "));
+        assert!(content.contains("\nother.com "));
+        assert!(!content.contains(hashed_host));
+        assert!(content.contains("[example.com]:2222 "));
+        assert_eq!(content.matches("example.com").count(), 2);
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &new).unwrap(),
+            HostKeyVerdict::Known
+        );
+        assert_eq!(
+            verify_host_key_at(&path, "other.com", 22, &other).unwrap(),
+            HostKeyVerdict::Known
+        );
+    }
+
+    #[test]
+    fn replace_host_key_on_missing_file_just_learns() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("known_hosts");
+        let key = public_key();
+        replace_host_key_at(&path, "example.com", 22, &key).unwrap();
+        assert_eq!(
+            verify_host_key_at(&path, "example.com", 22, &key).unwrap(),
+            HostKeyVerdict::Known
+        );
+    }
+
+    trait Base64Line {
+        fn public_key_base64_line(&self) -> String;
+    }
+    impl Base64Line for PublicKey {
+        fn public_key_base64_line(&self) -> String {
+            format!("{} {}", self.name(), self.public_key_base64())
+        }
     }
 }

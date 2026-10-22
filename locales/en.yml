@@ -489,5 +489,11 @@ toast_recording_saved: "Recording saved: %{path}"
 toast_recording_save_failed: "Failed to save recording: %{error}"
 
 # === SSH host key ===
-ssh_host_key_changed: "The SSH host key for %{host} does not match the one recorded in %{path}; the connection was aborted. If the host really rotated its key, remove the stale entry from that file and reconnect."
+ssh_host_key_changed: "The SSH host key for %{host} does not match the one recorded in %{path}; the connection was aborted. If the host really rotated its key, reconnect from the terminal tab and trust the new key."
+ssh_host_key_changed_title: "The SSH host key for %{host} has changed!"
+ssh_host_key_changed_hint: The host may have been reinstalled or rotated its key, or someone may be intercepting the connection. Verify the fingerprint first.
+ssh_host_key_file: "known_hosts:"
+ssh_host_key_recorded: "Recorded fingerprint:"
+ssh_host_key_received: "Received this time:"
+ssh_host_key_changed_prompt: If the host really rotated its key, press y to trust the new key and reconnect; any other key aborts.
 ssh_known_hosts_unavailable: Cannot locate known_hosts (HOME is unset), so the SSH host key cannot be verified; the connection was aborted.

@@ -489,5 +489,11 @@ toast_recording_saved: "日志已保存：%{path}"
 toast_recording_save_failed: "日志保存失败：%{error}"
 
 # === SSH host key ===
-ssh_host_key_changed: "%{host} 的 SSH 主机密钥与 %{path} 中记录的不一致，连接已中止。确认主机确实更换过密钥后，请删除该文件中对应的旧条目再重连。"
+ssh_host_key_changed: "%{host} 的 SSH 主机密钥与 %{path} 中记录的不一致，连接已中止。确认主机确实更换过密钥后，可在终端标签重新连接并信任新密钥。"
+ssh_host_key_changed_title: "%{host} 的 SSH 主机密钥已变更！"
+ssh_host_key_changed_hint: 主机可能重装或更换过密钥，也可能遭到中间人攻击。请先核对指纹。
+ssh_host_key_file: "known_hosts："
+ssh_host_key_recorded: "已记录指纹："
+ssh_host_key_received: "本次收到："
+ssh_host_key_changed_prompt: 确认主机确实更换过密钥后，按 y 信任新密钥并重新连接；按其他键中止。
 ssh_known_hosts_unavailable: 无法定位 known_hosts 文件（HOME 未设置），SSH 主机密钥无法校验，连接已中止。
