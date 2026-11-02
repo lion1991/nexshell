@@ -302,6 +302,19 @@ ADR: [ADR 0010](../adr/0010-warp-upstream-catch-up-preserves-nexshell-features.m
 | 证据 | `live_image_tests.rs` 5 项（单份 / 两份轮写的脏区上传、读不到沿用旧纹理、换尺寸重建、回收）；`renderer_tests.rs` `wait_for_gpu_frame_follows_the_fence`（真实 Metal 设备上的栅栏）；wgpu 在 macOS 用 `experimental-wgpu-renderer` 编译通过；真实 RDP 2026-10-10 短测：`gpu.live_image_upload` p50 0.08 ms / p95 0.82 ms / max 3.24 ms，EGFX 无解码错误；改分辨率、重连未测；加帧栅栏后再测约 3 分钟（含 AVC420 视频、反复最小化）：上传含等待 max 3.49 ms，未触发超时，画面正常 |
 | 状态 | `Pass`（2026-10-10 Matt 真机试用后确认） |
 
+### W-023 已隐藏时立即退出
+
+| 字段 | 内容 |
+| --- | --- |
+| 来源 | `e2a287a0e`（`objc/app.m` 的 `applicationShouldTerminate:`） |
+| 契约 | 非系统发起的退出，App 已隐藏时直接返回 `NSTerminateNow`，不走 hide 后再退出的流程 |
+| 消费端 | `src/main.rs` 的 `on_should_close_window`、`src/macos_window_util.rs`（ADR 0022） |
+| 风险 | 丢失后从 Dock 退出隐藏中的 App 要等 5 秒兜底才结束，期间进程和 Dock 指示点都还在 |
+| 必需证据 | `R` |
+| 候选位置 | `crates/warpui/src/platform/mac/objc/app.m` |
+| 证据 | 调试构建实测 2026-11-01：隐藏后发 quit Apple Event，0.19 s 退出（未用真实 Dock 菜单，未做去掉补丁的对照） |
+| 状态 | `In Progress`（待 Matt 真机确认） |
+
 ## 3. 官方历史接管项
 
 这些提交当前以 cherry-pick 形式位于私有分支。目标不是保留重复提交，而是证明目标官方历史包含等价或更新实现。

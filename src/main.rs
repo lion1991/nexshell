@@ -1140,6 +1140,13 @@ fn main() -> Result<()> {
 
     // 点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）
     callbacks.on_should_close_window = Some(Box::new(move |window_id, ctx| {
+        // macOS 主窗口的 X 只隐藏 App、保留会话，退出走菜单 / Dock（ADR 0022）。
+        #[cfg(target_os = "macos")]
+        if ctx.root_view::<RootView>(window_id).is_some() {
+            macos_window_util::hide_app_exiting_fullscreen();
+            return ApproveTerminateResult::Cancel;
+        }
+
         let running_count = flags_for_close
             .lock()
             .map(|flags| {

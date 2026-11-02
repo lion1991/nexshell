@@ -6,6 +6,7 @@ use cocoa::base::{id, nil, BOOL, NO};
 use cocoa::foundation::NSString;
 use objc::runtime::Class;
 use objc::{class, msg_send, sel, sel_impl};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, OnceLock};
 
 // NSFloatingWindowLevel = 3 (CGWindowLevelForKey(kCGFloatingWindowLevelKey))
@@ -119,6 +120,64 @@ pub fn app_visibility_events() -> async_channel::Receiver<bool> {
             rx
         })
         .clone()
+}
+
+/// 进程级常驻的通知观察者。
+unsafe fn observe_notification(name: &str, handler: impl Fn(id) + 'static) {
+    let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
+    let name = NSString::alloc(nil).init_str(name);
+    let block = ConcreteBlock::new(handler).copy();
+    let _observer: id = msg_send![
+        center,
+        addObserverForName: name
+        object: nil
+        queue: nil
+        usingBlock: &*block
+    ];
+    std::mem::forget(block);
+}
+
+/// 隐藏整个 App（等同 Cmd+H）。有全屏窗口时 `hide:` 不生效，先退全屏，动画结束再隐藏。
+pub fn hide_app_exiting_fullscreen() {
+    static INSTALL_OBSERVERS: Once = Once::new();
+    static HIDE_AFTER_TRANSITION: AtomicBool = AtomicBool::new(false);
+    const NS_WINDOW_STYLE_MASK_FULL_SCREEN: u64 = 1 << 14;
+
+    INSTALL_OBSERVERS.call_once(|| unsafe {
+        observe_notification("NSWindowDidExitFullScreenNotification", |_| {
+            if HIDE_AFTER_TRANSITION.swap(false, Ordering::Relaxed) {
+                hide_app_exiting_fullscreen();
+            }
+        });
+        // 进入全屏动画中 toggle 会被忽略，DidEnter 回调里立刻 toggle 同样无效，要延后。
+        observe_notification("NSWindowDidEnterFullScreenNotification", |notification| {
+            if HIDE_AFTER_TRANSITION.load(Ordering::Relaxed) {
+                let window: id = msg_send![notification, object];
+                let _: () = msg_send![
+                    window,
+                    performSelector: sel!(toggleFullScreen:)
+                    withObject: nil
+                    afterDelay: 0.1f64
+                ];
+            }
+        });
+    });
+
+    unsafe {
+        let app: id = cocoa::appkit::NSApp();
+        let windows: id = msg_send![app, windows];
+        let count: usize = msg_send![windows, count];
+        for index in 0..count {
+            let window: id = msg_send![windows, objectAtIndex: index];
+            let style_mask: u64 = msg_send![window, styleMask];
+            if style_mask & NS_WINDOW_STYLE_MASK_FULL_SCREEN != 0 {
+                HIDE_AFTER_TRANSITION.store(true, Ordering::Relaxed);
+                let _: () = msg_send![window, toggleFullScreen: nil];
+                return;
+            }
+        }
+        let _: () = msg_send![app, hide: nil];
+    }
 }
 
 pub fn set_window_alpha(alpha: f64) {
