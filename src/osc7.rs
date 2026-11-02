@@ -8,19 +8,28 @@
 
 use std::{path::PathBuf, sync::OnceLock};
 
-/// 本机 hostname（gethostname），首次调用后缓存。取不到时回退空串。
+/// 本机 hostname，首次调用后缓存。取不到时回退空串。
 pub fn local_hostname() -> &'static str {
     static CACHE: OnceLock<String> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let mut buf = [0u8; 256];
-        // SAFETY: buf 长度传给 libc，返回后按 NUL 截断
-        let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len() - 1) };
-        if rc != 0 {
-            return String::new();
-        }
-        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-        String::from_utf8(buf[..end].to_vec()).unwrap_or_default()
-    })
+    CACHE.get_or_init(system_hostname)
+}
+
+#[cfg(unix)]
+fn system_hostname() -> String {
+    let mut buf = [0u8; 256];
+    // SAFETY: buf 长度传给 libc，返回后按 NUL 截断
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len() - 1) };
+    if rc != 0 {
+        return String::new();
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8(buf[..end].to_vec()).unwrap_or_default()
+}
+
+// libc 只声明给 Unix；Windows 由系统提供该环境变量。
+#[cfg(not(unix))]
+fn system_hostname() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
 /// host 段是否算本机：空 / localhost / 与本机名的第一个 DNS label 相等

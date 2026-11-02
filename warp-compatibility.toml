@@ -2,6 +2,6 @@ schema_version = 1
 
 [warp]
 official_upstream = "86cfeb9006da7865d7f27f33228ed0f581d49f02"
-integration_mirror = "b900419d781aa597206138bd6cb85a52c925809c"
+integration_mirror = "5bf047181e96066937aa316b434f632c64836d08"
 relative_path = "../warp"
 remote = "git@github.com:lion1991/warp-nexshell.git"

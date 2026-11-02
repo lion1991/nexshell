@@ -145,6 +145,11 @@ rustc 版本，rustup 会在首个 cargo 调用时自动装到上面的 `RUSTUP_
 
 ## 5. 发版操作手册
 
+发版前先确认两点。本地只构建 macOS，Windows 编译错误不会自己暴露；v0.6.1–v0.6.8 就因此连续失败。
+
+- 跑 `cargo check --target x86_64-pc-windows-gnu`，通过再推。
+- `warp-compatibility.toml` 的 `integration_mirror` 要等于要发布的 warp HEAD，否则 Windows 版拿不到新的 warp 提交。
+
 正常发版，完整命令序列：
 
 ```bash
