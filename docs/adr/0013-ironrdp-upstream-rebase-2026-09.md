@@ -41,9 +41,22 @@ ADR 0011 基线（上游 `872845c` + 12 个 fork 补丁，rev `d9ee675`）之后
 - 处理：CoreAudio 输出 AudioUnit 会转换整数 PCM。实测 MacBook 扬声器只报 F32，按 I16 / 44.1 kHz 建流正常。故 macOS 上只比较声道数与采样率。
 - 影响：NexShell 自 v0.6.0（ADR 0011）起 Mac 无声，本补丁修复。
 
+### 追加修复：上游单点摘取（2026-11-01，Matt 拍板）
+
+只摘改动小、独立、能直接合入的修复，不追平整个上游。
+
+| 上游 | 取舍 | 原因 |
+|---|---|---|
+| #2174 `0f9154d2` 驱动器不支持的 IRP | 已摘，fork `36be10eb` | 共享盘默认开启；否则这类请求会让会话断开且不自动重连 |
+| #2084 `9409486b` 越界桌面尺寸 | 已摘，fork `538af770` | 挡住服务端宣告 65535² 时约 17GB 的画面缓冲 |
+| #2053 `cd5739d1` cliprdr 请求配对 | 不做 | `clipboard/remote.rs` 已串行，同时只有一个请求在途，不会错配 |
+| #1980 `124406d8` 剪贴板失败不断会话 | 不做 | `write_cliprdr` 和 `submit` 已有同样效果；server 部分用不到 |
+| #2083 `134493ec` SVC 压缩分片上限 | 下次追平时带上 | 只防恶意服务端，修完仍可声明约 4GB；4 个文件有冲突 |
+| #2173 `c3dd17e6` DRDYNVC v3 压缩 | 追平时或有实证再做 | 上游未对真实 Windows 测过；超长 DVC 块由丢弃变报错，在 NexShell 会断会话 |
+
 ## 基线
 
-- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。其上追加 ADR 0014 的补丁（决策 8–13、15）与上面的音频补丁，当前 rev `287f337d`。
+- IronRDP：fork rev `65cb3a93cf26d96682de4f2b9560efa42d9a8d28`（分支 `nexshell-2026-09`），上游合并基 `9b151c4c`。其上追加 ADR 0014 的补丁（决策 8–13、15）、上面的音频补丁与上游单点摘取，当前 rev `538af770`。
 - IronRDP 验证：`ironrdp-egfx` 单测 62 通过；`ironrdp-testsuite-core` 1684 通过（含上游 #1848 Haven 真机 Progressive fixtures）；改动 crate clippy 无新告警。
 - NexShell 验证：`cargo check --all-targets`（aarch64 / x86_64 macOS）、lib 测试 480、bin 测试 195 通过。Windows（x86_64-pc-windows-gnu）交叉检查中 ironrdp 全部依赖编译通过，仅 `src/osc7.rs` 的 `libc::gethostname` 报错——main 上 `f47bfb5` 引入的既有问题，与本次无关，不混入。
 - 回放证据：Win11 EGFX dump（1205 条记录 / 1069 帧），`egfx_replay` 新旧逐帧 hash 完全一致、0 解码失败。该 dump 以 Progressive 为主，AVC420 路径的改写仅由单测覆盖（语义不变，只换类型）。
