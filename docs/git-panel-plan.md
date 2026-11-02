@@ -269,3 +269,13 @@ worker 跑完发 `Refresh` 自更新。
    只透传 porcelain v2 的 unmerged 行。
 5. **`git pull` / `push` 走面板按钮还是塞到终端 stdin**：v1 走面板按钮 + worker
    后台调用；若需要看实时输出（如 push 进度），日后再考虑往当前 PTY 注入命令。
+
+## 已知问题：建 watcher 时卡住（待处理）
+
+2026-11-01 在 macOS 27.2 上测得，未修。
+
+- **现象**：两轮完整测试并发时，带真实 worker 的 `git_panel` 测试偶发失败，单独跑全部通过。失败与 3 秒超时、CPU 负载无关：测试最多等约 27 秒（10 轮 × 3 秒，`Loading` 占 1 轮）。
+- **机制**：每个 worker 建 watcher 时，`fseventsd` 卡约 1.5 秒，无关进程注册 FSEvents 也要排队，卡顿会累加。完整测试一份最慢 8.7 秒，两份 21.5 秒；纯文件负载和其余 559 个测试都在 25 毫秒内。线程栈停在 `FSEventStreamStart → f2d_register_rpc`。
+- **未知**：为什么卡约 1.5 秒（简单的 FSEvents 注册程序不会触发）；是否 macOS 27.2 才有。
+- **App 影响未实测**：`SetCwd` 先 `build_repo_watcher` 再 `emit_snapshot`，推断首次进入仓库时面板会多等约 1.5 秒。
+- **处理（Matt 决定先记录）**：下次改 Git 面板或发版时，先量 App 里首次进入仓库的耗时。确有约 1.5 秒就改为先发快照再建 watcher，并补一次刷新，防止漏掉这段时间的变更；感觉不到就只放宽测试等待。这个改法不能消除 `fseventsd` 卡顿，worker 单线程也仍会让紧接着的请求排队。
