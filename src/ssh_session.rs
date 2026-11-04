@@ -480,47 +480,12 @@ impl SshSession {
         command: &str,
         timeout: Duration,
     ) -> Result<SshExecOutput, String> {
-        tokio::time::timeout(timeout, async {
-            let mut channel = self
-                .handle
-                .channel_open_session()
-                .await
-                .map_err(|error| format!("Exec channel open failed: {error}"))?;
-            channel
-                .exec(true, command)
-                .await
-                .map_err(|error| format!("Exec request failed: {error}"))?;
-
-            let mut stdout = Vec::new();
-            let mut stderr = Vec::new();
-            let mut exit_status = None;
-
-            while let Some(msg) = channel.wait().await {
-                match msg {
-                    ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
-                    ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
-                    ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
-                    _ => {}
-                }
-            }
-
-            if exit_status.unwrap_or(0) != 0 {
-                let detail = String::from_utf8_lossy(&stderr).trim().to_string();
-                return Err(if detail.is_empty() {
-                    format!("Exec command exited with status {:?}", exit_status)
-                } else {
-                    detail
-                });
-            }
-
-            Ok(SshExecOutput {
-                stdout,
-                stderr,
-                exit_status,
-            })
-        })
-        .await
-        .map_err(|_| "Exec command timed out".to_string())?
+        let deadline = tokio::time::Instant::now() + timeout;
+        let channel = tokio::time::timeout_at(deadline, self.handle.channel_open_session())
+            .await
+            .map_err(|_| EXEC_TIMED_OUT.to_string())?
+            .map_err(|error| format!("Exec channel open failed: {error}"))?;
+        run_exec(channel, command, deadline).await
     }
 
     /// 测一次 SSH 协议层 RTT：对 channel_open_session 的服务端确认计时（≈1 个网络往返），
@@ -577,10 +542,152 @@ impl SshSession {
     }
 }
 
+const EXEC_TIMED_OUT: &str = "Exec command timed out";
+
+/// 超时要主动关通道：russh 丢弃 Channel 时不发 close，通道会一直占着服务端的会话名额（MaxSessions）。
+async fn run_exec(
+    mut channel: Channel<client::Msg>,
+    command: &str,
+    deadline: tokio::time::Instant,
+) -> Result<SshExecOutput, String> {
+    let result = tokio::time::timeout_at(deadline, async {
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|error| format!("Exec request failed: {error}"))?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_status = None;
+
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
+                ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
+                _ => {}
+            }
+        }
+
+        if exit_status.unwrap_or(0) != 0 {
+            let detail = String::from_utf8_lossy(&stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("Exec command exited with status {:?}", exit_status)
+            } else {
+                detail
+            });
+        }
+
+        Ok(SshExecOutput {
+            stdout,
+            stderr,
+            exit_status,
+        })
+    })
+    .await;
+
+    match result {
+        Ok(output) => output,
+        Err(_) => {
+            // 连接卡死时 close 也可能发不出去，不能让它拖住调用方。
+            let _ = tokio::time::timeout(Duration::from_secs(1), channel.close()).await;
+            Err(EXEC_TIMED_OUT.to_string())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use russh::keys::key::KeyPair;
+    use russh::server::{self, Auth, Msg, Session};
+    use russh::ChannelId;
+    use tokio::sync::oneshot;
+
+    struct CloseProbeServer {
+        closed: Option<oneshot::Sender<()>>,
+    }
+
+    #[async_trait]
+    impl server::Handler for CloseProbeServer {
+        type Error = russh::Error;
+
+        async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
+            Ok(Auth::Accept)
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            _channel: Channel<Msg>,
+            _session: &mut Session,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+
+        async fn channel_close(
+            &mut self,
+            _channel: ChannelId,
+            _session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            if let Some(closed) = self.closed.take() {
+                let _ = closed.send(());
+            }
+            Ok(())
+        }
+    }
+
+    struct AcceptAnyKey;
+
+    #[async_trait]
+    impl client::Handler for AcceptAnyKey {
+        type Error = russh::Error;
+
+        async fn check_server_key(&mut self, _key: &PublicKey) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn timed_out_exec_closes_the_channel_on_the_server() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let (closed_tx, closed_rx) = oneshot::channel();
+            tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let config = Arc::new(server::Config {
+                    keys: vec![KeyPair::generate_ed25519()],
+                    ..Default::default()
+                });
+                let handler = CloseProbeServer {
+                    closed: Some(closed_tx),
+                };
+                let session = server::run_stream(config, stream, handler).await.unwrap();
+                let _ = session.await;
+            });
+
+            let mut handle =
+                client::connect(Arc::new(client::Config::default()), addr, AcceptAnyKey)
+                    .await
+                    .unwrap();
+            assert!(handle.authenticate_none("tester").await.unwrap());
+            let channel = handle.channel_open_session().await.unwrap();
+
+            // 服务端不回 exec，模拟远端脚本跑不完。
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+            let error = run_exec(channel, "sleep 60", deadline).await.err().unwrap();
+
+            assert_eq!(error, EXEC_TIMED_OUT);
+            tokio::time::timeout(Duration::from_secs(5), closed_rx)
+                .await
+                .expect("server should see channel close")
+                .unwrap();
+        });
+    }
 
     fn public_key() -> PublicKey {
         KeyPair::generate_ed25519().clone_public_key().unwrap()

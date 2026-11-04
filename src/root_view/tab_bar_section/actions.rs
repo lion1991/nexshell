@@ -767,8 +767,9 @@ impl RootView {
         if self.active_tab_index == index {
             self.terminal = new_terminal;
             self.reset_active_terminal_view_state();
-            self.sync_host_overview_monitor(ctx);
         }
+        // 不限当前标签：代码查看器 / Git Diff 的侧栏显示的是来源终端的概览。
+        self.sync_host_overview_monitor(ctx);
 
         self.show_tab_right_click_menu = None;
         ctx.focus_self(); // 收回键盘焦点，否则回车会重放右键菜单项

@@ -306,8 +306,8 @@ Inter-|   Receive                                                |  Transmit
 123 root 7270 0.7 sshd-session sshd-session: root@pts/0
 124 root 6246 0.7 top top -b -n 1
 [exe]
-123	/usr/sbin/sshd
-124	/usr/bin/top
+123 /usr/sbin/sshd
+124 /usr/bin/top
 "#,
         )
         .expect("previous probe should parse");
@@ -339,8 +339,8 @@ Inter-|   Receive                                                |  Transmit
 124 root 6246 0.7 top top -b -n 1
 2 root 0 0.3 rcu_preempt [rcu_preempt]
 [exe]
-123	/usr/sbin/sshd
-124	/usr/bin/top
+123 /usr/sbin/sshd
+124 /usr/bin/top
 "#,
         )
         .expect("current probe should parse");
@@ -394,6 +394,9 @@ Inter-|   Receive                                                |  Transmit
         assert!(command.contains("[sock_udp]"));
         assert!(command.contains("ss -Hntan"));
         assert!(!command.contains("top"));
+        // 回归：逐进程 readlink 在数千进程的机器上会让采集超时。
+        assert!(!command.contains("readlink"));
+        assert!(command.contains("timeout 7 sh"));
     }
 
     #[test]

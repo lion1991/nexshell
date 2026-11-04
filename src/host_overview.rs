@@ -16,7 +16,20 @@ use crate::{
     terminal_runtime::RemoteSshConfig,
 };
 
-pub const HOST_OVERVIEW_COLLECT_COMMAND: &str = r#"printf '%s\n' 'NEXSHELL_HOST_OVERVIEW_V1'
+/// 脚本从 stdin 交给 `timeout`，到时退出，不在远端堆积（busybox 只杀 sh，子进程要等自己结束）；
+/// 时限要小于 COLLECT_TIMEOUT。
+/// 先试跑一次 `timeout`：老版 busybox 的用法不同，不能用就不限时。
+/// [exe] 不能逐进程起子进程，大机器上数千个进程会让一轮采集超时；
+/// 用 sed 只留读得到的路径，否则普通用户每轮要多传一行行读不到的记录。
+pub const HOST_OVERVIEW_COLLECT_COMMAND: &str = r#"nexshell_run() {
+if timeout 7 true >/dev/null 2>&1; then
+timeout 7 sh || { echo 'host overview collect timed out' >&2; exit 124; }
+else
+sh
+fi
+}
+nexshell_run <<'NEXSHELL_EOF'
+printf '%s\n' 'NEXSHELL_HOST_OVERVIEW_V1'
 printf '%s\n' '[identity]'
 (hostname 2>/dev/null || uname -n 2>/dev/null || printf '%s\n' '')
 (whoami 2>/dev/null || id -un 2>/dev/null || printf '%s\n' '')
@@ -36,7 +49,7 @@ printf '%s\n' '[net]'
 printf '%s\n' '[ps]'
 (ps -eo pid=,user=,rss=,pcpu=,comm=,args= --sort=-pcpu 2>/dev/null || printf '%s\n' '')
 printf '%s\n' '[exe]'
-(for d in /proc/[0-9]*; do pid=${d##*/}; link=$(readlink "$d/exe" 2>/dev/null); [ -n "$link" ] && printf '%s\t%s\n' "$pid" "$link"; done 2>/dev/null || printf '%s\n' '')
+(ls -ln /proc/[0-9]*/exe 2>/dev/null | sed -n 's|^[^/]*/proc/\([0-9]*\)/exe -> |\1 |p')
 printf '%s\n' '[sock_tcp]'
 (ss -Hntan -p -i 2>/dev/null || printf '%s\n' '')
 printf '%s\n' '[sock_udp]'
@@ -44,7 +57,9 @@ printf '%s\n' '[sock_udp]'
 printf '%s\n' '[disk]'
 (df -P -k 2>/dev/null | tail -n +2 || printf '%s\n' '')
 printf '%s\n' '[diskio]'
-(cat /proc/diskstats 2>/dev/null || printf '%s\n' '')"#;
+(cat /proc/diskstats 2>/dev/null || printf '%s\n' '')
+NEXSHELL_EOF
+"#;
 
 const MAGIC: &str = "NEXSHELL_HOST_OVERVIEW_V1";
 const HISTORY_LIMIT: usize = 150;
@@ -109,7 +124,7 @@ pub struct ProcessMetric {
     pub command: String,
     /// 完整命令行（含参数）
     pub args: String,
-    /// readlink /proc/[pid]/exe 结果
+    /// /proc/[pid]/exe 指向的路径；无权限读取时为空
     pub exe_path: Option<String>,
 }
 
@@ -922,7 +937,7 @@ async fn run_host_overview_monitor(
                     "connect err host={host_label} elapsed={:?} error={error}",
                     connect_started.elapsed()
                 );
-                if tx.send(HostOverviewEvent::Error(error)).await.is_err() {
+                if !report_monitor_error(&tx, &shutdown, error).await {
                     return;
                 }
                 sleep_or_shutdown(refresh_interval, &shutdown).await;
@@ -1001,7 +1016,7 @@ async fn run_host_overview_monitor(
                     }
                     Err(error) => {
                         ho_debug!("parse err host={host_label} error={error}");
-                        if tx.send(HostOverviewEvent::Error(error)).await.is_err() {
+                        if !report_monitor_error(&tx, &shutdown, error).await {
                             return;
                         }
                     }
@@ -1012,7 +1027,7 @@ async fn run_host_overview_monitor(
                     // 单次抖动：保留上一帧数据、不拆连接，下轮重试；
                     // 连续多次才判定连接已死，报错并重连
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                        if tx.send(HostOverviewEvent::Error(error)).await.is_err() {
+                        if !report_monitor_error(&tx, &shutdown, error).await {
                             return;
                         }
                         session.close().await;
@@ -1028,6 +1043,15 @@ async fn run_host_overview_monitor(
             .await;
         }
     }
+}
+
+/// 返回 false 表示采集该退出。已叫停的旧线程不再上报：标签重连后，它晚到的错误会盖住新连接的状态。
+async fn report_monitor_error(
+    tx: &async_channel::Sender<HostOverviewEvent>,
+    shutdown: &AtomicBool,
+    error: String,
+) -> bool {
+    !shutdown.load(Ordering::Relaxed) && tx.send(HostOverviewEvent::Error(error)).await.is_ok()
 }
 
 // pub(crate)：容器监控复用同一套 SSH 认证流程。
@@ -1394,20 +1418,14 @@ fn parse_processes(lines: &[String], exe_map: &HashMap<u32, String>) -> Vec<Proc
 }
 
 fn parse_exe_links(lines: &[String]) -> HashMap<u32, String> {
-    let mut map = HashMap::new();
-    for line in lines {
-        let mut parts = line.splitn(2, '\t');
-        let pid = match parts.next().and_then(|s| s.parse::<u32>().ok()) {
-            Some(pid) => pid,
-            None => continue,
-        };
-        if let Some(path) = parts.next() {
-            if !path.is_empty() {
-                map.insert(pid, path.to_string());
-            }
-        }
-    }
-    map
+    lines
+        .iter()
+        .filter_map(|line| {
+            let (pid, path) = line.split_once(' ')?;
+            let pid = pid.parse::<u32>().ok()?;
+            (!path.is_empty()).then(|| (pid, path.to_string()))
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -1694,6 +1712,91 @@ mod tests {
         compare_processes, split_rate, HostOverviewResume, HostOverviewSnapshot, NetworkMetric,
         NetworkRatePoint, ProcessMetric, ProcessSortKey,
     };
+
+    #[test]
+    fn exe_links_keep_spaces_in_paths_and_skip_malformed_lines() {
+        let lines = [
+            "1 /usr/bin/bash",
+            "42 /opt/my app/run",
+            "bad /usr/bin/x",
+            "7",
+            "",
+        ]
+        .map(String::from);
+
+        let links = super::parse_exe_links(&lines);
+
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[&1], "/usr/bin/bash");
+        assert_eq!(links[&42], "/opt/my app/run");
+    }
+
+    /// 真跑一遍采集命令，防止 shell 语法或 heredoc 写坏后所有主机的面板都没数据。
+    #[cfg(unix)]
+    #[test]
+    fn collect_command_runs_in_a_posix_shell() {
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(super::HOST_OVERVIEW_COLLECT_COMMAND)
+            .output()
+            .unwrap();
+
+        assert!(output.status.success(), "{output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("[exe]") && stdout.contains("[diskio]"));
+        super::parse_probe_output(&stdout).unwrap();
+    }
+
+    #[test]
+    fn stopped_monitor_does_not_report_a_late_error() {
+        use super::{spawn_host_overview_monitor, HostOverviewEvent, HostOverviewStatus};
+        use crate::terminal_runtime::RemoteSshConfig;
+        use std::{net::TcpListener, time::Duration};
+
+        // 接受连接但不回 banner，让采集线程停在连接阶段。
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let config = RemoteSshConfig {
+            host: "127.0.0.1".to_string(),
+            port: listener.local_addr().unwrap().port(),
+            username: "tester".to_string(),
+            auth_method: "password".to_string(),
+            password: Some("secret".to_string()),
+            private_key: None,
+            key_passphrase: None,
+            ca_cert: None,
+            keep_alive_enabled: false,
+            keep_alive_interval: 30,
+            keep_alive_max_failures: 3,
+            tcp_connect_timeout: 30,
+            auth_timeout: 30,
+            term_encoding: "utf-8".to_string(),
+        };
+        let (handle, events) = spawn_host_overview_monitor(
+            config,
+            Duration::from_secs(1),
+            HostOverviewResume::default(),
+        )
+        .unwrap();
+
+        match events.recv_blocking().unwrap() {
+            HostOverviewEvent::Snapshot(snapshot) => {
+                assert_eq!(snapshot.status, HostOverviewStatus::Collecting)
+            }
+            other => panic!("unexpected first event: {other:?}"),
+        }
+        let (socket, _) = listener.accept().unwrap();
+
+        // 模拟标签重连：先叫停旧采集，它的连接随后才失败。
+        handle.stop();
+        drop(socket);
+
+        while let Ok(event) = events.recv_blocking() {
+            assert!(
+                !matches!(event, HostOverviewEvent::Error(_)),
+                "stopped monitor reported: {event:?}"
+            );
+        }
+    }
 
     #[test]
     fn equal_sort_values_keep_a_stable_pid_order() {
