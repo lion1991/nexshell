@@ -5,8 +5,9 @@
 use crate::RootView;
 use nexshell::host_management::{
     default_database_path, delete_hosts_from_db_path, draft_host_id,
-    load_or_initialize_host_management_snapshot_from_db_path, update_host_sort_orders,
-    upsert_host_card_in_db_path, HostCardSnapshot, HostClipboardOp, HostViewMode,
+    load_or_initialize_host_management_snapshot_from_db_path, set_hosts_group_in_db,
+    update_host_sort_orders, upsert_host_card_in_db_path, HostCardSnapshot, HostClipboardOp,
+    HostViewMode,
 };
 use pathfinder_geometry::rect::RectF;
 use warpui::ViewContext;
@@ -102,6 +103,50 @@ impl RootView {
             Err(error) => {
                 self.host_state.notice =
                     Some(rust_i18n::t!("toast_delete_failed", error = error).to_string());
+            }
+        }
+    }
+
+    pub(super) fn move_hosts_to_group(&mut self, host_ids: Vec<String>, group_id: Option<String>) {
+        let Some(db_path) = default_database_path() else {
+            self.host_state.notice =
+                Some(rust_i18n::t!("toast_host_library_unavailable_save").to_string());
+            return;
+        };
+        let group_label = group_id
+            .as_deref()
+            .and_then(|id| {
+                self.host_state
+                    .snapshot
+                    .groups
+                    .iter()
+                    .find(|g| g.id == id)
+                    .map(|g| g.label.clone())
+            })
+            .unwrap_or_else(|| rust_i18n::t!("form_no_group").to_string());
+        // 从多选集合发起的（多选栏，或右键目标在选中集里）移完就收起选择栏
+        let from_selection = host_ids
+            .iter()
+            .all(|id| self.host_state.selected_host_ids.contains(id));
+        let result = set_hosts_group_in_db(&db_path, &host_ids, group_id.as_deref())
+            .and_then(|moved| self.load_host_snapshot_from_db().map(|()| moved));
+        match result {
+            Ok(moved) => {
+                if from_selection {
+                    self.host_state.clear_selection();
+                }
+                self.host_state.notice = Some(
+                    rust_i18n::t!(
+                        "toast_hosts_moved_to_group",
+                        count = moved,
+                        group = group_label
+                    )
+                    .to_string(),
+                );
+            }
+            Err(error) => {
+                self.host_state.notice =
+                    Some(rust_i18n::t!("toast_move_to_group_failed", error = error).to_string());
             }
         }
     }

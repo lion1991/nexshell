@@ -178,6 +178,8 @@ file_panel_ctx_open_with_viewer: 用编辑器打开
 host_ctx_connect: 连接
 host_ctx_edit: 编辑
 host_ctx_rename: 重命名
+host_ctx_move_to_group: 移到分组…
+host_ctx_manage_groups: 管理分组…
 host_ctx_copy: 复制
 host_ctx_cut: 剪切
 host_ctx_paste: 粘贴
@@ -328,6 +330,8 @@ toast_restore_failed: "恢复主机失败：%{error}"
 toast_rename_failed: "重命名主机失败：%{error}"
 toast_hosts_refreshed: 已刷新主机库
 toast_hosts_deleted: "已删除 %{count} 台主机"
+toast_hosts_moved_to_group: "已把 %{count} 台主机移到「%{group}」"
+toast_move_to_group_failed: "移动分组失败：%{error}"
 toast_hosts_deleted_refresh_fail: "已删除 %{count} 台主机，但刷新失败：%{error}"
 toast_save_failed: "保存主机失败：%{error}"
 toast_delete_failed: "删除主机失败：%{error}"
@@ -355,6 +359,7 @@ host_selected_count: "已选择 %{count} 台"
 host_selected_hosts: "已选择 %{count} 台主机"
 host_connect: 连接
 host_move: 移动
+host_move_to_group: 分组
 host_delete: 删除
 host_cancel: 取消
 host_privacy: 隐私

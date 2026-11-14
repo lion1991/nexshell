@@ -418,7 +418,7 @@ impl RootView {
     ) {
         // 右键目标高亮：独立状态，不进 selected_host_ids（不触发底部选择栏）
         self.host_state.context_menu_target = Some(host_id.clone());
-        let items = self.host_card_context_menu_items(&host_id);
+        let items = self.host_card_context_menu_items(&host_id, position);
         if items.is_empty() {
             return;
         }
@@ -441,6 +441,7 @@ impl RootView {
     fn host_card_context_menu_items(
         &self,
         host_id: &str,
+        position: Vector2F,
     ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
         use nexshell::menu::{MenuItem, MenuItemFields};
         let endpoint = self
@@ -460,6 +461,12 @@ impl RootView {
                 .into_item(),
             MenuItemFields::new(rust_i18n::t!("host_ctx_rename"))
                 .with_on_select_action(TerminalGridAction::HostRenameInline(host_id.to_string()))
+                .into_item(),
+            MenuItemFields::new(rust_i18n::t!("host_ctx_move_to_group"))
+                .with_on_select_action(TerminalGridAction::HostShowGroupPicker {
+                    host_id: Some(host_id.to_string()),
+                    position,
+                })
                 .into_item(),
             MenuItem::Separator,
             MenuItemFields::new(rust_i18n::t!("host_ctx_copy"))
@@ -492,6 +499,94 @@ impl RootView {
                 .with_on_select_action(TerminalGridAction::HostEnterReorderMode)
                 .into_item(),
         ]
+    }
+
+    /// 在主机右键菜单的位置弹出分组列表（独立菜单，不在原菜单里换内容：一次点击派发的
+    /// Select/item/Close 是倒序执行的，原地换内容会被随后的 Close 和过期 Select 打乱）。
+    /// host_id 为 None（多选栏）或右键目标在多选集合里时作用于整个选中集，否则只改那一台。
+    pub(crate) fn show_host_group_picker(
+        &mut self,
+        host_id: Option<String>,
+        position: Vector2F,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let selected = &self.host_state.selected_host_ids;
+        let host_ids: Vec<String> = match &host_id {
+            Some(id) if !selected.contains(id) => vec![id.clone()],
+            _ => selected.iter().cloned().collect(),
+        };
+        if host_ids.is_empty() {
+            return;
+        }
+        self.host_state.context_menu_target = host_id;
+        let items = self.host_group_picker_items(host_ids);
+        self.host_group_picker_menu.update(ctx, |menu, view_ctx| {
+            menu.set_items(items, view_ctx);
+            menu.set_origin(Some(position));
+        });
+        self.show_host_group_picker_menu = Some(position);
+        self.show_host_card_context_menu = None;
+        self.show_file_panel_context_menu = None;
+        self.show_git_panel_context_menu = None;
+        self.show_terminal_context_menu = None;
+        self.show_tab_right_click_menu = None;
+        self.show_process_list_context_menu = None;
+        self.new_session_menu_open = false;
+        self.settings_menu_open = false;
+        ctx.focus(&self.host_card_context_menu);
+        ctx.notify();
+    }
+
+    fn host_group_picker_items(
+        &self,
+        host_ids: Vec<String>,
+    ) -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+        use nexshell::menu::{MenuItem, MenuItemFields};
+        use nexshell::ui_components::icons::Icon;
+
+        // 目标们同属一个分组时才打勾；混合分组不标当前项
+        let mut groups_of_targets = host_ids
+            .iter()
+            .filter_map(|id| self.host_state.host_by_id(id))
+            .map(|h| h.group_id.clone());
+        let first = groups_of_targets.next();
+        let current: Option<Option<String>> = match first {
+            Some(g) if groups_of_targets.all(|other| other == g) => Some(g),
+            _ => None,
+        };
+
+        let entry = |label: String, group_id: Option<String>| {
+            let fields = MenuItemFields::new(label);
+            let fields = if current.as_ref() == Some(&group_id) {
+                fields.with_icon(Icon::Check)
+            } else {
+                fields.with_indent()
+            };
+            fields
+                .with_on_select_action(TerminalGridAction::HostMoveToGroup {
+                    host_ids: host_ids.clone(),
+                    group_id,
+                })
+                .into_item()
+        };
+
+        let mut items = vec![entry(rust_i18n::t!("form_no_group").to_string(), None)];
+        items.extend(
+            self.host_state
+                .snapshot
+                .groups
+                .iter()
+                .filter(|g| g.id != "all")
+                .map(|g| entry(g.label.clone(), Some(g.id.clone()))),
+        );
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuItemFields::new(rust_i18n::t!("host_ctx_manage_groups"))
+                .with_indent()
+                .with_on_select_action(TerminalGridAction::HostManageGroupsTags)
+                .into_item(),
+        );
+        items
     }
 
     pub(in crate::root_view) fn render_container_card_context_menu(&self) -> Box<dyn Element> {

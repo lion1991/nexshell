@@ -1259,6 +1259,29 @@ pub fn delete_group_from_db(db_path: &Path, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 批量改主机所属分组（右键 / 多选栏「移到分组」）；group_id 为 None 即移出分组。
+pub fn set_hosts_group_in_db(
+    db_path: &Path,
+    host_ids: &[String],
+    group_id: Option<&str>,
+) -> Result<usize, String> {
+    let mut conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|error| format!("open db: {error}"))?;
+    let tx = conn.transaction().map_err(|e| format!("tx: {e}"))?;
+    let now = unix_ts_seconds();
+    let mut updated = 0usize;
+    for id in host_ids {
+        updated += tx
+            .execute(
+                "UPDATE hosts SET group_id = ?1, updated_at = ?2 WHERE id = ?3",
+                params![group_id, now, id],
+            )
+            .map_err(|e| format!("set host group {id}: {e}"))?;
+    }
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(updated)
+}
+
 /// 导入时按 id 重建分组：存在则更新名称/排序，不存在则插入。
 pub fn upsert_group_in_db(
     db_path: &Path,
@@ -2095,6 +2118,35 @@ mod tests {
             })
             .unwrap();
         assert_eq!(name, "New");
+    }
+
+    #[test]
+    fn set_hosts_group_moves_listed_hosts_only() {
+        let (db_path, conn) = temp_db();
+        let gid = create_group_in_db(&db_path, "Prod").unwrap();
+        for id in ["h1", "h2", "h3"] {
+            insert_host_with_tags(&conn, id, &[]);
+        }
+        let group_of = |id: &str| -> Option<String> {
+            conn.query_row("SELECT group_id FROM hosts WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .unwrap()
+        };
+
+        let ids = vec!["h1".to_string(), "h2".to_string()];
+        assert_eq!(
+            set_hosts_group_in_db(&db_path, &ids, Some(&gid)).unwrap(),
+            2
+        );
+        assert_eq!(group_of("h1").as_deref(), Some(gid.as_str()));
+        assert_eq!(group_of("h2").as_deref(), Some(gid.as_str()));
+        assert_eq!(group_of("h3"), None);
+
+        let ids = vec!["h1".to_string()];
+        assert_eq!(set_hosts_group_in_db(&db_path, &ids, None).unwrap(), 1);
+        assert_eq!(group_of("h1"), None);
+        assert_eq!(group_of("h2").as_deref(), Some(gid.as_str()));
     }
 
     #[test]

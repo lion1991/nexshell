@@ -234,6 +234,9 @@ pub(crate) struct RootView {
     show_process_list_context_menu: Option<Vector2F>,
     host_card_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_host_card_context_menu: Option<Vector2F>,
+    /// 「移到分组…」分组列表：独立菜单，接在主机右键菜单的位置弹出（多选栏则在点击处）。
+    host_group_picker_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
+    show_host_group_picker_menu: Option<Vector2F>,
     container_card_context_menu: warpui::ViewHandle<nexshell::menu::Menu<TerminalGridAction>>,
     show_container_card_context_menu: Option<Vector2F>,
 
@@ -715,7 +718,10 @@ impl RootView {
                 ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
                         me.show_host_card_context_menu = None;
-                        me.host_state.context_menu_target = None;
+                        // 点「移到分组…」时分组列表接手右键目标高亮；Enter 路径下本 Close 晚于列表打开
+                        if me.show_host_group_picker_menu.is_none() {
+                            me.host_state.context_menu_target = None;
+                        }
                         me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
@@ -723,6 +729,20 @@ impl RootView {
                 menu
             },
             show_host_card_context_menu: None,
+            host_group_picker_menu: {
+                let menu =
+                    ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
+                ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
+                    if matches!(event, nexshell::menu::Event::Close { .. }) {
+                        me.show_host_group_picker_menu = None;
+                        me.host_state.context_menu_target = None;
+                        me.refocus_root_after_menu_close(&menu, ctx);
+                        ctx.notify();
+                    }
+                });
+                menu
+            },
+            show_host_group_picker_menu: None,
             container_card_context_menu: {
                 let menu =
                     ctx.add_typed_action_view(|_| nexshell::menu::Menu::new().with_drop_shadow());
@@ -2106,6 +2126,18 @@ impl View for RootView {
             );
         }
 
+        if let Some(position) = self.show_host_group_picker_menu {
+            root.add_positioned_overlay_child(
+                warpui::elements::ChildView::new(&self.host_group_picker_menu).finish(),
+                OffsetPositioning::offset_from_parent(
+                    position,
+                    terminal_context_menu_offset_bounds(),
+                    ParentAnchor::TopLeft,
+                    ChildAnchor::TopLeft,
+                ),
+            );
+        }
+
         if let Some(position) = self.show_container_card_context_menu {
             root.add_positioned_overlay_child(
                 self.render_container_card_context_menu(),
@@ -2353,6 +2385,12 @@ impl TypedActionView for RootView {
             TerminalGridAction::HostRestoreDeleted => self.handle_host_restore_deleted(ctx),
             TerminalGridAction::HostRenameInline(host_id) => {
                 self.handle_host_rename_inline(host_id.clone(), ctx)
+            }
+            TerminalGridAction::HostShowGroupPicker { host_id, position } => {
+                self.show_host_group_picker(host_id.clone(), *position, ctx);
+            }
+            TerminalGridAction::HostMoveToGroup { host_ids, group_id } => {
+                self.handle_host_move_to_group(host_ids.clone(), group_id.clone(), ctx)
             }
 
             // === 容器管理：右键菜单 / 操作 / 日志（host_library_section + context_menus_section）===

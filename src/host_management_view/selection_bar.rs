@@ -12,10 +12,12 @@ use warpui::{
 use crate::host_management_view::constants::*;
 use crate::terminal_grid_element::TerminalGridAction;
 use nexshell::ui_anim::SpringAnim;
+use pathfinder_geometry::vector::Vector2F;
 
 pub struct SelectionBarStates {
     pub connect_state: MouseStateHandle,
     pub edit_state: MouseStateHandle,
+    pub group_state: MouseStateHandle,
     pub move_state: MouseStateHandle,
     pub delete_state: MouseStateHandle,
     pub cancel_state: MouseStateHandle,
@@ -31,6 +33,7 @@ impl SelectionBarStates {
         Self {
             connect_state: Arc::new(Mutex::new(MouseState::default())),
             edit_state: Arc::new(Mutex::new(MouseState::default())),
+            group_state: Arc::new(Mutex::new(MouseState::default())),
             move_state: Arc::new(Mutex::new(MouseState::default())),
             delete_state: Arc::new(Mutex::new(MouseState::default())),
             cancel_state: Arc::new(Mutex::new(MouseState::default())),
@@ -57,7 +60,7 @@ pub fn render_selection_bar(
             rust_i18n::t!("host_connect").to_string(),
             hc.text_primary,
             ui_font,
-            TerminalGridAction::HostConnectSelected,
+            |_| TerminalGridAction::HostConnectSelected,
             hc,
         ))
         .with_child(render_bar_button(
@@ -66,7 +69,19 @@ pub fn render_selection_bar(
             rust_i18n::t!("host_edit").to_string(),
             hc.text_primary,
             ui_font,
-            TerminalGridAction::HostEditSelected,
+            |_| TerminalGridAction::HostEditSelected,
+            hc,
+        ))
+        .with_child(render_bar_button(
+            &states.group_state,
+            ICON_FOLDER,
+            rust_i18n::t!("host_move_to_group").to_string(),
+            hc.text_primary,
+            ui_font,
+            |position| TerminalGridAction::HostShowGroupPicker {
+                host_id: None,
+                position,
+            },
             hc,
         ))
         .with_child(render_bar_button(
@@ -75,7 +90,7 @@ pub fn render_selection_bar(
             rust_i18n::t!("host_move").to_string(),
             hc.text_primary,
             ui_font,
-            TerminalGridAction::HostEnterReorderMode,
+            |_| TerminalGridAction::HostEnterReorderMode,
             hc,
         ))
         .with_child(render_bar_button(
@@ -84,7 +99,7 @@ pub fn render_selection_bar(
             rust_i18n::t!("host_delete").to_string(),
             hc.text_primary,
             ui_font,
-            TerminalGridAction::HostDeleteSelected,
+            |_| TerminalGridAction::HostDeleteSelected,
             hc,
         ))
         .with_child(render_bar_button(
@@ -93,7 +108,7 @@ pub fn render_selection_bar(
             rust_i18n::t!("host_cancel").to_string(),
             hc.text_secondary,
             ui_font,
-            TerminalGridAction::HostClearSelection,
+            |_| TerminalGridAction::HostClearSelection,
             hc,
         ))
         .finish();
@@ -129,7 +144,7 @@ fn render_bar_button(
     label: String,
     color: warpui::color::ColorU,
     ui_font: fonts::FamilyId,
-    action: TerminalGridAction,
+    action: impl Fn(Vector2F) -> TerminalGridAction + 'static,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
     let hc = *hc;
@@ -167,8 +182,8 @@ fn render_bar_button(
         .finish()
     })
     .with_cursor(warpui::platform::Cursor::PointingHand)
-    .on_click(move |ctx, _, _| {
-        ctx.dispatch_typed_action(action.clone());
+    .on_click(move |ctx, _, position| {
+        ctx.dispatch_typed_action(action(position));
     })
     .finish()
 }
@@ -201,7 +216,7 @@ pub fn render_reorder_bar(
             rust_i18n::t!("host_reorder_done").to_string(),
             hc.text_accent,
             ui_font,
-            TerminalGridAction::HostExitReorderMode,
+            |_| TerminalGridAction::HostExitReorderMode,
             hc,
         ))
         .finish();

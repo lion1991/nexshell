@@ -63,6 +63,16 @@ impl RootView {
         self.start_host_rename(host_id, ctx);
     }
 
+    pub(in crate::root_view) fn handle_host_move_to_group(
+        &mut self,
+        host_ids: Vec<String>,
+        group_id: Option<String>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.move_hosts_to_group(host_ids, group_id);
+        ctx.notify();
+    }
+
     pub(in crate::root_view) fn handle_host_quick_connect(
         &mut self,
         host_id: String,

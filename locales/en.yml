@@ -178,6 +178,8 @@ file_panel_ctx_open_with_viewer: Open in editor
 host_ctx_connect: Connect
 host_ctx_edit: Edit
 host_ctx_rename: Rename
+host_ctx_move_to_group: Move to group…
+host_ctx_manage_groups: Manage groups…
 host_ctx_copy: Copy
 host_ctx_cut: Cut
 host_ctx_paste: Paste
@@ -328,6 +330,8 @@ toast_restore_failed: "Restore host failed: %{error}"
 toast_rename_failed: "Rename host failed: %{error}"
 toast_hosts_refreshed: Host library refreshed
 toast_hosts_deleted: "%{count} host(s) deleted"
+toast_hosts_moved_to_group: "Moved %{count} host(s) to \"%{group}\""
+toast_move_to_group_failed: "Failed to move to group: %{error}"
 toast_hosts_deleted_refresh_fail: "%{count} host(s) deleted, but refresh failed: %{error}"
 toast_save_failed: "Save host failed: %{error}"
 toast_delete_failed: "Delete host failed: %{error}"
@@ -355,6 +359,7 @@ host_selected_count: "%{count} selected"
 host_selected_hosts: "%{count} host(s) selected"
 host_connect: Connect
 host_move: Move
+host_move_to_group: Group
 host_delete: Delete
 host_cancel: Cancel
 host_privacy: Privacy

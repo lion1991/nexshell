@@ -847,6 +847,15 @@ pub enum TerminalGridAction {
     HostClipboardPaste,
     HostRestoreDeleted,
     HostRenameInline(String),
+    /// 「移到分组」列表：host_id 为右键目标，None 表示多选栏作用于选中集。
+    HostShowGroupPicker {
+        host_id: Option<String>,
+        position: Vector2F,
+    },
+    HostMoveToGroup {
+        host_ids: Vec<String>,
+        group_id: Option<String>,
+    },
     HostEditOne(String),
     HostDeleteOne(String),
     HostQuickConnect(String),

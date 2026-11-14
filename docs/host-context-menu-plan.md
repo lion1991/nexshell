@@ -12,6 +12,11 @@
   新建 = 单项直接开**新建主机窗口** `HostNewHost`。两者均无子菜单。
 - C 作废（不做按字段排序；拖拽模式自身已 `update_host_sort_orders` 落库）。
 - D 复制/剪切/粘贴、恢复删除 = **会话内内存态**，应用重启失效。
+- E 改分组（2026-11-13 Matt 拍板）= 右键「移到分组…」+ 多选栏「分组」按钮，不必进编辑窗口。
+  点「移到分组…」后在原菜单位置弹出**独立的分组列表菜单**（仍不用子菜单）：无分组 + 全部分组，
+  目标同属一个分组时该项打勾；末项「管理分组…」打开已有的分组/标签管理窗口。
+  右键目标在多选集合里时作用于整个选中集，否则只改这一台；从选中集发起的移完收起选择栏。
+  **暂不做**：把卡片拖到左侧分组栏（跨区域拖放，且与拖拽排序模式冲突），等右键用一阵再议。
 
 ## 最终菜单（平铺，分隔区用 `MenuItem::Separator`）
 
@@ -21,6 +26,7 @@
 | — | Separator | |
 | 编辑 | 选中目标 + `HostEditSelected` | ✅ 复用 |
 | 重命名 | `HostRenameInline(id)` → 卡片内联 editor | 🆕 |
+| 移到分组… | `HostShowGroupPicker{Some(id),pos}` → 同位置弹分组列表菜单 | 🆕（决策 E）|
 | — | Separator | |
 | 复制 | `HostClipboardCopy(id)` | 🆕 状态 |
 | 剪切 | `HostClipboardCut(id)` | 🆕 状态 |
@@ -87,3 +93,14 @@ deleted_host_backup: Option<HostRecord>,   // 删除前完整记录，供"恢复
 2. 复制/剪切/粘贴 + 恢复（状态层）
 3. 重命名内联 editor
 4. 列表行同步右键 + i18n + `cargo build` / 现有单测验证
+
+## 移到分组（决策 E）实现要点
+
+- 分组列表是独立的 `host_group_picker_menu`，**不要改成在主机菜单里原地换内容**：
+  - 鼠标点菜单项时，一次点击 push 的 `Select(Index)` / item action / `Close(true)` 由
+    warpui 倒序派发（`warpui_core/src/core/app.rs` `actions.into_iter().rev()`）。原地换内容会被先到的 Close 关掉，
+    随后到的过期 `Select(Index)` 还会落到新条目上（越界后按 ↓ 会 panic）。
+  - 键盘 Enter 时 Menu 在自身 update 内同步派发 item action，再改同一个 Menu 会 panic（Circular view update）。
+- 两种顺序下主机菜单的 Close 都可能晚于列表打开：它的订阅在列表显示时不清 `context_menu_target`，
+  `refocus_root_after_menu_close` 只在焦点仍在该菜单时才收回，所以列表的焦点不受影响。
+- 写库 `set_hosts_group_in_db`：单事务批量 `UPDATE hosts SET group_id`，不经 upsert 整行重写。
