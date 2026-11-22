@@ -409,7 +409,6 @@ form_advanced: Advanced settings
 form_keep_alive_enabled: Enabled
 form_keep_alive_disabled: Disabled
 form_heartbeat_interval: Heartbeat interval
-form_max_failures: Max failures
 form_connection_timeout: Connection timeout
 form_tcp_timeout: TCP connect timeout
 form_auth_timeout: Auth timeout

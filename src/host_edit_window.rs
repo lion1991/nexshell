@@ -54,7 +54,6 @@ pub struct HostEditDraft {
     pub tags: Vec<String>,
     pub keep_alive_enabled: bool,
     pub keep_alive_interval: u16,
-    pub keep_alive_max_failures: u16,
     pub tcp_connect_timeout: u16,
     pub auth_timeout: u16,
     pub term_encoding: String,
@@ -91,7 +90,6 @@ impl HostEditDraft {
             tags: card.tags.clone(),
             keep_alive_enabled: c.keep_alive_enabled,
             keep_alive_interval: c.keep_alive_interval,
-            keep_alive_max_failures: c.keep_alive_max_failures as u16,
             tcp_connect_timeout: c.tcp_connect_timeout,
             auth_timeout: c.auth_timeout,
             term_encoding: c.term_encoding.clone(),
@@ -133,7 +131,6 @@ impl HostEditDraft {
             tags: Vec::new(),
             keep_alive_enabled: true,
             keep_alive_interval: 30,
-            keep_alive_max_failures: 3,
             tcp_connect_timeout: 15,
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),
@@ -163,7 +160,6 @@ pub enum EditField {
     CaCert,
     Description,
     KeepAliveInterval,
-    KeepAliveMaxFailures,
     TcpConnectTimeout,
     AuthTimeout,
 }
@@ -345,7 +341,6 @@ pub struct HostEditView {
     ca_cert_editor: ViewHandle<EditorView>,
     description_editor: ViewHandle<EditorView>,
     keep_alive_interval_editor: ViewHandle<EditorView>,
-    keep_alive_max_failures_editor: ViewHandle<EditorView>,
     tcp_connect_timeout_editor: ViewHandle<EditorView>,
     auth_timeout_editor: ViewHandle<EditorView>,
     scroll_state: ClippedScrollStateHandle,
@@ -405,8 +400,6 @@ impl HostEditView {
         );
         let keep_alive_interval_editor =
             Self::create_warp_text_editor("", &draft.keep_alive_interval.to_string(), ctx);
-        let keep_alive_max_failures_editor =
-            Self::create_warp_text_editor("", &draft.keep_alive_max_failures.to_string(), ctx);
         let tcp_connect_timeout_editor =
             Self::create_warp_text_editor("", &draft.tcp_connect_timeout.to_string(), ctx);
         let auth_timeout_editor =
@@ -425,11 +418,6 @@ impl HostEditView {
         Self::subscribe_editor(
             EditField::KeepAliveInterval,
             &keep_alive_interval_editor,
-            ctx,
-        );
-        Self::subscribe_editor(
-            EditField::KeepAliveMaxFailures,
-            &keep_alive_max_failures_editor,
             ctx,
         );
         Self::subscribe_editor(
@@ -454,7 +442,6 @@ impl HostEditView {
             ca_cert_editor,
             description_editor,
             keep_alive_interval_editor,
-            keep_alive_max_failures_editor,
             tcp_connect_timeout_editor,
             auth_timeout_editor,
             scroll_state: ClippedScrollStateHandle::default(),
@@ -612,7 +599,6 @@ impl HostEditView {
             EditField::CaCert => &self.ca_cert_editor,
             EditField::Description => &self.description_editor,
             EditField::KeepAliveInterval => &self.keep_alive_interval_editor,
-            EditField::KeepAliveMaxFailures => &self.keep_alive_max_failures_editor,
             EditField::TcpConnectTimeout => &self.tcp_connect_timeout_editor,
             EditField::AuthTimeout => &self.auth_timeout_editor,
         }
@@ -665,8 +651,6 @@ impl HostEditView {
             EditField::Description
         } else if focused == self.keep_alive_interval_editor.id() {
             EditField::KeepAliveInterval
-        } else if focused == self.keep_alive_max_failures_editor.id() {
-            EditField::KeepAliveMaxFailures
         } else if focused == self.tcp_connect_timeout_editor.id() {
             EditField::TcpConnectTimeout
         } else if focused == self.auth_timeout_editor.id() {
@@ -709,7 +693,6 @@ impl HostEditView {
         fields.push(EditField::Description);
         if is_ssh {
             fields.push(EditField::KeepAliveInterval);
-            fields.push(EditField::KeepAliveMaxFailures);
             fields.push(EditField::TcpConnectTimeout);
             fields.push(EditField::AuthTimeout);
         } else if is_telnet {
@@ -767,9 +750,6 @@ impl HostEditView {
         let keep_alive_interval = self
             .parsed_number_from_editor(EditField::KeepAliveInterval, 10, 300, ctx)
             .unwrap_or_else(|| ctx.read_model(&self.model, |m, _| m.draft.keep_alive_interval));
-        let keep_alive_max_failures = self
-            .parsed_number_from_editor(EditField::KeepAliveMaxFailures, 1, 10, ctx)
-            .unwrap_or_else(|| ctx.read_model(&self.model, |m, _| m.draft.keep_alive_max_failures));
         let tcp_connect_timeout = self
             .parsed_number_from_editor(EditField::TcpConnectTimeout, 5, 60, ctx)
             .unwrap_or_else(|| ctx.read_model(&self.model, |m, _| m.draft.tcp_connect_timeout));
@@ -794,7 +774,6 @@ impl HostEditView {
             m.draft.ca_cert = ca_cert;
             m.draft.description = description;
             m.draft.keep_alive_interval = keep_alive_interval;
-            m.draft.keep_alive_max_failures = keep_alive_max_failures;
             m.draft.tcp_connect_timeout = tcp_connect_timeout;
             m.draft.auth_timeout = auth_timeout;
             ctx.emit(HostEditEvent::Saved(m.draft.clone()));
@@ -1297,7 +1276,6 @@ fn number_bounds(field: EditField) -> Option<(u16, u16)> {
     match field {
         EditField::Port => Some((1, u16::MAX)),
         EditField::KeepAliveInterval => Some((10, 300)),
-        EditField::KeepAliveMaxFailures => Some((1, 10)),
         EditField::TcpConnectTimeout => Some((5, 60)),
         EditField::AuthTimeout => Some((10, 120)),
         _ => None,
@@ -1308,7 +1286,6 @@ fn set_draft_number_field(draft: &mut HostEditDraft, field: EditField, value: u1
     let slot = match field {
         EditField::Port => &mut draft.port,
         EditField::KeepAliveInterval => &mut draft.keep_alive_interval,
-        EditField::KeepAliveMaxFailures => &mut draft.keep_alive_max_failures,
         EditField::TcpConnectTimeout => &mut draft.tcp_connect_timeout,
         EditField::AuthTimeout => &mut draft.auth_timeout,
         _ => return false,
@@ -2785,7 +2762,7 @@ fn render_advanced_card(
         return render_serial_advanced_card(draft, states, ui_font, appearance, hc);
     }
 
-    // Telnet 保活是定时 IAC NOP、无认证阶段：不显示最大失败次数与认证超时。
+    // Telnet 保活是定时 IAC NOP、无认证阶段：不显示认证超时。
     let is_telnet = draft.protocol == "Telnet";
     let mut card = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
@@ -2822,19 +2799,7 @@ fn render_advanced_card(
                 appearance,
                 hc,
             ),
-            if is_telnet {
-                warpui::elements::Empty::new().finish()
-            } else {
-                render_settings_number_item(
-                    &rust_i18n::t!("form_max_failures"),
-                    draft.keep_alive_max_failures,
-                    &view.keep_alive_max_failures_editor,
-                    "1-10 次",
-                    ui_font,
-                    appearance,
-                    hc,
-                )
-            },
+            warpui::elements::Empty::new().finish(),
         ))
         .with_margin_top(18.0)
         .finish(),
@@ -3397,7 +3362,6 @@ mod tests {
             c.ca_cert = Some("/tmp/ca.pem".to_string());
             c.keep_alive_enabled = false;
             c.keep_alive_interval = 60;
-            c.keep_alive_max_failures = 5;
             c.tcp_connect_timeout = 10;
             c.auth_timeout = 20;
             c.term_encoding = "gbk".to_string();
@@ -3434,7 +3398,6 @@ mod tests {
         assert_eq!(draft.tags, vec!["prod".to_string(), "us-east".to_string()]);
         assert!(!draft.keep_alive_enabled);
         assert_eq!(draft.keep_alive_interval, 60);
-        assert_eq!(draft.keep_alive_max_failures, 5);
         assert_eq!(draft.tcp_connect_timeout, 10);
         assert_eq!(draft.auth_timeout, 20);
         assert_eq!(draft.term_encoding, "gbk");

@@ -576,7 +576,6 @@ pub fn remote_ssh_config_from_host_config(config: &HostConnectionConfig) -> Remo
         ca_cert: config.ca_cert.clone(),
         keep_alive_enabled: config.keep_alive_enabled,
         keep_alive_interval: config.keep_alive_interval,
-        keep_alive_max_failures: config.keep_alive_max_failures,
         tcp_connect_timeout: config.tcp_connect_timeout,
         auth_timeout: config.auth_timeout,
         term_encoding: config.term_encoding.clone(),
@@ -1086,7 +1085,6 @@ pub(crate) async fn connect_authenticated_session(
             SshConnectOptions {
                 keep_alive_enabled: config.keep_alive_enabled,
                 keep_alive_interval_secs: config.keep_alive_interval.clamp(10, 300),
-                keep_alive_max_failures: config.keep_alive_max_failures.clamp(1, 10),
             },
         ),
     )
@@ -1766,7 +1764,6 @@ mod tests {
             ca_cert: None,
             keep_alive_enabled: false,
             keep_alive_interval: 30,
-            keep_alive_max_failures: 3,
             tcp_connect_timeout: 30,
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),

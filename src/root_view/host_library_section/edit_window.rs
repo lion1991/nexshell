@@ -386,7 +386,6 @@ impl RootView {
         connection.key_id = draft.key_id.clone();
         connection.keep_alive_enabled = draft.keep_alive_enabled;
         connection.keep_alive_interval = draft.keep_alive_interval;
-        connection.keep_alive_max_failures = draft.keep_alive_max_failures.clamp(1, 10) as u8;
         connection.tcp_connect_timeout = draft.tcp_connect_timeout;
         connection.auth_timeout = draft.auth_timeout;
         connection.term_encoding = draft.term_encoding.clone();

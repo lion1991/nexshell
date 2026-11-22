@@ -409,7 +409,6 @@ form_advanced: 高级设置
 form_keep_alive_enabled: 已启用
 form_keep_alive_disabled: 已停用
 form_heartbeat_interval: 心跳间隔
-form_max_failures: 最大失败次数
 form_connection_timeout: 连接超时
 form_tcp_timeout: TCP 连接超时
 form_auth_timeout: 认证超时

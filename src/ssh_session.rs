@@ -302,7 +302,6 @@ pub enum ChannelRequest {
 pub struct SshConnectOptions {
     pub keep_alive_enabled: bool,
     pub keep_alive_interval_secs: u16,
-    pub keep_alive_max_failures: u8,
 }
 
 pub struct SshSession {
@@ -342,7 +341,6 @@ impl SshSession {
             // sending protocol-level probes, but let the channel event loop's
             // periodic no-op window-change detect real write failures instead
             // of closing a healthy idle session from russh's timeout counter.
-            let _ = options.keep_alive_max_failures;
             cfg.keepalive_max = 0;
         } else {
             cfg.keepalive_interval = None;

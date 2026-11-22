@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS hosts (
     sort_order   INTEGER NOT NULL DEFAULT 0,
     keep_alive_enabled INTEGER NOT NULL DEFAULT 1,
     keep_alive_interval INTEGER NOT NULL DEFAULT 30,
-    keep_alive_max_failures INTEGER NOT NULL DEFAULT 3,
     tcp_connect_timeout INTEGER NOT NULL DEFAULT 15,
     auth_timeout INTEGER NOT NULL DEFAULT 30,
     term_encoding TEXT NOT NULL DEFAULT 'utf-8',
@@ -122,7 +121,6 @@ pub struct HostConnectionConfig {
     pub serial_rts: bool,
     pub keep_alive_enabled: bool,
     pub keep_alive_interval: u16,
-    pub keep_alive_max_failures: u8,
     pub tcp_connect_timeout: u16,
     pub auth_timeout: u16,
     pub term_encoding: String,
@@ -275,7 +273,6 @@ impl HostConnectionConfig {
             serial_rts: false,
             keep_alive_enabled: true,
             keep_alive_interval: 30,
-            keep_alive_max_failures: 3,
             tcp_connect_timeout: 15,
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),
@@ -316,7 +313,6 @@ impl HostConnectionConfig {
             serial_rts: false,
             keep_alive_enabled: true,
             keep_alive_interval: 30,
-            keep_alive_max_failures: 3,
             tcp_connect_timeout: 15,
             auth_timeout: 30,
             term_encoding: "utf-8".to_string(),
@@ -1142,15 +1138,15 @@ pub fn create_draft_host_in_db_path(
             password, private_key, key_passphrase, ca_cert, serial_port,
             serial_baud_rate, serial_data_bits, serial_stop_bits, serial_parity,
             serial_flow_control, serial_dtr, serial_rts, group_id, sort_order,
-            keep_alive_enabled, keep_alive_interval, keep_alive_max_failures,
+            keep_alive_enabled, keep_alive_interval,
             tcp_connect_timeout, auth_timeout, term_encoding, tags, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
             NULL, NULL, NULL, NULL, NULL,
             ?9, ?10, ?11, ?12,
             ?13, ?14, ?15, ?16, ?17,
-            ?18, ?19, ?20,
-            ?21, ?22, ?23, ?24, ?25, ?26
+            ?18, ?19,
+            ?20, ?21, ?22, ?23, ?24, ?25
         )",
         params![
             id,
@@ -1172,7 +1168,6 @@ pub fn create_draft_host_in_db_path(
             next_sort_order,
             1_i64,
             30_i64,
-            3_i64,
             15_i64,
             30_i64,
             "utf-8",
@@ -1393,7 +1388,7 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             password, private_key, key_passphrase, ca_cert, serial_port,
             serial_baud_rate, serial_data_bits, serial_stop_bits, serial_parity,
             serial_flow_control, serial_dtr, serial_rts, group_id,
-            keep_alive_enabled, keep_alive_interval, keep_alive_max_failures,
+            keep_alive_enabled, keep_alive_interval,
             tcp_connect_timeout, auth_timeout, term_encoding, tags, created_at, updated_at, key_id,
             rdp_display_quality, rdp_resolution
         ) VALUES (
@@ -1401,8 +1396,8 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17,
             ?18, ?19, ?20, ?21,
-            ?22, ?23, ?24,
-            ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
+            ?22, ?23,
+            ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
         )
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
@@ -1427,7 +1422,6 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
             group_id = excluded.group_id,
             keep_alive_enabled = excluded.keep_alive_enabled,
             keep_alive_interval = excluded.keep_alive_interval,
-            keep_alive_max_failures = excluded.keep_alive_max_failures,
             tcp_connect_timeout = excluded.tcp_connect_timeout,
             auth_timeout = excluded.auth_timeout,
             term_encoding = excluded.term_encoding,
@@ -1464,7 +1458,6 @@ pub fn upsert_host_card_in_db_path(db_path: &Path, host: &HostCardSnapshot) -> R
                 0_i64
             },
             i64::from(config.keep_alive_interval),
-            i64::from(config.keep_alive_max_failures),
             i64::from(config.tcp_connect_timeout),
             i64::from(config.auth_timeout),
             config.term_encoding.trim(),
@@ -1602,7 +1595,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
              COALESCE(serial_stop_bits, 1), COALESCE(serial_parity, 'none'), \
              COALESCE(serial_flow_control, 'none'), COALESCE(serial_dtr, 0), \
              COALESCE(serial_rts, 0), group_id, COALESCE(keep_alive_enabled, 1), \
-             COALESCE(keep_alive_interval, 30), COALESCE(keep_alive_max_failures, 3), \
+             COALESCE(keep_alive_interval, 30), \
              COALESCE(tcp_connect_timeout, 15), COALESCE(auth_timeout, 30), \
              COALESCE(term_encoding, 'utf-8'), COALESCE(tags, '[]'), \
              COALESCE(sort_order, 0), key_id, \
@@ -1615,7 +1608,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
             let protocol_raw: String = row.get(6)?;
             let protocol = protocol_display_name(&protocol_raw).to_string();
             let is_serial = protocol == "Serial";
-            let tags_json: String = row.get(27)?;
+            let tags_json: String = row.get(26)?;
             let connection = HostConnectionConfig {
                 host: row.get(3)?,
                 port: row.get::<_, i32>(4)? as u16,
@@ -1635,13 +1628,12 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
                 serial_rts: row.get::<_, i64>(19)? != 0,
                 keep_alive_enabled: row.get::<_, i64>(21)? != 0,
                 keep_alive_interval: row.get::<_, i64>(22)? as u16,
-                keep_alive_max_failures: row.get::<_, i64>(23)? as u8,
-                tcp_connect_timeout: row.get::<_, i64>(24)? as u16,
-                auth_timeout: row.get::<_, i64>(25)? as u16,
-                term_encoding: row.get(26)?,
-                key_id: row.get(29)?,
-                rdp_display_quality: RdpDisplayQuality::from_db(&row.get::<_, String>(30)?),
-                rdp_resolution: RdpResolution::from_db(&row.get::<_, String>(31)?),
+                tcp_connect_timeout: row.get::<_, i64>(23)? as u16,
+                auth_timeout: row.get::<_, i64>(24)? as u16,
+                term_encoding: row.get(25)?,
+                key_id: row.get(28)?,
+                rdp_display_quality: RdpDisplayQuality::from_db(&row.get::<_, String>(29)?),
+                rdp_resolution: RdpResolution::from_db(&row.get::<_, String>(30)?),
             };
             let endpoint = connection.endpoint(&protocol);
 
@@ -1659,7 +1651,7 @@ fn load_hosts(conn: &Connection) -> Result<Vec<HostCardSnapshot>, String> {
                 } else {
                     HostSystemIcon::Terminal
                 },
-                sort_order: row.get(28)?,
+                sort_order: row.get(27)?,
             })
         })
         .map_err(|error| format!("query hosts: {error}"))?;
@@ -1825,11 +1817,6 @@ fn ssh_pty_command_for_host(host: &HostCardSnapshot) -> Result<PtyCommandSpec, S
             format!(
                 "ServerAliveInterval={}",
                 config.keep_alive_interval.clamp(10, 300)
-            ),
-            "-o".to_string(),
-            format!(
-                "ServerAliveCountMax={}",
-                config.keep_alive_max_failures.clamp(1, 10)
             ),
         ]);
     }
@@ -2400,6 +2387,29 @@ mod tests {
         let host = snapshot.hosts.iter().find(|h| h.id == "tel-1").unwrap();
         assert_eq!(host.protocol, "Telnet");
         assert_eq!(host.connection.port, 23);
+        assert_eq!(host.connection.username, "admin");
+    }
+
+    #[test]
+    fn old_db_with_keep_alive_max_failures_column_still_works() {
+        // 旧版库的 hosts 表多一列 keep_alive_max_failures（NOT NULL DEFAULT 3）；
+        // 现在不再读写这一列，旧库要能照常启动、新增、保存、读回。
+        let (db_path, conn) = temp_db();
+        conn.execute(
+            "ALTER TABLE hosts ADD COLUMN keep_alive_max_failures INTEGER NOT NULL DEFAULT 3",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        initialize_host_database(&db_path).unwrap();
+
+        let draft_id = create_draft_host_in_db_path(&db_path, None).unwrap();
+        upsert_host_card_in_db_path(&db_path, &telnet_card("10.0.0.9", "admin")).unwrap();
+
+        let snapshot = load_host_management_snapshot_from_db_path(&db_path).unwrap();
+        assert!(snapshot.hosts.iter().any(|h| h.id == draft_id));
+        let host = snapshot.hosts.iter().find(|h| h.id == "tel-1").unwrap();
+        assert_eq!(host.connection.host, "10.0.0.9");
         assert_eq!(host.connection.username, "admin");
     }
 

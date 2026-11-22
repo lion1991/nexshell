@@ -1187,7 +1187,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：中：用户改了「最大失败次数」不会有任何效果（死配置项）；是移除字段还是接上新语义属于产品决定
 - 决定：修代码
 - 拍板备注：推翻「记待办」。移除配置项，不接上（理由见拍板记录）。要删：主机编辑窗口的「最大失败次数」输入框和 draft 字段、各层连接配置结构里的 `keep_alive_max_failures`、`locales` 的 `form_max_failures`、`ssh_session.rs` 的 `let _ = options.keep_alive_max_failures;`；这段英文注释留下，它解释的是 `keepalive_max` 为什么是 0。连带文件 `host_edit_window.rs`、`host_management.rs`、`host_overview.rs`、`terminal_runtime.rs`、`root_view/host_library_section/edit_window.rs`、`locales/`、`lib.rs` 里的测试，已同意连带修改；少一个输入框这个可见变化已同意。旧库要能照常打开，旧版导出的主机文件要能照常导入，各留一条回归用例；库里那一列留不留由实现者定。排在 B-059 之后做。
-- 完成：
+- 完成：2026-11-22（库里那一列：新库不再建，旧库留着不读写）
 
 #### B-065 `src/terminal_runtime.rs:3072`–3074 `LocalTerminalRuntime.spawn_remote_ssh`
 

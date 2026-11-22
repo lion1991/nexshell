@@ -2799,7 +2799,6 @@ pub struct RemoteSshConfig {
     pub ca_cert: Option<String>,
     pub keep_alive_enabled: bool,
     pub keep_alive_interval: u16,
-    pub keep_alive_max_failures: u8,
     pub tcp_connect_timeout: u16,
     pub auth_timeout: u16,
     pub term_encoding: String,
@@ -4213,7 +4212,6 @@ async fn run_remote_ssh_event_loop(
                 SshConnectOptions {
                     keep_alive_enabled: config.keep_alive_enabled,
                     keep_alive_interval_secs: config.keep_alive_interval.clamp(10, 300),
-                    keep_alive_max_failures: config.keep_alive_max_failures.clamp(1, 10),
                 },
             ),
         )

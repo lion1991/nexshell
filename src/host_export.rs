@@ -81,7 +81,10 @@ pub fn encrypt_export(
         hosts,
     };
     let plaintext = serde_json::to_vec(&payload).map_err(|e| format!("序列化失败：{}", e))?;
+    seal(&plaintext, password)
+}
 
+fn seal(plaintext: &[u8], password: &str) -> Result<Vec<u8>, String> {
     let mut rng = rand::thread_rng();
     let mut salt = [0u8; SALT_LEN];
     let mut nonce = [0u8; NONCE_LEN];
@@ -93,7 +96,7 @@ pub fn encrypt_export(
 
     let cipher = Aes256Gcm::new((&key).into());
     let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
+        .encrypt(Nonce::from_slice(&nonce), plaintext)
         .map_err(|e| format!("加密失败：{}", e))?;
 
     let envelope = Envelope {
@@ -221,6 +224,22 @@ mod tests {
         let bytes = encrypt_export(&hosts, &[], &[], "right").unwrap();
         let err = decrypt_export(&bytes, "wrong").unwrap_err();
         assert!(err.contains("密码"));
+    }
+
+    #[test]
+    fn legacy_file_with_keep_alive_max_failures_still_imports() {
+        // 旧版导出的主机连接配置带 keep_alive_max_failures 字段（现已移除），必须仍可导入。
+        let mut host = serde_json::to_value(sample_host()).unwrap();
+        host["connection"]["keep_alive_max_failures"] = serde_json::json!(3);
+        let payload = serde_json::json!({
+            "schema": "nexshell.host_library.v1",
+            "hosts": [host],
+        });
+        let bytes = seal(&serde_json::to_vec(&payload).unwrap(), "pw").unwrap();
+        let restored = decrypt_export(&bytes, "pw").unwrap();
+        assert_eq!(restored.hosts.len(), 1);
+        assert_eq!(restored.hosts[0].name, "edge-1");
+        assert_eq!(restored.hosts[0].connection.host, "10.0.0.1");
     }
 
     #[test]
