@@ -1070,7 +1070,8 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：设计上是为「不跑的测试」辩护，故归 B
 - 决定：修代码
 - 拍板备注：留在 core-2 批次修，并排在 B-064 之前——这批测试是主机库改动的回归网（见拍板记录）。注释给的理由已不成立：rusqlite 是无条件依赖，Cargo.lock 里只有一份 libsqlite3-sys。逐个去掉 `#[cfg(any())]`：测的行为还在的（建库、增删改、筛选、选择）让它跑起来，文案类漂移（如搜索框占位符）可以改断言；测的行为已经不存在的（SSH 走 DirectPty、`connect_command_for` 拼 ssh 命令、legacy 演示数据的固定内容）删掉测试；行为对不上又说不清哪边错的，停下报告，不改断言。只为这些测试活着的生产代码（`legacy_host_management_snapshot`、`connect_command_for` 一线）不在这条里删，列进汇报。
-- 完成：
+- 补充拍板（Matt 2026-11-22）：剩下的 `host_management_snapshot_can_load_real_tauri_host_database` 删掉。它的种子库是没有 `auth_method` 列的极简旧结构，Tauri 那一代已废弃，NexShell 自建的库一直有这一列；「旧 Tauri 结构迁移后可读写」已由 `persists_draft` 覆盖。否决：为这种实际不存在的旧库加补 `auth_method` 的迁移。
+- 完成：2026-11-22（恢复 7 个、删 4 个）
 
 #### B-060 `src/menu.rs:343` `MenuItemLabel.render`
 

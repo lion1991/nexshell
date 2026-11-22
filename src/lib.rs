@@ -2952,56 +2952,6 @@ Inter-|   Receive                                                |  Transmit
         ));
     }
 
-    #[cfg(any())]
-    #[test]
-    fn host_management_snapshot_can_load_real_tauri_host_database() {
-        let db_path = std::env::temp_dir().join(format!(
-            "nexshell-native-hosts-{}.sqlite3",
-            std::process::id()
-        ));
-        let conn = rusqlite::Connection::open(&db_path).expect("open temp db");
-        conn.execute_batch(
-            r#"
-            CREATE TABLE groups (id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER NOT NULL);
-            CREATE TABLE hosts (
-              id TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              description TEXT NOT NULL,
-              host TEXT NOT NULL,
-              port INTEGER NOT NULL,
-              username TEXT NOT NULL,
-              protocol TEXT NOT NULL,
-              serial_port TEXT,
-              serial_baud_rate INTEGER NOT NULL,
-              group_id TEXT,
-              tags TEXT NOT NULL,
-              created_at INTEGER NOT NULL
-            );
-            INSERT INTO groups (id, name, sort_order) VALUES ('g1', '生产环境', 1);
-            INSERT INTO hosts (
-              id, name, description, host, port, username, protocol,
-              serial_port, serial_baud_rate, group_id, tags, created_at
-            ) VALUES (
-              'h1', 'prod-a', '', '10.0.0.2', 2222, 'root', 'ssh',
-              NULL, 115200, 'g1', '["prod"]', 10
-            );
-            "#,
-        )
-        .expect("seed temp db");
-        drop(conn);
-
-        let snapshot =
-            host_management::load_host_management_snapshot_from_db_path(&db_path).expect("load db");
-
-        assert_eq!(snapshot.groups[1].label, "生产环境");
-        assert_eq!(snapshot.groups[1].count, 1);
-        assert_eq!(snapshot.available_tags, ["prod"]);
-        assert_eq!(snapshot.hosts[0].name, "prod-a");
-        assert_eq!(snapshot.hosts[0].endpoint, "root@10.0.0.2:2222");
-
-        let _ = std::fs::remove_file(db_path);
-    }
-
     #[test]
     fn host_management_persists_draft_create_and_selected_delete_to_database() {
         let db_path = std::env::temp_dir().join(format!(
