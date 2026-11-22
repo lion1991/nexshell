@@ -7,7 +7,6 @@ tab_local: Local
 tab_remote: Remote
 tab_serial: Serial
 tab_telnet: Telnet
-tab_direct: Terminal
 tab_process_list: Processes
 process_list_placeholder: "Loading processes…"
 process_list_error: "Failed to collect process list"

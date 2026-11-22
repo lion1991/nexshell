@@ -1711,7 +1711,6 @@ impl RootView {
                         | TerminalSessionKind::Remote
                         | TerminalSessionKind::Serial
                         | TerminalSessionKind::Telnet
-                        | TerminalSessionKind::Direct
                 )
             )
     }
@@ -3269,38 +3268,6 @@ impl RootView {
                 self.host_state.notice =
                     Some(rust_i18n::t!("toast_connecting", title = title).to_string());
             }
-            HostConnectionPlan::DirectPty {
-                session_id,
-                title,
-                command,
-            } => {
-                let tab_session_id = self.unique_terminal_tab_id(&session_id);
-                let args = command.args.iter().map(String::as_str).collect::<Vec<_>>();
-                let (cols, rows) = self
-                    .last_resize_cells
-                    .lock()
-                    .map(|cells| *cells)
-                    .unwrap_or((DEFAULT_COLS, DEFAULT_ROWS));
-                let terminal = LocalTerminalRuntime::spawn_command_or_failed(
-                    &tab_session_id,
-                    &command.program,
-                    &args,
-                    command.status,
-                    cols,
-                    rows,
-                );
-                self.push_terminal_tab(
-                    terminal,
-                    &tab_session_id,
-                    title.clone(),
-                    TerminalSessionKind::Direct,
-                    Some(host_id.to_string()),
-                    None,
-                    ctx,
-                );
-                self.host_state.notice =
-                    Some(rust_i18n::t!("toast_connecting", title = title).to_string());
-            }
             HostConnectionPlan::Serial {
                 session_id,
                 title,
@@ -3484,10 +3451,6 @@ mod ime_tests {
         assert!(RootView::page_uses_terminal_ime_cursor(
             AppPage::Terminal,
             Some(TerminalSessionKind::Serial)
-        ));
-        assert!(RootView::page_uses_terminal_ime_cursor(
-            AppPage::Terminal,
-            Some(TerminalSessionKind::Direct)
         ));
         assert!(RootView::page_uses_terminal_ime_cursor(
             AppPage::Terminal,

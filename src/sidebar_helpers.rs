@@ -76,7 +76,6 @@ mod tests {
             TerminalSessionKind::Remote,
             TerminalSessionKind::Serial,
             TerminalSessionKind::Telnet,
-            TerminalSessionKind::Direct,
             TerminalSessionKind::ProcessList,
             TerminalSessionKind::NetworkList,
             TerminalSessionKind::SystemInfo,

@@ -368,7 +368,6 @@ enum TerminalSessionKind {
     Remote,
     Serial,
     Telnet,
-    Direct,
     ProcessList,
     NetworkList,
     SystemInfo,
@@ -384,7 +383,6 @@ impl TerminalSessionKind {
             Self::Remote => rust_i18n::t!("tab_remote").to_string(),
             Self::Serial => rust_i18n::t!("tab_serial").to_string(),
             Self::Telnet => rust_i18n::t!("tab_telnet").to_string(),
-            Self::Direct => rust_i18n::t!("tab_direct").to_string(),
             Self::ProcessList => rust_i18n::t!("tab_process_list").to_string(),
             Self::NetworkList => rust_i18n::t!("tab_network_list").to_string(),
             Self::SystemInfo => rust_i18n::t!("tab_system_info").to_string(),
@@ -402,7 +400,7 @@ impl TerminalSessionKind {
     fn supports_terminal_recording(self) -> bool {
         matches!(
             self,
-            Self::Local | Self::Remote | Self::Serial | Self::Telnet | Self::Direct
+            Self::Local | Self::Remote | Self::Serial | Self::Telnet
         )
     }
 }
@@ -1329,7 +1327,6 @@ mod tests {
             TerminalSessionKind::Remote,
             TerminalSessionKind::Serial,
             TerminalSessionKind::Telnet,
-            TerminalSessionKind::Direct,
         ] {
             assert!(kind.supports_terminal_recording(), "{kind:?}");
         }
@@ -1357,7 +1354,6 @@ mod tests {
         }
         for kind in [
             TerminalSessionKind::Local,
-            TerminalSessionKind::Direct,
             TerminalSessionKind::CodeViewer,
             TerminalSessionKind::Rdp,
         ] {

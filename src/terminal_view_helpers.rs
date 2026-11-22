@@ -68,7 +68,6 @@ pub(crate) fn terminal_disconnected_notice_text(
         TerminalSessionKind::Serial => "串口连接已断开",
         TerminalSessionKind::Telnet => "Telnet 连接已断开",
         TerminalSessionKind::Local
-        | TerminalSessionKind::Direct
         | TerminalSessionKind::ProcessList
         | TerminalSessionKind::NetworkList
         | TerminalSessionKind::SystemInfo
@@ -321,7 +320,6 @@ pub(crate) fn split_pane_header_badge_icon(kind: TerminalSessionKind) -> &'stati
         }
         TerminalSessionKind::Local
         | TerminalSessionKind::Serial
-        | TerminalSessionKind::Direct
         | TerminalSessionKind::ProcessList
         | TerminalSessionKind::NetworkList
         | TerminalSessionKind::SystemInfo
@@ -337,7 +335,6 @@ pub(crate) fn terminal_tab_kind_uses_side_panel_layout(kind: TerminalSessionKind
             | TerminalSessionKind::Remote
             | TerminalSessionKind::Serial
             | TerminalSessionKind::Telnet
-            | TerminalSessionKind::Direct
             | TerminalSessionKind::GitDiff
             | TerminalSessionKind::CodeViewer
     )

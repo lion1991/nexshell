@@ -101,7 +101,6 @@ fn is_host_session(kind: TerminalSessionKind) -> bool {
         TerminalSessionKind::Remote
             | TerminalSessionKind::Serial
             | TerminalSessionKind::Telnet
-            | TerminalSessionKind::Direct
             | TerminalSessionKind::Rdp
     )
 }

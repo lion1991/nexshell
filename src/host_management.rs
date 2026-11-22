@@ -338,23 +338,11 @@ impl HostConnectionConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PtyCommandSpec {
-    pub program: String,
-    pub args: Vec<String>,
-    pub status: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostConnectionPlan {
     SavedSsh {
         session_id: String,
         title: String,
         config: HostConnectionConfig,
-    },
-    DirectPty {
-        session_id: String,
-        title: String,
-        command: PtyCommandSpec,
     },
     Serial {
         session_id: String,
@@ -812,18 +800,6 @@ impl HostManagementState {
         self.snapshot.hosts.iter().find(|host| host.id == id)
     }
 
-    pub fn connect_command_for(&self, id: &str) -> Option<Vec<u8>> {
-        let host = self.host_by_id(id)?;
-        match host.protocol.as_str() {
-            "SSH" => {
-                let command = ssh_command_for_host(host);
-                (!command.is_empty()).then(|| command.into_bytes())
-            }
-            "Serial" => None,
-            _ => None,
-        }
-    }
-
     pub fn connection_plan_for(&self, id: &str) -> Option<HostConnectionPlan> {
         let host = self.host_by_id(id)?;
         Some(match host.protocol.as_str() {
@@ -891,12 +867,6 @@ impl HostManagementState {
         self.selected_host_ids
             .retain(|host_id| visible_ids.contains(host_id));
     }
-}
-
-pub fn load_host_management_snapshot() -> Result<HostManagementSnapshot, String> {
-    let db_path =
-        default_database_path().ok_or_else(|| "cannot resolve NexShell db path".to_string())?;
-    load_host_management_snapshot_from_db_path(&db_path)
 }
 
 pub fn load_or_initialize_host_management_snapshot_from_db_path(
@@ -1115,6 +1085,7 @@ pub fn unavailable_host_management_snapshot() -> HostManagementSnapshot {
     }
 }
 
+#[cfg(test)]
 pub fn create_draft_host_in_db_path(
     db_path: &Path,
     group_id: Option<&str>,
@@ -1543,6 +1514,7 @@ fn database_path_from_env(
     }
 }
 
+#[cfg(test)]
 pub fn legacy_host_management_snapshot() -> HostManagementSnapshot {
     let hosts = legacy_hosts();
 
@@ -1691,21 +1663,6 @@ fn parse_tags(tags_json: &str) -> Vec<String> {
     serde_json::from_str::<Vec<String>>(tags_json).unwrap_or_default()
 }
 
-fn ssh_command_for_host(host: &HostCardSnapshot) -> String {
-    match ssh_pty_command_for_host(host) {
-        Ok(command) => {
-            let args = command
-                .args
-                .iter()
-                .map(|arg| shell_quote(arg))
-                .collect::<Vec<_>>()
-                .join(" ");
-            format!("{} {args}\r", command.program)
-        }
-        Err(_) => String::new(),
-    }
-}
-
 fn ssh_saved_connection_error(config: &HostConnectionConfig) -> Option<String> {
     if config.host.trim().is_empty() {
         return Some("主机地址为空".to_string());
@@ -1778,106 +1735,6 @@ fn serial_saved_connection_error(config: &HostConnectionConfig) -> Option<String
     None
 }
 
-fn ssh_pty_command_for_host(host: &HostCardSnapshot) -> Result<PtyCommandSpec, String> {
-    let config = &host.connection;
-    let address = config.host.trim();
-    if address.is_empty() {
-        return Err("主机地址为空".to_string());
-    }
-
-    let username = config.username.trim();
-    if username.is_empty() {
-        return Err("用户名为空".to_string());
-    }
-
-    if config.auth_method == "key" {
-        if let Some(private_key) = config.private_key.as_deref().map(str::trim) {
-            if !private_key.is_empty() && private_key_path_arg(private_key).is_none() {
-                return Err(
-                    "native direct ssh 暂不支持内联私钥内容，后续需要接入 Tauri russh 连接后端"
-                        .to_string(),
-                );
-            }
-        }
-    }
-
-    let target = format!("{username}@{address}");
-    let mut args = vec![
-        "-p".to_string(),
-        config.port.to_string(),
-        "-o".to_string(),
-        format!("ConnectTimeout={}", config.tcp_connect_timeout.clamp(5, 60)),
-        "-o".to_string(),
-        "StrictHostKeyChecking=accept-new".to_string(),
-    ];
-
-    if config.keep_alive_enabled {
-        args.extend([
-            "-o".to_string(),
-            format!(
-                "ServerAliveInterval={}",
-                config.keep_alive_interval.clamp(10, 300)
-            ),
-        ]);
-    }
-
-    if config.auth_method == "key" {
-        if let Some(private_key) = config
-            .private_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .and_then(private_key_path_arg)
-        {
-            args.extend([
-                "-i".to_string(),
-                private_key,
-                "-o".to_string(),
-                "IdentitiesOnly=yes".to_string(),
-            ]);
-        }
-    }
-
-    args.push(target.clone());
-
-    Ok(PtyCommandSpec {
-        program: "ssh".to_string(),
-        args,
-        status: format!("connecting SSH: {target}:{}", config.port),
-    })
-}
-
-fn private_key_path_arg(private_key: &str) -> Option<String> {
-    if private_key.contains('\n') || private_key.contains("BEGIN ") {
-        return None;
-    }
-
-    let trimmed = private_key.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(expand_tilde(trimmed))
-}
-
-fn expand_tilde(path: &str) -> String {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(rest).to_string_lossy().to_string();
-        }
-    }
-    path.to_string()
-}
-
-fn shell_quote(arg: &str) -> String {
-    if arg.chars().all(|ch| {
-        ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':' | '=' | '@')
-    }) {
-        return arg.to_string();
-    }
-    format!("'{}'", arg.replace('\'', "'\\''"))
-}
-
 fn session_id_for_host(host_id: &str) -> String {
     let mut normalized = String::with_capacity(host_id.len() + 5);
     normalized.push_str("host-");
@@ -1906,6 +1763,7 @@ pub fn draft_host_id() -> String {
     format!("native-draft-{}-{nanos}", std::process::id())
 }
 
+#[cfg(test)]
 fn legacy_ssh_host(
     id: &str,
     name: &str,
@@ -1929,6 +1787,7 @@ fn legacy_ssh_host(
     }
 }
 
+#[cfg(test)]
 fn legacy_serial_host(id: &str, name: &str, port: &str, baud_rate: u32) -> HostCardSnapshot {
     let connection = HostConnectionConfig::serial(port, baud_rate);
     HostCardSnapshot {
@@ -1945,6 +1804,7 @@ fn legacy_serial_host(id: &str, name: &str, port: &str, baud_rate: u32) -> HostC
     }
 }
 
+#[cfg(test)]
 fn connection_from_ssh_endpoint(endpoint: &str) -> HostConnectionConfig {
     let trimmed = endpoint.trim();
     let Some((target, port)) = trimmed.rsplit_once(':') else {
@@ -1956,6 +1816,7 @@ fn connection_from_ssh_endpoint(endpoint: &str) -> HostConnectionConfig {
     HostConnectionConfig::ssh(host, port.parse().unwrap_or(22), username)
 }
 
+#[cfg(test)]
 fn legacy_hosts() -> Vec<HostCardSnapshot> {
     vec![
         legacy_ssh_host(

@@ -91,22 +91,6 @@ impl RootView {
                             rows,
                         )
                     }
-                    HostConnectionPlan::DirectPty {
-                        session_id: sid,
-                        command,
-                        ..
-                    } => {
-                        let tab_session_id = self.unique_terminal_tab_id(&sid);
-                        let args = command.args.iter().map(String::as_str).collect::<Vec<_>>();
-                        LocalTerminalRuntime::spawn_command_or_failed(
-                            &tab_session_id,
-                            &command.program,
-                            &args,
-                            command.status,
-                            cols,
-                            rows,
-                        )
-                    }
                     HostConnectionPlan::Serial {
                         session_id: sid,
                         config,

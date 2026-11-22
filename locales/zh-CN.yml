@@ -7,7 +7,6 @@ tab_local: 本地
 tab_remote: 远程
 tab_serial: 串口
 tab_telnet: Telnet
-tab_direct: 终端
 tab_process_list: 进程
 process_list_placeholder: 进程列表加载中…
 process_list_error: 进程列表采集失败
