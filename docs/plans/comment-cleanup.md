@@ -873,7 +873,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：最坏是该帧晚 ≤50ms 发布（延迟，不丢画面）；要确认分片是否真会携带 End marker，需用 NEXSHELL_RDP_EGFX_DUMP 或抓包看大帧的 FrameMarker 位置。
 - 备注：行为是降级而非错误处理，归 B 供维护者确认是否接受
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-050 `src/rdp_session/stats.rs:90` `RdpStats.capture_fd`
 
@@ -887,7 +887,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：注释本身不删，只审查理由；理由对但没覆盖重复调用的情形，修代码后可补一句「重复调用先关旧 fd」
 - 决定：修代码
 - 拍板备注：确认是 bug，留在 rdp-2 批次修（见拍板记录）。同一个 `RdpStats` 整个会话共用，每次重连 `capture_fd` 覆盖 `raw_fd` 却不关上一轮的 dup：漏一个 fd，旧 socket 也被这个 dup 吊着，直到进程退出。回归用例：连续 `capture_fd` 两次后，第一次 dup 出来的 fd 已关闭。关旧 fd 和 UI 线程 `rtt_ms` 并发读怎么处理，由实现者定。
-- 完成：
+- 完成：2026-11-22（重复 capture_fd 先关上一轮的 dup，加回归用例）
 
 #### B-051 `src/rdp_session/stats.rs:102`–103 `RdpStats.rtt_ms`
 
@@ -900,7 +900,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立。
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-052 `src/rdp_session/stats.rs:133` `RdpStats.drop`
 
@@ -912,7 +912,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：本条注释自身没错，问题在 capture_fd 一侧（#0233）。
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 ### C 过期的「为什么」
 

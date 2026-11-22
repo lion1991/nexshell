@@ -1,11 +1,10 @@
-//! RDP 会话运行时统计：协议线程累加，UI 侧只读差分算率。全原子无锁。
+//! RDP 会话运行时统计：协议线程累加，UI 侧只读差分算率。计数全是原子量；RTT 采样用的 fd
+//! 放在锁里，重连换 fd 时不会和 UI 线程的读取交错。
 //! 速率不在此算（协议层不知刷新节奏），UI 每秒读一次做差分。
 //! TCP RTT 通过 macOS 原生 fd 采样；其他平台保留通用统计并返回无 RTT 样本。
 
 #[cfg(target_os = "macos")]
 use std::os::fd::RawFd;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::AtomicI32;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
@@ -23,9 +22,9 @@ pub struct RdpStats {
     udp_active: AtomicBool,
     /// 连接建立时刻，算会话时长。
     connected_at: Instant,
-    /// TLS 升级前对 TcpStream dup 的 fd，仅供 getsockopt 读 srtt；Drop 时 close。-1=无。
+    /// TLS 升级前对 TcpStream dup 的 fd，仅供 getsockopt 读 srtt；换新 fd 或 Drop 时 close。-1=无。
     #[cfg(target_os = "macos")]
-    raw_fd: AtomicI32,
+    raw_fd: parking_lot::Mutex<RawFd>,
 }
 
 impl RdpStats {
@@ -38,7 +37,7 @@ impl RdpStats {
             udp_active: AtomicBool::new(false),
             connected_at: Instant::now(),
             #[cfg(target_os = "macos")]
-            raw_fd: AtomicI32::new(-1),
+            raw_fd: parking_lot::Mutex::new(-1),
         }
     }
 
@@ -85,18 +84,27 @@ impl RdpStats {
     }
 
     /// TLS 升级前 dup 一份底层 TCP fd 存入（原 stream 照常被 TLS 吃掉）。失败存 -1。
+    /// 整个会话共用一个 RdpStats，每次重连都会再调一次：先关掉上一轮的 dup，
+    /// 否则漏一个 fd，旧连接的 socket 也被它吊着关不掉。
     #[cfg(target_os = "macos")]
     pub fn capture_fd(&self, stream_fd: RawFd) {
         // SAFETY: dup 一个当前有效的 socket fd；失败返回 -1，由 rtt_ms 忽略。
         let dup = unsafe { libc::dup(stream_fd) };
-        self.raw_fd.store(dup, Ordering::Relaxed);
+        let old = std::mem::replace(&mut *self.raw_fd.lock(), dup);
+        if old >= 0 {
+            // SAFETY: old 是上一轮 dup 出来、由本 stats 独占的 fd，已从锁里换出，只 close 这一次。
+            unsafe {
+                libc::close(old);
+            }
+        }
     }
 
     /// 读 TCP 平滑 RTT（macOS `TCP_CONNECTION_INFO.tcpi_srtt`，单位 ms）。失败/无 fd 返回 None。
     #[cfg(target_os = "macos")]
     pub fn rtt_ms(&self) -> Option<f64> {
-        let fd = self.raw_fd.load(Ordering::Relaxed);
-        if fd < 0 {
+        // 读的全程持锁，capture_fd 不会在中途把这个 fd 关掉、让编号被别的文件复用。
+        let fd = self.raw_fd.lock();
+        if *fd < 0 {
             return None;
         }
         // SAFETY: fd 为本会话 dup 的有效 TCP socket；info 为 POD、zeroed 合法，
@@ -105,7 +113,7 @@ impl RdpStats {
             let mut info: libc::tcp_connection_info = std::mem::zeroed();
             let mut len = std::mem::size_of::<libc::tcp_connection_info>() as libc::socklen_t;
             let ret = libc::getsockopt(
-                fd,
+                *fd,
                 libc::IPPROTO_TCP,
                 libc::TCP_CONNECTION_INFO,
                 &mut info as *mut _ as *mut libc::c_void,
@@ -128,7 +136,7 @@ impl RdpStats {
 #[cfg(target_os = "macos")]
 impl Drop for RdpStats {
     fn drop(&mut self) {
-        let fd = self.raw_fd.load(Ordering::Relaxed);
+        let fd = *self.raw_fd.get_mut();
         if fd >= 0 {
             // SAFETY: fd 为本 stats 独占持有的 dup fd，仅此处 close 一次。
             unsafe {
@@ -168,6 +176,31 @@ pub fn format_duration_hms(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn capture_fd_again_releases_previous_dup() {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let stats = RdpStats::new();
+        let (first, mut first_peer) = UnixStream::pair().expect("socketpair");
+        first_peer
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set_read_timeout");
+        stats.capture_fd(first.as_raw_fd());
+        drop(first);
+        // 重连：换成第二条连接。第一条的 dup 若还开着，对端就读不到 EOF。
+        let (second, _second_peer) = UnixStream::pair().expect("socketpair");
+        stats.capture_fd(second.as_raw_fd());
+
+        let mut buf = [0u8; 1];
+        let n = first_peer
+            .read(&mut buf)
+            .expect("第一条连接应已全部关闭（读到 EOF），而不是超时");
+        assert_eq!(n, 0);
+    }
 
     #[test]
     fn mbps_diffs_over_one_second() {
