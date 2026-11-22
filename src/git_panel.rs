@@ -1761,9 +1761,9 @@ mod tests {
 
     /// 端到端验证 fs watcher：建仓 → SetCwd → 等首次 Snapshot → 外部写入新文件 →
     /// 等 watcher debounce → 验证自动收到含新文件的 Snapshot（无需手动 Refresh）。
-    /// 用 ignore 标记是因为 2s+ debounce 会拖慢整套测试套件；CI 单跑 `--ignored` 验。
+    /// 用 ignore 标记是因为 2s+ debounce 会拖慢整套测试套件；由 `scripts/validate.sh` 单跑。
     #[test]
-    #[ignore = "需要 ~6s 真实 fs watch；跑 `cargo test -- --ignored`"]
+    #[ignore = "需要 ~6s 真实 fs watch；由 scripts/validate.sh 单跑"]
     fn watcher_triggers_auto_refresh_on_workspace_change() {
         use std::{fs, process::Command, time::Duration};
         if Command::new("git").arg("--version").output().is_err() {

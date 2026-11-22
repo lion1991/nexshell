@@ -978,7 +978,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：同组 doc 另含端到端描述（C）
 - 决定：修代码
 - 拍板备注：推翻「记待办」。`#[ignore]` 保留，在 `scripts/validate.sh` 的 cargo test 之后加一步单跑这条测试（`-- --ignored` 加测试名），把注释和 ignore 理由里的「CI 单跑」改成 `scripts/validate.sh`。`scripts/validate.sh` 在本批目录之外，已同意连带修改。先单跑确认它现在能过；不过就停下报告，不改断言。
-- 完成：
+- 完成：2026-11-22
 
 #### B-056 `src/history_suggester.rs:47` `read_history`
 
