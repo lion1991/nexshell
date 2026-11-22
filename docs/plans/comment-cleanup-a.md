@@ -145,28 +145,28 @@
 | `src/settings_view/mod.rs` | 183 | `render_settings_view` | // --- Content --- |  |
 | `src/settings_view/mod.rs` | 233 | `render_settings_view` | // warp: theme_chooser 侧面板 |  |
 | `src/settings_view/mod.rs` | 334 | `render_theme_chooser_panel` | // --- 面板容器 --- |  |
-| `src/themes/theme.rs` | 361 | `WarpThemeConfig.new` | // preload with built-in themes |  |
-| `src/themes/theme.rs` | 546 | `render_preview` | // The border above the input box. |  |
-| `src/themes/theme.rs` | 556 | `render_preview` | // The fake cursor within the input box. |  |
-| `src/ui_components/avatar.rs` | 62 | `Avatar.build` | // One third of the total avatar height/width should be padding. |  |
-| `src/ui_components/avatar.rs` | 76 | `Avatar.build` | // One third of the total avatar height/width should be padding. |  |
-| `src/util/bindings.rs` | 11 | `CustomAction` | // CustomActions are attached to menu items, and may be attached to Bindings. |  |
+| `src/themes/theme.rs` | 361 | `WarpThemeConfig.new` | // preload with built-in themes | 保留（上游原文） |
+| `src/themes/theme.rs` | 546 | `render_preview` | // The border above the input box. | 保留（上游原文） |
+| `src/themes/theme.rs` | 556 | `render_preview` | // The fake cursor within the input box. | 保留（上游原文） |
+| `src/ui_components/avatar.rs` | 62 | `Avatar.build` | // One third of the total avatar height/width should be padding. | 保留（上游原文） |
+| `src/ui_components/avatar.rs` | 76 | `Avatar.build` | // One third of the total avatar height/width should be padding. | 保留（上游原文） |
+| `src/util/bindings.rs` | 11 | `CustomAction` | // CustomActions are attached to menu items, and may be attached to Bindings. | 保留（上游原文） |
 | `src/util/bindings.rs` | 392 | `(顶层)` | // ── 键绑定查询/修改 (端口自 warp util::bindings) ───────────────────────── |  |
 | `src/util/extensions.rs` | 1 | `SliceExt` | // 切片扩展：二分查找插入位置（端口自 warp app/src/util/extensions.rs） |  |
-| `src/util/grid.rs` | 28 | `grid_cell_dimensions` | // Get the font metrics that make up the total line height for the font. |  |
-| `src/util/grid.rs` | 32 | `grid_cell_dimensions` | // Using a ratio, compared to the default line height, to appropriately scale the cell's Height. |  |
-| `src/util/grid.rs` | 50 | `grid_cell_dimensions` | // Return a default advance width if we couldn't load the advance from the glyph. |  |
-| `src/util/grid.rs` | 67–68 | `calculate_grid_baseline_position` | // Leading is additional spacing between lines.<br>// Descent is the general guideline for how far the font will go below the baseline (for single spacing). |  |
+| `src/util/grid.rs` | 28 | `grid_cell_dimensions` | // Get the font metrics that make up the total line height for the font. | 保留（上游原文） |
+| `src/util/grid.rs` | 32 | `grid_cell_dimensions` | // Using a ratio, compared to the default line height, to appropriately scale the cell's Height. | 保留（上游原文） |
+| `src/util/grid.rs` | 50 | `grid_cell_dimensions` | // Return a default advance width if we couldn't load the advance from the glyph. | 保留（上游原文） |
+| `src/util/grid.rs` | 67–68 | `calculate_grid_baseline_position` | // Leading is additional spacing between lines.<br>// Descent is the general guideline for how far the font will go below the baseline (for single spacing). | 保留（上游原文） |
 | `src/util/mod.rs` | 9 | `merge_ranges` | // 合并相邻/重叠区间（端口自 warp app/src/util/mod.rs） |  |
-| `src/view_components/action_button.rs` | 488 | `ActionButton.set_keybinding` | // Remove any subscription from a previous keybinding. |  |
-| `src/view_components/action_button.rs` | 700 | `ActionButton.render` | // Set once an element has been added to the row, to simplify spacing with conditional elements. |  |
-| `src/view_components/action_button.rs` | 703 | `ActionButton.render` | // Helper closure to render the keybinding |  |
-| `src/view_components/action_button.rs` | 712 | `ActionButton.render` | // Compact mode: render as plain text without boxes |  |
-| `src/view_components/action_button.rs` | 735 | `ActionButton.render` | // Standard mode: render with individual key boxes |  |
-| `src/view_components/action_button.rs` | 787 | `ActionButton.render` | // Render keybinding before label if configured |  |
-| `src/view_components/action_button.rs` | 807–810 | `ActionButton.render` | // Determine the maximum width constraint for the button label:<br>// - If both max_label_width and width are set, use the smaller value to ensure the label fits<br>// - If only one constraint is set, use that value<br>// - If no constraints are set, don't set a width constraint |  |
-| `src/view_components/action_button.rs` | 837 | `ActionButton.render` | // Render keybinding after label (default position) if not already rendered before |  |
-| `src/view_components/action_button.rs` | 927 | `ActionButton.render` | // buttons that only have an icon should always be square |  |
+| `src/view_components/action_button.rs` | 488 | `ActionButton.set_keybinding` | // Remove any subscription from a previous keybinding. | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 700 | `ActionButton.render` | // Set once an element has been added to the row, to simplify spacing with conditional elements. | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 703 | `ActionButton.render` | // Helper closure to render the keybinding | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 712 | `ActionButton.render` | // Compact mode: render as plain text without boxes | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 735 | `ActionButton.render` | // Standard mode: render with individual key boxes | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 787 | `ActionButton.render` | // Render keybinding before label if configured | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 807–810 | `ActionButton.render` | // Determine the maximum width constraint for the button label:<br>// - If both max_label_width and width are set, use the smaller value to ensure the label fits<br>// - If only one constraint is set, use that value<br>// - If no constraints are set, don't set a width constraint | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 837 | `ActionButton.render` | // Render keybinding after label (default position) if not already rendered before | 保留（上游原文） |
+| `src/view_components/action_button.rs` | 927 | `ActionButton.render` | // buttons that only have an icon should always be square | 保留（上游原文） |
 
 ## root-view（27）
 
@@ -280,12 +280,12 @@
 | `src/lib.rs` | 4724 | `tests.terminal_grid_core_scrollback_lets_user_view_history_then_jump_back_to_bottom` | // Generate enough output to push prior lines into scrollback. |  |
 | `src/macos_window_util.rs` | 20 | `(顶层)` | // NSApplicationOcclusionStateVisible |  |
 | `src/main.rs` | 91 | `(顶层)` | // main.rs 残留只剩启动装配与伴生类型，下列为这部分仍需的少量符号。 |  |
-| `src/menu.rs` | 423 | `MenuItemLabel.render` | // Create column layout for stacked text |  |
-| `src/menu.rs` | 428 | `MenuItemLabel.render` | // Add primary text |  |
-| `src/menu.rs` | 436 | `MenuItemLabel.render` | // Add secondary text with spacing |  |
-| `src/menu.rs` | 1425 | `MenuItemFields.render` | // Render tooltip if present and hovered |  |
-| `src/menu.rs` | 1599 | `MenuItem.selectable` | // Whether it's selectable depends only on whether the item is disabled or not. |  |
-| `src/menu.rs` | 1607 | `MenuItem.selectable` | // Separator is simply a non-selectable option in the menu list. |  |
+| `src/menu.rs` | 423 | `MenuItemLabel.render` | // Create column layout for stacked text | 保留（上游原文） |
+| `src/menu.rs` | 428 | `MenuItemLabel.render` | // Add primary text | 保留（上游原文） |
+| `src/menu.rs` | 436 | `MenuItemLabel.render` | // Add secondary text with spacing | 保留（上游原文） |
+| `src/menu.rs` | 1425 | `MenuItemFields.render` | // Render tooltip if present and hovered | 保留（上游原文） |
+| `src/menu.rs` | 1599 | `MenuItem.selectable` | // Whether it's selectable depends only on whether the item is disabled or not. | 保留（上游原文） |
+| `src/menu.rs` | 1607 | `MenuItem.selectable` | // Separator is simply a non-selectable option in the menu list. | 保留（上游原文） |
 | `src/pane_tree.rs` | 118–120 | `PaneData` | // ---------------------------------------------------------------------------<br>// PaneData<br>// --------------------------------------------------------------------------- |  |
 | `src/pane_tree.rs` | 241–243 | `PaneNode` | // ---------------------------------------------------------------------------<br>// PaneNode<br>// --------------------------------------------------------------------------- |  |
 | `src/pane_tree.rs` | 396–398 | `PaneBranch` | // ---------------------------------------------------------------------------<br>// PaneBranch<br>// --------------------------------------------------------------------------- |  |
@@ -323,7 +323,7 @@
 | `src/terminal_runtime.rs` | 5021 | `TerminalPalette.from_theme` | // selection = accent with reduced opacity, blended on background |  |
 | `src/terminal_runtime.rs` | 5754 | `tests.consume_osc7_split_across_chunks` | // 第二轮拼上 tail |  |
 | `src/terminal_runtime.rs` | 5781 | `tests.scan_osc7_updates_local_cwd` | // 第二次 cwd 变更 |  |
-| `src/time_format.rs` | 5 | `(顶层)` | // Some conversion ratios for time units. |  |
+| `src/time_format.rs` | 5 | `(顶层)` | // Some conversion ratios for time units. | 保留（上游原文） |
 | `src/ui_anim.rs` | 120 | `(顶层)` | // ── 数值过渡（环弧 sweep 等）──────────────────────────────────── |  |
 | `src/ui_anim.rs` | 211 | `(顶层)` | // ── 一维弹簧（位移/宽度动画）──────────────────────────────────── |  |
 | `src/ui_anim.rs` | 334 | `(顶层)` | // ── 提示条时间线 ─────────────────────────────────────────────── |  |
