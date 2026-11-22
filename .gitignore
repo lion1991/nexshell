@@ -49,3 +49,6 @@ meta.jsonl
 .planning/liquid-glass-pr7/findings.md
 .planning/liquid-glass-pr7/progress.md
 .planning/liquid-glass-pr7/task_plan.md
+
+# 捷径检查（.githooks/check_shortcuts.py）运行时生成
+__pycache__/

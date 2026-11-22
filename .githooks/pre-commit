@@ -1,0 +1,6 @@
+#!/bin/sh
+# 拦新增改动里的捷径与无理由豁免，约定见 docs/shortcut-guard.md。
+# 启用：git config core.hooksPath .githooks（放在别的目录就换成那个目录；脚本按本文件所在目录找）
+checker="$(cd "$(dirname "$0")" && pwd)/check_shortcuts.py"
+command -v python3 >/dev/null 2>&1 || { echo "pre-commit: 需要 python3 才能运行捷径检查（$checker）" >&2; exit 1; }
+exec python3 "$checker"

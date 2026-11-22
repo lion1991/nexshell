@@ -1,0 +1,41 @@
+name: shortcut-guard
+
+# 与本地 pre-commit 同一个脚本，对合并基点到 HEAD 的新增行再查一遍，
+# 堵住 git commit --no-verify。约定见 docs/shortcut-guard.md。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: go # 只要 python3；和 SiheTools、server-config-tools 的捷径检查用同一个 Linux runner
+    env:
+      GUARD_DIR: .githooks # check_shortcuts.py 和回归用例所在目录，装在别处就改这里
+    steps:
+      - uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Regression tests of the checker
+        run: python3 "$GUARD_DIR/test_check_shortcuts.py"
+      - name: Check added lines since the merge base
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          if [ "$EVENT" = pull_request ]; then
+            base=$(git merge-base "origin/${BASE_REF#refs/heads/}" HEAD)
+          elif [ "$REF_NAME" != main ]; then
+            base=$(git merge-base origin/main HEAD)
+          elif [ -n "$BEFORE" ] && ! [ "$BEFORE" = 0000000000000000000000000000000000000000 ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # main 自己的合并基点就是 HEAD，改查这次推送带来的提交
+            base=$(git merge-base "$BEFORE" HEAD)
+          else
+            # main 重建后的首次推送：只查最后一个提交；仓库只有一个提交时从空树算起
+            base=$(git rev-parse -q --verify HEAD~1 || git hash-object -t tree /dev/null)
+          fi
+          echo "checking $base..HEAD"
+          python3 "$GUARD_DIR/check_shortcuts.py" --range "$base..HEAD"
