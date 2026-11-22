@@ -136,12 +136,8 @@ menu_find: 查找…
 menu_paste: 粘贴
 menu_clear_screen: 清屏
 
-menu_whats_new: 新功能
 menu_settings: 设置
 menu_keyboard_shortcuts: 键盘快捷键
-menu_documentation: 文档
-menu_feedback: 反馈
-menu_view_logs: 查看日志
 
 ctx_split_right: 右侧分屏
 ctx_split_left: 左侧分屏

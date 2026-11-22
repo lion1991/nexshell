@@ -53,6 +53,19 @@ impl RootView {
         )
     }
 
+    // warp/app/src/workspace/view.rs:8282-8413 user_menu_items
+    fn settings_menu_items() -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
+        use nexshell::menu::MenuItemFields;
+        vec![
+            MenuItemFields::new(rust_i18n::t!("menu_settings"))
+                .with_on_select_action(TerminalGridAction::ShowSettings)
+                .into_item(),
+            MenuItemFields::new(rust_i18n::t!("menu_keyboard_shortcuts"))
+                .with_on_select_action(TerminalGridAction::ShowSettingsKeybindings)
+                .into_item(),
+        ]
+    }
+
     pub(in crate::root_view) fn handle_toggle_settings_menu(
         &mut self,
         ctx: &mut ViewContext<Self>,
@@ -60,29 +73,7 @@ impl RootView {
         if self.settings_menu_open {
             self.settings_menu_open = false;
         } else {
-            use nexshell::menu::{MenuItem, MenuItemFields};
-            // warp/app/src/workspace/view.rs:8282-8413 user_menu_items
-            let items = vec![
-                MenuItemFields::new(rust_i18n::t!("menu_whats_new"))
-                    .with_on_select_action(TerminalGridAction::SettingsMenuWhatsNew)
-                    .into_item(),
-                MenuItemFields::new(rust_i18n::t!("menu_settings"))
-                    .with_on_select_action(TerminalGridAction::ShowSettings)
-                    .into_item(),
-                MenuItemFields::new(rust_i18n::t!("menu_keyboard_shortcuts"))
-                    .with_on_select_action(TerminalGridAction::ShowSettingsKeybindings)
-                    .into_item(),
-                MenuItem::Separator,
-                MenuItemFields::new(rust_i18n::t!("menu_documentation"))
-                    .with_on_select_action(TerminalGridAction::SettingsMenuDocumentation)
-                    .into_item(),
-                MenuItemFields::new(rust_i18n::t!("menu_feedback"))
-                    .with_on_select_action(TerminalGridAction::SettingsMenuFeedback)
-                    .into_item(),
-                MenuItemFields::new(rust_i18n::t!("menu_view_logs"))
-                    .with_on_select_action(TerminalGridAction::SettingsMenuViewLogs)
-                    .into_item(),
-            ];
+            let items = Self::settings_menu_items();
             let origin = ctx
                 .element_position_by_id(crate::SETTINGS_BUTTON_POSITION_ID)
                 .map(|rect| vec2f(rect.max_x(), rect.max_y() + 2.0));
@@ -105,15 +96,6 @@ impl RootView {
         self.set_app_page(AppPage::Settings, ctx);
         self.settings_tab_open = true;
         self.settings_view_state.borrow_mut().current_page = NexSettingsSection::Keybindings;
-        self.settings_menu_open = false;
-        ctx.notify();
-    }
-
-    // What's New / Documentation / Feedback / View Logs 暂仅关闭菜单（占位，后续接外链）。
-    pub(in crate::root_view) fn handle_settings_menu_dismiss(
-        &mut self,
-        ctx: &mut ViewContext<Self>,
-    ) {
         self.settings_menu_open = false;
         ctx.notify();
     }
@@ -360,5 +342,31 @@ impl RootView {
             d.set_selected_by_name(current_name, ctx);
         });
         ctx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nexshell::menu::MenuItem;
+
+    use super::TerminalGridAction;
+    use crate::RootView;
+
+    #[test]
+    fn settings_menu_only_offers_working_entries() {
+        let actions: Vec<_> = RootView::settings_menu_items()
+            .iter()
+            .map(|item| match item {
+                MenuItem::Item(fields) => fields.on_select_action().cloned(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            actions,
+            vec![
+                Some(TerminalGridAction::ShowSettings),
+                Some(TerminalGridAction::ShowSettingsKeybindings),
+            ]
+        );
     }
 }

@@ -1101,10 +1101,6 @@ pub enum TerminalGridAction {
     GitPushConfirm,
     // --- 设置菜单 actions ---
     ToggleSettingsMenu,
-    SettingsMenuWhatsNew,
-    SettingsMenuDocumentation,
-    SettingsMenuFeedback,
-    SettingsMenuViewLogs,
     // --- 设置页面 actions ---
     ShowSettings,
     ShowSettingsKeybindings,

@@ -136,12 +136,8 @@ menu_find: "Find…"
 menu_paste: Paste
 menu_clear_screen: Clear Screen
 
-menu_whats_new: "What's new"
 menu_settings: Settings
 menu_keyboard_shortcuts: Keyboard shortcuts
-menu_documentation: Documentation
-menu_feedback: Feedback
-menu_view_logs: View logs
 
 ctx_split_right: Split Pane Right
 ctx_split_left: Split Pane Left

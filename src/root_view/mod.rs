@@ -2581,10 +2581,6 @@ impl TypedActionView for RootView {
             TerminalGridAction::ShowSettingsKeybindings => {
                 self.handle_show_settings_keybindings(ctx)
             }
-            TerminalGridAction::SettingsMenuWhatsNew
-            | TerminalGridAction::SettingsMenuDocumentation
-            | TerminalGridAction::SettingsMenuFeedback
-            | TerminalGridAction::SettingsMenuViewLogs => self.handle_settings_menu_dismiss(ctx),
             TerminalGridAction::ShowSettings => self.handle_show_settings(ctx),
             TerminalGridAction::CloseSettingsTab => self.handle_close_settings_tab(ctx),
             TerminalGridAction::SettingsSelectPage(section) => {

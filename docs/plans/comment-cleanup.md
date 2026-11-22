@@ -286,7 +286,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：中：用户看得到、点得了，但点了没反应，像坏掉；要么去掉这四项，要么接外链（属新功能，需 Matt 拍板），拍板结果记进 docs。
 - 决定：修代码
 - 拍板备注：推翻「记待办」。去掉这四项，不接外链（理由见拍板记录）。要删：`settings_section.rs` 的四个菜单项、分隔线和 `handle_settings_menu_dismiss`，`root_view/mod.rs` 的路由，`src/terminal_grid_element.rs` 的四个 `SettingsMenu*` action，`locales/en.yml` 与 `locales/zh-CN.yml` 的 `menu_whats_new` / `menu_documentation` / `menu_feedback` / `menu_view_logs`。后两处在本批目录之外，已同意连带修改；菜单少四项这个可见变化已同意。
-- 完成：
+- 完成：2026-11-22
 
 #### B-009 `src/root_view/tab_bar_section/title_bar.rs:239` `RootView.tab_accent_bar_layout`
 
