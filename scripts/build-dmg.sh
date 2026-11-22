@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ── 配置 ──
 APP_NAME="NexShell"
 BUNDLE_ID="com.matt.nexshell"
 BIN_NAME="nexshell"
@@ -27,7 +26,6 @@ BUNDLE_DIR="$TARGET_ROOT/bundle"
 APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
 DMG_DIR="$TARGET_ROOT/dmg"
 
-# ── 解析参数 ──
 SKIP_BUILD=false
 for arg in "$@"; do
     case $arg in
@@ -39,7 +37,6 @@ for arg in "$@"; do
     esac
 done
 
-# ── 1. 编译 ──
 if [ "$SKIP_BUILD" = false ]; then
     echo "▸ 编译 release …"
     nexshell_run_cargo_clean build --release --manifest-path "$PROJECT_DIR/Cargo.toml"
@@ -52,7 +49,6 @@ if [ ! -f "$BUILD_DIR/$BIN_NAME" ]; then
     exit 1
 fi
 
-# ── 2. 构建 .app bundle ──
 echo "▸ 构建 $APP_NAME.app …"
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
@@ -60,7 +56,6 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BUILD_DIR/$BIN_NAME" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -138,11 +133,9 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 </plist>
 PLIST
 
-# 如果有 .icns 图标就拷进去
 ICON_PATH="$PROJECT_DIR/assets/AppIcon.icns"
 if [ -f "$ICON_PATH" ]; then
     cp "$ICON_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
-    # 追加 CFBundleIconFile
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP_BUNDLE/Contents/Info.plist"
     echo "  ✓ 使用自定义图标"
 else
@@ -169,7 +162,6 @@ else
     codesign --force --deep --sign - "$APP_BUNDLE"
 fi
 
-# ── 4. 打包 DMG ──
 echo "▸ 打包 DMG …"
 rm -rf "$DMG_DIR"
 mkdir -p "$DMG_DIR"

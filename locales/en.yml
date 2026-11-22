@@ -1,10 +1,8 @@
-# === App ===
 app_name: NexShell
 copyright: "© 2025-2026 Matt"
 about_app: About NexShell
 quit_app: Quit NexShell
 
-# === Tab types ===
 tab_local: Local
 tab_remote: Remote
 tab_serial: Serial
@@ -77,7 +75,6 @@ code_viewer_reconnect_banner_dirty: "Connection lost — unsaved changes can't b
 system_info_placeholder: "Loading system info…"
 system_info_error: "Failed to collect system info"
 
-# === Host overview sidebar ===
 host_overview_fallback_title: Host Info
 host_overview_subtitle_placeholder: Connect to an SSH host to see its overview
 host_overview_not_connected: Not connected
@@ -113,7 +110,6 @@ host_overview_uptime_days: "Up %{n}d"
 host_overview_uptime_hours: "Up %{n}h"
 host_overview_uptime_minutes: "Up %{n}m"
 
-# === Container management ===
 host_container_no_docker: "Docker not found"
 host_container_permission_denied: "No permission to access Docker, add this user to the docker group"
 host_container_probe_error: "Probe failed"
@@ -130,10 +126,8 @@ container_search_placeholder: "Search containers…"
 container_search_no_match: "No matching containers"
 container_action_error: "Operation failed"
 
-# === Sidebar ===
 sidebar: Sidebar
 
-# === Menu: new tab ===
 menu_terminal: Terminal
 menu_new_tab: New tab
 menu_close_tab: Close tab
@@ -142,7 +136,6 @@ menu_find: "Find…"
 menu_paste: Paste
 menu_clear_screen: Clear Screen
 
-# === Menu: gear ===
 menu_whats_new: "What's new"
 menu_settings: Settings
 menu_keyboard_shortcuts: Keyboard shortcuts
@@ -150,7 +143,6 @@ menu_documentation: Documentation
 menu_feedback: Feedback
 menu_view_logs: View logs
 
-# === Context menu ===
 ctx_split_right: Split Pane Right
 ctx_split_left: Split Pane Left
 ctx_split_down: Split Pane Down
@@ -193,7 +185,6 @@ file_panel_input_new_file: New file name
 file_panel_input_rename: "Rename %{name}"
 file_panel_path_copied: Path copied
 
-# === Git Panel ===
 git_panel_empty: Git
 git_panel_remote_unsupported: Git panel not available for remote sessions
 git_panel_no_repo: Not in a git repository
@@ -244,12 +235,10 @@ git_panel_ssh_host_key_warning: If you continue, NexShell records the host key s
 git_panel_ssh_host_key_confirm: Trust and Push
 git_panel_ssh_host_key_cancel: Cancel
 
-# === Settings ===
 settings_title: Settings
 settings_appearance: Appearance
 settings_keybindings: Keyboard shortcuts
 
-# === Appearance page ===
 appearance_title: Appearance
 appearance_theme: Theme
 appearance_themes: Themes
@@ -277,12 +266,10 @@ settings_open_file_editor: Open files with
 settings_editor_system_default: System default
 settings_reuse_view_tab: Reuse one tab for diff & code viewer
 
-# === Cursor styles ===
 cursor_block: Block
 cursor_beam: Beam
 cursor_underline: Underline
 
-# === Keybindings page ===
 key_clear_screen: Clear screen
 key_find: Find
 key_copy: Copy
@@ -303,7 +290,6 @@ key_increase_font: Increase font
 key_decrease_font: Decrease font
 key_reset_font: Reset font
 
-# === Dialogs ===
 dialog_close_window: "Close window?"
 dialog_close_window_msg: "You have %{count} running processes. Closing the window will terminate them."
 dialog_close_window_unsaved: "There are unsaved changes. Closing the window will discard them. Close anyway?"
@@ -316,7 +302,6 @@ dialog_quit_app_recording: "A terminal is recording. Quitting will end the recor
 dialog_confirm_quit: Confirm quit
 dialog_cancel: Cancel
 
-# === Toast / Notice ===
 toast_form_required: "Name, address, port, and username cannot be empty"
 toast_host_saved: Host settings saved
 toast_host_created: New host saved
@@ -349,7 +334,6 @@ toast_rdp_trust_cert_failed: "Failed to trust certificate: %{error}"
 toast_connect_failed: "%{title}: %{reason}"
 toast_rdp_password_required: "RDP requires a saved password"
 
-# === Host management ===
 host_empty: No hosts
 host_empty_hint: "Click \"+\" at top right to add a new host"
 host_new: New host
@@ -396,7 +380,6 @@ host_manage_groups_tags: Manage groups and tags
 host_protocol_all: All protocols
 host_nav_containers: Containers
 
-# === Host edit form ===
 form_new_host: New host
 form_edit_host: Edit host
 form_protocol: Protocol
@@ -451,7 +434,6 @@ form_placeholder_description: "Optional description..."
 form_placeholder_host_ssh: "e.g. 192.168.1.1"
 form_placeholder_host_serial: /dev/cu.xxx
 
-# === Group / Tag management ===
 manage_title: Manage Groups & Tags
 manage_groups: Groups
 manage_tags: Tags
@@ -464,18 +446,15 @@ manage_delete_confirm: "Delete \"%{name}\"?"
 manage_group_deleted: "Group \"%{name}\" deleted"
 manage_tag_deleted: "Tag \"%{name}\" removed from all hosts"
 
-# === Shell chrome ===
 shell_last_login: "Last login: Mon May  4 07:30 on native-shell"
 shell_ready: NexShell native terminal host is ready
 shell_detached: terminal renderer detached for this tab
 shell_background: "session %{session} stays alive in the background"
 shell_reattach: select the terminal tab to reattach the renderer
 
-# === Tab context menu ===
 host_reorder_hint: "Drag cards to reorder"
 host_reorder_done: Done
 
-# === Tab context menu ===
 tab_ctx_rename: Rename tab
 tab_ctx_reset_name: Reset tab name
 tab_ctx_duplicate: Duplicate Tab
@@ -491,7 +470,6 @@ tab_ctx_save_config: Save as new config
 tab_ctx_record_start: Start Recording
 tab_ctx_record_stop: Stop Recording
 
-# === Terminal recording ===
 log_banner_start: Log Start
 log_banner_end: Log End
 log_banner_truncated: truncated at size cap
@@ -499,7 +477,6 @@ toast_recording_started: Recording started
 toast_recording_saved: "Recording saved: %{path}"
 toast_recording_save_failed: "Failed to save recording: %{error}"
 
-# === SSH host key ===
 ssh_host_key_changed: "The SSH host key for %{host} does not match the one recorded in %{path}; the connection was aborted. If the host really rotated its key, reconnect from the terminal tab and trust the new key."
 ssh_host_key_changed_title: "The SSH host key for %{host} has changed!"
 ssh_host_key_changed_hint: The host may have been reinstalled or rotated its key, or someone may be intercepting the connection. Verify the fingerprint first.

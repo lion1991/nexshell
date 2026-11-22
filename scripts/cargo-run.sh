@@ -4,7 +4,7 @@
 # 仅当 cargo 报"找不到 Metal Toolchain"（装了但非默认）时才需要它。
 # 用法: scripts/cargo-run.sh [cargo 子命令与参数]   默认 run
 set -euo pipefail
-cd "$(dirname "$0")/.."  # crate 根 = nexshell/
+cd "$(dirname "$0")/.."
 
 if [ -z "${TOOLCHAINS:-}" ]; then
     TOOLCHAINS="$(xcodebuild -showComponent MetalToolchain 2>/dev/null \

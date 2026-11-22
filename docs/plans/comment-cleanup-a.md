@@ -4,10 +4,12 @@
 
 ## repo-ci-scripts（61）
 
+已清理：2026-11-21（删 58 条，跳过 3 条，工具依赖 0 条）
+
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
-| `.forgejo/workflows/windows-release.yml` | 63 | `(顶层)` | # Prefer shallow fetch of the pinned sha; fall back to a full fetch |  |
-| `.forgejo/workflows/windows-release.yml` | 118 | `(顶层)` | # Query existing release: 200 reuse, 404 create, anything else fails |  |
+| `.forgejo/workflows/windows-release.yml` | 63 | `(顶层)` | # Prefer shallow fetch of the pinned sha; fall back to a full fetch | 跳过（PowerShell run 块，脚本只认 bash / sh） |
+| `.forgejo/workflows/windows-release.yml` | 118 | `(顶层)` | # Query existing release: 200 reuse, 404 create, anything else fails | 跳过（PowerShell run 块，脚本只认 bash / sh） |
 | `.gitignore` | 1 | `(顶层)` | # Rust 构建产物 |  |
 | `.gitignore` | 5 | `(顶层)` | # 系统 / 编辑器 |  |
 | `examples/rdp_probe.rs` | 513 | `main` | // 落盘最终 framebuffer。 |  |
@@ -64,7 +66,7 @@
 | `scripts/build-dmg.sh` | 63 | `(顶层)` | # Info.plist |  |
 | `scripts/build-dmg.sh` | 141 | `(顶层)` | # 如果有 .icns 图标就拷进去 |  |
 | `scripts/build-dmg.sh` | 145 | `(顶层)` | # 追加 CFBundleIconFile |  |
-| `scripts/build-dmg.sh` | 160 | `(顶层)` | # 唯一指纹，消除同名歧义 |  |
+| `scripts/build-dmg.sh` | 160 | `(顶层)` | # 唯一指纹，消除同名歧义 | 保留（实为「为什么」：说明取指纹而不取证书名） |
 | `scripts/build-dmg.sh` | 172 | `(顶层)` | # ── 4. 打包 DMG ── |  |
 | `scripts/cargo-run.sh` | 7 | `(顶层)` | # crate 根 = nexshell/ |  |
 

@@ -510,7 +510,6 @@ fn main() {
         connected_at, first_frame_at, frame_count
     );
 
-    // 落盘最终 framebuffer。
     let (w, h, rgba) = {
         let fb = handle.framebuffer.lock();
         (u32::from(fb.width), u32::from(fb.height), fb.rgba.clone())

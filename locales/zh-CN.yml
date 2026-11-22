@@ -1,10 +1,8 @@
-# === App ===
 app_name: NexShell
 copyright: "© 2025-2026 Matt"
 about_app: 关于 NexShell
 quit_app: 退出 NexShell
 
-# === Tab types ===
 tab_local: 本地
 tab_remote: 远程
 tab_serial: 串口
@@ -77,7 +75,6 @@ code_viewer_reconnect_banner_dirty: 连接已断开，未保存的修改暂时�
 system_info_placeholder: 系统信息加载中…
 system_info_error: 系统信息采集失败
 
-# === Host overview sidebar ===
 host_overview_fallback_title: 主机信息
 host_overview_subtitle_placeholder: 连接 SSH 主机后显示概览
 host_overview_not_connected: 未连接
@@ -113,7 +110,6 @@ host_overview_uptime_days: "运行 %{n} 天"
 host_overview_uptime_hours: "运行 %{n} 小时"
 host_overview_uptime_minutes: "运行 %{n} 分钟"
 
-# === Container management ===
 host_container_no_docker: 未检测到 Docker
 host_container_permission_denied: 当前用户无 Docker 权限，请加入 docker 组
 host_container_probe_error: 采集失败
@@ -130,10 +126,8 @@ container_search_placeholder: 搜索容器名…
 container_search_no_match: 无匹配的容器
 container_action_error: 操作失败
 
-# === Sidebar ===
 sidebar: 侧边栏
 
-# === Menu: new tab ===
 menu_terminal: 终端
 menu_new_tab: 新建标签页
 menu_close_tab: 关闭标签页
@@ -142,7 +136,6 @@ menu_find: 查找…
 menu_paste: 粘贴
 menu_clear_screen: 清屏
 
-# === Menu: gear ===
 menu_whats_new: 新功能
 menu_settings: 设置
 menu_keyboard_shortcuts: 键盘快捷键
@@ -150,7 +143,6 @@ menu_documentation: 文档
 menu_feedback: 反馈
 menu_view_logs: 查看日志
 
-# === Context menu ===
 ctx_split_right: 右侧分屏
 ctx_split_left: 左侧分屏
 ctx_split_down: 下方分屏
@@ -193,7 +185,6 @@ file_panel_input_new_file: 新文件名
 file_panel_input_rename: "重命名 %{name}"
 file_panel_path_copied: 已复制路径
 
-# === Git Panel ===
 git_panel_empty: Git
 git_panel_remote_unsupported: 远程会话不支持 git 面板
 git_panel_no_repo: 不在 git 仓库中
@@ -244,12 +235,10 @@ git_panel_ssh_host_key_warning: 继续后，NexShell 会把上面这把主机密
 git_panel_ssh_host_key_confirm: 信任并推送
 git_panel_ssh_host_key_cancel: 取消
 
-# === Settings ===
 settings_title: 设置
 settings_appearance: 外观
 settings_keybindings: 键盘快捷键
 
-# === Appearance page ===
 appearance_title: 外观
 appearance_theme: 主题
 appearance_themes: 主题
@@ -277,12 +266,10 @@ settings_open_file_editor: 打开文件用
 settings_editor_system_default: 系统默认
 settings_reuse_view_tab: diff 与代码查看器复用单标签
 
-# === Cursor styles ===
 cursor_block: 方块
 cursor_beam: 竖线
 cursor_underline: 下划线
 
-# === Keybindings page ===
 key_clear_screen: 清屏
 key_find: 查找
 key_copy: 复制
@@ -303,7 +290,6 @@ key_increase_font: 放大字体
 key_decrease_font: 缩小字体
 key_reset_font: 重置字体
 
-# === Dialogs ===
 dialog_close_window: 关闭窗口？
 dialog_close_window_msg: "你有 %{count} 个进程正在运行，关闭窗口将终止这些进程。"
 dialog_close_window_unsaved: "有未保存的更改，关闭窗口将丢失。确认关闭？"
@@ -316,7 +302,6 @@ dialog_quit_app_recording: "有终端正在录制日志，退出将结束录制�
 dialog_confirm_quit: 确认退出
 dialog_cancel: 取消
 
-# === Toast / Notice ===
 toast_form_required: 名称、地址、端口、用户不能为空
 toast_host_saved: 已保存主机设置
 toast_host_created: 已保存新主机
@@ -349,7 +334,6 @@ toast_rdp_trust_cert_failed: "信任证书失败：%{error}"
 toast_connect_failed: "%{title}：%{reason}"
 toast_rdp_password_required: RDP 需要保存密码
 
-# === Host management ===
 host_empty: 暂无主机
 host_empty_hint: 点击右上角「+ 新建主机」添加
 host_new: 新建主机
@@ -396,7 +380,6 @@ host_manage_groups_tags: 管理分组与标签
 host_protocol_all: 所有协议
 host_nav_containers: 容器
 
-# === Host edit form ===
 form_new_host: 新建主机
 form_edit_host: 编辑主机
 form_protocol: 协议
@@ -451,7 +434,6 @@ form_placeholder_description: 可选描述...
 form_placeholder_host_ssh: 例如 192.168.1.1
 form_placeholder_host_serial: /dev/cu.xxx
 
-# === Group / Tag management ===
 manage_title: 管理分组与标签
 manage_groups: 分组
 manage_tags: 标签
@@ -464,18 +446,15 @@ manage_delete_confirm: "确认删除「%{name}」？"
 manage_group_deleted: "已删除分组「%{name}」"
 manage_tag_deleted: "已从所有主机移除标签「%{name}」"
 
-# === Shell chrome ===
 shell_last_login: "Last login: Mon May  4 07:30 on native-shell"
 shell_ready: NexShell native terminal host is ready
 shell_detached: 终端渲染器已与此标签页分离
 shell_background: "会话 %{session} 在后台保持活跃"
 shell_reattach: 选择终端标签页以重新连接渲染器
 
-# === Tab context menu ===
 host_reorder_hint: "拖拽卡片调整顺序"
 host_reorder_done: 完成
 
-# === Tab context menu ===
 tab_ctx_rename: 重命名标签页
 tab_ctx_reset_name: 重置标签页名称
 tab_ctx_duplicate: 复制标签页
@@ -491,7 +470,6 @@ tab_ctx_save_config: 保存为新配置
 tab_ctx_record_start: 开始录制
 tab_ctx_record_stop: 停止录制
 
-# === Terminal recording ===
 log_banner_start: 日志开始
 log_banner_end: 日志结束
 log_banner_truncated: 超出上限已截断
@@ -499,7 +477,6 @@ toast_recording_started: 已开始录制日志
 toast_recording_saved: "日志已保存：%{path}"
 toast_recording_save_failed: "日志保存失败：%{error}"
 
-# === SSH host key ===
 ssh_host_key_changed: "%{host} 的 SSH 主机密钥与 %{path} 中记录的不一致，连接已中止。确认主机确实更换过密钥后，可在终端标签重新连接并信任新密钥。"
 ssh_host_key_changed_title: "%{host} 的 SSH 主机密钥已变更！"
 ssh_host_key_changed_hint: 主机可能重装或更换过密钥，也可能遭到中间人攻击。请先核对指纹。
