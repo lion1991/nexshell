@@ -172,6 +172,8 @@
 
 ## root-view（27）
 
+已清理：2026-11-21（删 27 条，跳过 0 条，工具依赖 0 条）
+
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
 | `src/root_view/code_viewer_section.rs` | 153 | `RootView.place_code_viewer_content` | // 当前 tab 有未保存改动则先弹确认；否则直接换内容（ADR 0003）。 |  |

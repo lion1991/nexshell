@@ -261,7 +261,6 @@ impl RootView {
             if let Ok(mut cache) = self.shaped_line_cache.lock() {
                 *cache = TerminalShapedLineCache::default();
             }
-            // warp: appearance_page.rs:1928 — 更新 FilterableDropdown 选中项
             let label = name;
             self.font_family_dropdown.update(ctx, |d, ctx| {
                 d.set_selected_by_name(label, ctx);
@@ -280,7 +279,6 @@ impl RootView {
         warp_core::ui::appearance::Appearance::handle(ctx).update(ctx, |appearance, ctx| {
             appearance.set_monospace_font_weight(weight, ctx);
         });
-        // warp: 更新 Dropdown 选中项
         let label = weight.to_string();
         self.font_weight_dropdown.update(ctx, |d, ctx| {
             d.set_selected_by_name(label, ctx);

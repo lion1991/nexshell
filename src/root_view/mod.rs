@@ -112,12 +112,10 @@ use crate::{settings_view, warp_dropdown_view, warp_filterable_dropdown};
 use nexshell::design_tokens::DesignTokens;
 use nexshell::ui_anim::{SlotReveal, SpringAnim, ToastTimeline, TransitionMap};
 
-// crate root 保留的伴生类型（helper/section 也经 crate:: 引用）。
 use crate::{
     AppPage, CursorBlinkState, FilePanelInputIntent, HostFleetSyncDebounce, HostPasswordIntent,
     TabModel, TerminalSessionKind, TerminalSessionTab,
 };
-// crate root 保留的布局/资源常量。
 use crate::{
     DEFAULT_COLS, DEFAULT_ROWS, DEFAULT_WINDOW_TITLE, FILE_PANEL_WIDTH_DEFAULT,
     GIT_PANEL_WIDTH_DEFAULT, IDLE_REFRESH_INTERVAL, NEW_TAB_BUTTON_POSITION_ID,
@@ -872,7 +870,7 @@ impl RootView {
             toast: None,
             anim_tick_running: false,
         };
-        view.reload_host_recent(); // 启动首屏即填充最近访问
+        view.reload_host_recent();
         view
     }
 
@@ -1830,7 +1828,7 @@ impl View for RootView {
             self.report_terminal_focus(true);
             Self::sync_titlebar_height(ctx);
             self.window_key_focused.set(true);
-            self.sync_rdp_hotkey_guard(); // 重获焦点：RDP tab 恢复符号热键接管。
+            self.sync_rdp_hotkey_guard();
         }
         // 终端是否收键盘（is_focused_pane）在 render 时按焦点算，焦点在子编辑器和根之间换手后要重画，
         // 否则点了搜索框后第一个字符仍会进 PTY。

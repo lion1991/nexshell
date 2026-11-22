@@ -67,7 +67,6 @@ impl RootView {
             height,
             // EGFX 默认开启；必要时用 NEXSHELL_RDP_DISABLE_EGFX=1 回退旧管线。
             enable_egfx: default_enable_egfx(),
-            // RDPSND 音频重定向默认开启。
             enable_audio: true,
             // RDPDR 驱动器重定向默认开启（~/NexShell RDP ↔ \\tsclient\NexShell 文件互拷）。
             enable_drive: true,

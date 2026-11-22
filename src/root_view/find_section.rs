@@ -120,7 +120,6 @@ impl RootView {
         ctx.notify();
     }
 
-    // 查找栏 overlay：active 时返回 top-right 浮层，否则 None。
     pub(in crate::root_view) fn render_find_bar(&self) -> Option<Box<dyn Element>> {
         let find_active = self.find_state.lock().map(|s| s.active).unwrap_or(false);
         if !find_active {
@@ -157,7 +156,6 @@ impl RootView {
         )
         .finish();
 
-        // 去框化输入区：搜索图标做左锚，输入直接融在玻璃条上。
         let editor_area = Shrinkable::new(
             1.,
             Container::new(
@@ -298,7 +296,6 @@ impl RootView {
         )
         .finish();
 
-        // 计数与导航按钮之间的发丝分隔，收整右侧簇（两侧等距留白）。
         let cluster_divider = Container::new(
             ConstrainedBox::new(
                 Container::new(warpui::elements::Empty::new().finish())

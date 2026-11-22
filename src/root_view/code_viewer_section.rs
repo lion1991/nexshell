@@ -150,7 +150,6 @@ impl RootView {
                 && tab.host_id.as_deref() == Some(source_tab_id.as_str())
                 && (reuse || tab.code_viewer_path.as_deref() == Some(path.as_str()))
         }) {
-            // 当前 tab 有未保存改动则先弹确认；否则直接换内容（ADR 0003）。
             if self.terminal_tabs[idx].code_viewer_dirty {
                 self.confirm_discard_code_viewer_reuse(idx, content, path, handle, meta, ctx);
             } else {
@@ -283,7 +282,6 @@ impl RootView {
         let text = view.as_ref(ctx).text(ctx).into_string();
 
         match handle {
-            // 本地：同步覆盖写（ADR 0003 行为不变）。
             None => match std::fs::write(&path, &text) {
                 Ok(()) => {
                     if let Some(tab) = self.terminal_tabs.get_mut(idx) {
@@ -302,7 +300,6 @@ impl RootView {
                     ctx.notify();
                 }
             },
-            // 远程：乐观异步，先冲突检测（force=false）。
             Some(handle) => {
                 self.fire_remote_save(tab_id, path, handle, text, expected, false, post, 0, ctx);
             }
@@ -477,7 +474,6 @@ impl RootView {
                         let Some(tab) = view.terminal_tabs.iter().find(|t| t.id == tab_id) else {
                             return;
                         };
-                        // tab 已被换文件则放弃覆盖（review F）。
                         if tab.code_viewer_path.as_deref() != Some(path.as_str()) {
                             return;
                         }
@@ -595,7 +591,6 @@ impl RootView {
                     );
                     move |view: &mut Self, ctx: &mut ViewContext<Self>| {
                         if let Some(idx) = view.terminal_tabs.iter().position(|t| t.id == tab_id) {
-                            // 先存当前内容（本地同步 / 远程异步），成功后换进新文件。
                             view.start_code_viewer_save(
                                 idx,
                                 PostSave::Reuse {
@@ -803,7 +798,6 @@ impl RootView {
             .host_id
             .as_ref()
             .and_then(|hid| self.terminal_tabs.iter().position(|t| &t.id == hid));
-        // 源终端找不到（已关）或未连通都视为断开。
         let connected = source
             .map(|i| Self::terminal_tab_is_connected(&self.terminal_tabs[i]))
             .unwrap_or(false);

@@ -418,7 +418,6 @@ impl RootView {
             ));
         }
         if let Some(err) = state.error.as_ref() {
-            // 断线 → 可点击重连；其它错误保持纯文本。
             if !Self::terminal_tab_is_connected(tab) {
                 if let Some(index) = self.terminal_tabs.iter().position(|t| t.id == tab.id) {
                     return file_panel_fill_slot(file_panel_reconnect_message(
@@ -461,7 +460,6 @@ impl RootView {
             let row = self.render_file_panel_entry(tab, entry, &state.selected_names, colors, &uc);
             col.add_child(row);
         }
-        // warp: 列表外面套 ClippedScrollable 提供纵向滚动条
         let scrollable = ClippedScrollable::vertical(
             tab.file_panel_scroll_state.clone(),
             col.finish(),
@@ -734,7 +732,6 @@ impl RootView {
                 ));
             });
         } else {
-            // 远程文件双击 → 内置编辑器（ADR 0005）；二进制/超大由 handler 提示下载。
             let full_path = nexshell::file_panel::join_path(&tab.file_panel_state.cwd, &entry.name);
             hover = hover.on_double_click(move |ctx, _, _| {
                 ctx.dispatch_typed_action(TerminalGridAction::FilePanelOpenInCodeViewer {

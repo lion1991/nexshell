@@ -25,7 +25,6 @@ use warpui::{SingletonEntity as _, ViewContext};
 
 impl RootView {
     pub(in crate::root_view) fn handle_toggle_file_panel(&mut self, ctx: &mut ViewContext<Self>) {
-        // 关门滑出途中再按 = 取消关门滑回。
         if self.file_panel_closing.borrow().is_some() {
             *self.file_panel_closing.borrow_mut() = None;
             self.file_panel_slide.borrow_mut().set_target(0.0);
@@ -54,7 +53,7 @@ impl RootView {
         if matches!(tab.kind, TerminalSessionKind::Local) {
             tab.file_panel_state.follow_cwd = true;
         }
-        self.file_panel_slide_pending.set(true); // 首帧按实际宽度起搏滑入
+        self.file_panel_slide_pending.set(true);
         ctx.notify();
         self.refresh_or_restart_file_panel_worker(&tab_id, ctx);
     }

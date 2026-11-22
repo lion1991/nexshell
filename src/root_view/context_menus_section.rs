@@ -309,7 +309,6 @@ impl RootView {
         position: Vector2F,
         ctx: &mut ViewContext<Self>,
     ) {
-        // 右键 entry：若该项不在选择集合内，则单独选中；已选中则保留现有多选集合
         if let Some(target) = &name {
             if let Some(tab) = self.file_panel_tab_mut() {
                 if !tab.file_panel_state.selected_names.contains(target) {

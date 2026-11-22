@@ -39,7 +39,6 @@ use warpui::modals::{AlertDialogWithCallbacks, ModalButton};
 use warpui::{AppContext, Element, ViewContext};
 
 impl RootView {
-    // ===== A 类：从 handle_action match arm body 抽出的 handler =====
 
     pub(in crate::root_view) fn handle_toggle_git_panel(&mut self, ctx: &mut ViewContext<Self>) {
         // 防御：远程/数据 tab 不允许切换 git 面板（按钮已隐藏，这里只是兜底）
@@ -52,7 +51,6 @@ impl RootView {
         let Some(tab) = self.terminal_tabs.get_mut(idx) else {
             return;
         };
-        // 关门滑出途中再按 = 取消关门滑回（跟随的 file 面板同步回位）。
         if self.git_panel_closing.borrow().is_some() {
             *self.git_panel_closing.borrow_mut() = None;
             self.git_panel_slide.borrow_mut().set_target(0.0);
@@ -79,7 +77,6 @@ impl RootView {
             return;
         }
         tab.git_panel_open = true;
-        // 首帧按实际宽度起搏滑入。
         self.git_panel_slide_pending.set(true);
         // 文件面板已开（且不在关门中）时：git 槽位出现使其布局左移 G+1（含边框），
         // 给它补同量内容偏移从旧屏幕位置同弹簧滑到新位置——git 面板推着它走。
@@ -185,8 +182,6 @@ impl RootView {
     pub(in crate::root_view) fn handle_git_panel_resize_end(&mut self) {
         self.git_panel_resize_anchor = None;
     }
-
-    // ===== C 类：从 main.rs 第 3 块 impl RootView 整体搬入的 git_panel fn =====
 
     pub(crate) fn apply_git_event_to_diff_tabs(&mut self, owner: &str, event: GitEvent) -> bool {
         let source_repo = self
@@ -359,8 +354,6 @@ impl RootView {
             |_: &mut Self, _: &mut ViewContext<Self>| {},
         ));
     }
-
-    // ===== render fn：从 main.rs 第 2 块 impl RootView 整体搬入 =====
 
     pub(in crate::root_view) fn render_git_panel(&self, _app: &AppContext) -> Box<dyn Element> {
         let colors = self.design_tokens.overview;
