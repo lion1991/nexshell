@@ -229,6 +229,8 @@ impl RootView {
             HostListClick::Activate(index) => self.activate_terminal_tab(index, ctx),
             HostListClick::Connect => self.connect_host(host_id, ctx),
         }
+        // 从搜索框回车打开：连接失败或没切走焦点时，别把键盘留在搜索框。
+        self.release_host_list_search_focus(ctx);
         ctx.notify();
     }
 

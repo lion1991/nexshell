@@ -1832,9 +1832,12 @@ impl View for RootView {
             self.window_key_focused.set(true);
             self.sync_rdp_hotkey_guard(); // 重获焦点：RDP tab 恢复符号热键接管。
         }
+        // 终端是否收键盘（is_focused_pane）在 render 时按焦点算，焦点在子编辑器和根之间换手后要重画，
+        // 否则点了搜索框后第一个字符仍会进 PTY。
+        ctx.notify();
     }
 
-    fn on_blur(&mut self, blur_ctx: &BlurContext, _ctx: &mut ViewContext<Self>) {
+    fn on_blur(&mut self, blur_ctx: &BlurContext, ctx: &mut ViewContext<Self>) {
         root_debug_key_log(format_args!(
             "root blur self_blurred={} page={:?} active_tab={}",
             blur_ctx.is_self_blurred(),
@@ -1847,6 +1850,7 @@ impl View for RootView {
             self.sync_rdp_hotkey_guard(); // 失焦：主动 Pop 兜底（不只靠系统前台自动恢复）。
             self.release_rdp_held_input(self.active_tab_index); // 失焦兜底抬起远端按键，防卡键（非 RDP tab 内部静默跳过）。
         }
+        ctx.notify();
     }
 
     fn active_cursor_position(&self, ctx: &ViewContext<Self>) -> Option<CursorInfo> {

@@ -270,6 +270,8 @@ impl RootView {
             *layout = None;
         }
         self.reset_active_terminal_view_state();
+        // 点窗格和单窗格点终端一样：收回键盘焦点（比如从主机列表搜索框）。
+        self.handle_terminal_mouse_down(ctx);
         ctx.notify();
     }
 
