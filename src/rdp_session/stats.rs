@@ -86,10 +86,11 @@ impl RdpStats {
     /// TLS 升级前 dup 一份底层 TCP fd 存入（原 stream 照常被 TLS 吃掉）。失败存 -1。
     /// 整个会话共用一个 RdpStats，每次重连都会再调一次：先关掉上一轮的 dup，
     /// 否则漏一个 fd，旧连接的 socket 也被它吊着关不掉。
+    /// dup 带 CLOEXEC：会话期间起的子进程（剪贴板辅助进程等）不继承它，断线后旧 socket 能及时关掉。
     #[cfg(target_os = "macos")]
     pub fn capture_fd(&self, stream_fd: RawFd) {
         // SAFETY: dup 一个当前有效的 socket fd；失败返回 -1，由 rtt_ms 忽略。
-        let dup = unsafe { libc::dup(stream_fd) };
+        let dup = unsafe { libc::fcntl(stream_fd, libc::F_DUPFD_CLOEXEC, 0) };
         let old = std::mem::replace(&mut *self.raw_fd.lock(), dup);
         if old >= 0 {
             // SAFETY: old 是上一轮 dup 出来、由本 stats 独占的 fd，已从锁里换出，只 close 这一次。
@@ -200,6 +201,22 @@ mod tests {
             .read(&mut buf)
             .expect("第一条连接应已全部关闭（读到 EOF），而不是超时");
         assert_eq!(n, 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn captured_fd_is_close_on_exec() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let stats = RdpStats::new();
+        let (stream, _peer) = UnixStream::pair().expect("socketpair");
+        stats.capture_fd(stream.as_raw_fd());
+        let fd = *stats.raw_fd.lock();
+        assert!(fd >= 0);
+        // SAFETY: fd 是 stats 持有的有效 fd，F_GETFD 只读标志位。
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0, "flags={flags}");
     }
 
     #[test]
