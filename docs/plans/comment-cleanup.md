@@ -382,7 +382,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立；仅是整模块级豁免，范围比 #[cfg(any(target_os="macos", test))] 标在 dib_to_bitmap 与 shift_of 上略粗，将来别处新增死代码在非 macOS 下会被一并压住
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-012 `src/rdp_session/clipboard/download.rs:409` `process_alive`
 
@@ -394,7 +394,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立。pid 为 0 时 kill(0,0) 检查进程组，但目录名 pid 来自 std::process::id() 写入的名字，实际不会为 0
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-013 `src/rdp_session/clipboard/helper_process.rs:41` `(顶层)`
 
@@ -406,7 +406,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-014 `src/rdp_session/clipboard/helper_process.rs:396` `bitmap_rep`
 
@@ -418,7 +418,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-015 `src/rdp_session/clipboard/helper_process.rs:412` `bitmap_rep`
 
@@ -430,7 +430,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：现状成立，依赖「唯一调用方保证等长」这个隐含不变量；要自包含可把长度改成 width*height*4 再与 bgra 比较（那是改代码，由维护者决定）
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-016 `src/rdp_session/clipboard/local_mac.rs:31` `string_type`
 
@@ -443,7 +443,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立；只是格式不合 SAFETY: 惯例，一条注释覆盖五处 unsafe，若后续检查（clippy::undocumented_unsafe_blocks）要求逐块 SAFETY 会报
 - 备注：不是 // SAFETY: 前缀但功能上是 unsafe 的理由，按 B 归
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-017 `src/rdp_session/clipboard/local_mac.rs:172` `decode_bitmap`
 
@@ -455,7 +455,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-018 `src/rdp_session/clipboard/wire.rs:3` `(顶层)`
 
@@ -468,7 +468,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立；整模块级豁免会把将来非 macOS 下真正多余的代码一起压住
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-019 `src/rdp_session/egfx/decoder_vt.rs:72`–73 `unsafe impl Send for VtH264Decoder {}`
 
@@ -482,7 +482,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立
 - 备注：理由第二句「只在单一线程内被调用」与 Send（可换线程）的诉求措辞略混，实质是「同一时刻只有一个线程用」
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-020 `src/rdp_session/egfx/decoder_vt.rs:147`–148 `VtH264Decoder.build_current_session`
 
@@ -495,7 +495,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-021 `src/rdp_session/egfx/decoder_vt.rs:202`–203 `VtH264Decoder.decode_pixel_buffer`
 
@@ -509,7 +509,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立
 - 备注：首句「首次尝试。」是叙述，另含对重试路径的说明（见 0242）
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-022 `src/rdp_session/egfx/decoder_vt.rs:215` `VtH264Decoder.decode_pixel_buffer`
 
@@ -521,7 +521,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-023 `src/rdp_session/egfx/decoder_vt.rs:256` `VtH264Decoder.decode_nv12_ranged`
 
@@ -533,7 +533,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-024 `src/rdp_session/egfx/decoder_vt.rs:282` `VtH264Decoder.decode`
 
@@ -545,7 +545,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-025 `src/rdp_session/egfx/decoder_vt.rs:339` `unsafe extern "C-unwind" fn output_callb`
 
@@ -557,7 +557,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-026 `src/rdp_session/egfx/decoder_vt.rs:344` `unsafe extern "C-unwind" fn output_callb`
 
@@ -569,7 +569,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-027 `src/rdp_session/egfx/decoder_vt.rs:361` `build_session`
 
@@ -581,7 +581,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-028 `src/rdp_session/egfx/decoder_vt.rs:376` `build_session`
 
@@ -593,7 +593,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-029 `src/rdp_session/egfx/decoder_vt.rs:384`–385 `build_session`
 
@@ -607,7 +607,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立
 - 备注：另含一句「目标像素属性传 None → 默认输出 NV12」，是对参数选择的说明（C 性质）
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-030 `src/rdp_session/egfx/decoder_vt.rs:400` `build_session`
 
@@ -619,7 +619,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-031 `src/rdp_session/egfx/decoder_vt.rs:403`–404 `build_session`
 
@@ -633,7 +633,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立
 - 备注：同时含 C 性质的一句「RealTime 提示（低延迟优先）」；忽略返回值本身是个小捷径但理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-032 `src/rdp_session/egfx/decoder_vt.rs:421` `decode_sync`
 
@@ -645,7 +645,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-033 `src/rdp_session/egfx/decoder_vt.rs:439` `decode_sync`
 
@@ -657,7 +657,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-034 `src/rdp_session/egfx/decoder_vt.rs:446` `decode_sync`
 
@@ -669,7 +669,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-035 `src/rdp_session/egfx/decoder_vt.rs:464` `decode_sync`
 
@@ -681,7 +681,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-036 `src/rdp_session/egfx/decoder_vt.rs:472` `decode_sync`
 
@@ -693,7 +693,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-037 `src/rdp_session/egfx/decoder_vt.rs:484` `decode_sync`
 
@@ -706,7 +706,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立
 - 备注：紧邻上一行注释 0272 的措辞与此处相反，见 0272
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-038 `src/rdp_session/egfx/decoder_vt.rs:493` `decode_sync`
 
@@ -718,7 +718,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-039 `src/rdp_session/egfx/decoder_vt.rs:532`–533 `with_locked_nv12`
 
@@ -733,7 +733,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：SAFETY 部分成立；「简单稳妥」是为省事辩护的那半句
 - 决定：保留
 - 拍板备注：推翻「修代码」。传 0 是读写锁，功能正确；换成 ReadOnly 只是语义更准，属风格类，又在 EGFX 解码热路径上、要真机回归，不动代码。注释首句自相矛盾，改成如实描述：「flags=0 是读写锁，只读访问同样适用」；SAFETY 行不变。
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-040 `src/rdp_session/egfx/decoder_vt.rs:539` `with_locked_nv12`
 
@@ -745,7 +745,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-041 `src/rdp_session/egfx/decoder_vt.rs:562` `with_locked_nv12`
 
@@ -757,7 +757,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-042 `src/rdp_session/egfx/decoder_vt.rs:571` `read_pixel_buffer`
 
@@ -769,7 +769,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-043 `src/rdp_session/egfx/mod.rs:397` `EgfxHandler.on_map_surface_to_scaled_output`
 
@@ -782,7 +782,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：服务端发缩放映射时（高 DPI 缩放场景可能）画面按 1:1 贴到原点，会错位/大小不对；少见所以影响面小
 - 决定：记待办
 - 拍板备注：待办内容：先在真机开 `NEXSHELL_RDP_EGFX_TRACE`，确认服务端会不会发 MapSurfaceToScaledOutput（日志里的 `map_scaled`）；发了再做缩放渲染，一直没见过就关掉这条待办。
-- 完成：
+- 完成：2026-11-22（T-004）
 
 #### B-044 `src/rdp_session/egfx/surfaces.rs:620`–623 `progressive_paint_plan`
 
@@ -798,7 +798,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：现状功能正确，代价是每个 Progressive PDU 多解析一遍块头（不含 IDWT）以及一份重复的 tile 像素缓存；风险在于以后升级 fork 时两套裁剪逻辑可能不一致
 - 决定：记待办
 - 拍板备注：ADR 0008 把这段注释指定为「nexshell 侧裁剪」的说明：解释为什么要再解一遍的前三行保留，只把末句「改进方向」换成待办编号。待办内容：下一轮 IronRDP 追平时评估改用库的 `begin_frame` / `end_frame` 加 `DecodedTile.update_rectangles`，去掉二次解析和 `tile_pixels` 缓存；验收用 ADR 0008 第⑤步的复测（键盘移窗 7 轮 + 鼠标拖动 7 轮零残留）。
-- 完成：
+- 完成：2026-11-22（T-005）
 
 #### B-045 `src/rdp_session/egfx/vimage.rs:141` `generate`
 
@@ -810,7 +810,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-046 `src/rdp_session/egfx/vimage.rs:169` `nv12_to_rgba`
 
@@ -823,7 +823,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：理由成立；若要符合 SAFETY: 惯例可补前缀，属风格问题
 - 备注：不是 // SAFETY: 前缀，但功能上是 cast_mut + 后续 unsafe 调用的理由
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-047 `src/rdp_session/egfx/vimage.rs:188` `nv12_to_rgba`
 
@@ -835,7 +835,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 #### B-048 `src/rdp_session/egfx/vimage.rs:286` `ayuv_to_rgba`
 
@@ -847,16 +847,16 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：理由成立
 - 决定：保留
-- 完成：
+- 完成：2026-11-22（保留，不动）
 
 ### C 过期的「为什么」
 
 | 编号 | 位置 | 所在符号 | 过期的句子 | 依据 | 建议改成 | 决定 | 完成 |
 |---|---|---|---|---|---|---|---|
-| C-101 | `src/rdp_session/egfx/decoder_vt.rs:482` | `decode_sync` | 回调未触发或提前失败，无需释放 image。 | decoder_vt.rs:481-487：紧接着的代码正是「若 output.image 非空就 from_raw 释放」。decode_frame 返回非 0 时回调仍可能已执行并 retain 了 image（0273 的 SAFETY 也是这么说的），所以不是「无需释放」 | decode_frame 失败时回调可能已经 retain 了 image，要取回释放；回调没触发则 image 为空，什么都不用做。 | 按建议改 |  |<!-- entry {"no": "C-101", "cls": "C", "file": "src/rdp_session/egfx/decoder_vt.rs", "key": "// 回调未触发或提前失败，无需释放 image。", "decision": "", "done": ""} -->
-| C-102 | `src/rdp_session/egfx/mod.rs:71`–72 | `build_dvc_client` | 现有 capabilities()（V8.1+V8）生效，服务端将选 AVC420（与下一行 0352 合起来读） | egfx/mod.rs:282-327：capabilities() 现经 advertised_capabilities(small_cache, avc444_enabled())，macOS 默认把 V10.7 排最前再带 V8.1、V8（ADR 0015）；同文件头注释 0339 也写 V10.7+V8.1+V8。库侧「decoder 接上后 start() 不再过滤 AVC 能力集」仍成立（ironrdp-egfx 538af77 client.rs:1285-1301，无 decoder 才过滤） | decoder 接上后，库 start() 不再过滤 AVC 能力集，capabilities() 原样发出（macOS 默认 V10.7+V8.1+V8，见 advertised_capabilities） | 按建议改 |  |<!-- entry {"no": "C-102", "cls": "C", "file": "src/rdp_session/egfx/mod.rs", "key": "/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，现有 capabilities()（V8.1+V8）", "decision": "", "done": ""} -->
-| C-103 | `src/rdp_session/egfx/mod.rs:72`–73 | `(顶层)` | 服务端将选 AVC420 | 同 0351：macOS 默认声明 V10.7，服务端可选 AVC444（egfx/mod.rs:282-287、avc444_stream 路径 mod.rs:678-705） | 服务端按能力选 AVC420 或 AVC444（仍会混发 ClearCodec 小块与 Progressive）。 | 按建议改 |  |<!-- entry {"no": "C-103", "cls": "C", "file": "src/rdp_session/egfx/mod.rs", "key": "/// 生效，服务端将选 AVC420（仍会混发 ClearCodec 小块与 Progressive）。", "decision": "", "done": ""} -->
-| C-104 | `src/rdp_session/egfx/surfaces.rs:235`–236 | `Compositor` | lib 已解好的 Uncompressed/AVC420 输出（RGBA） | write_bitmap 是 on_bitmap_updated 的落点（egfx/mod.rs:417-455），ClearCodec 同样经此写入（mod.rs:416 注释、surfaces.rs:4 文件头 0389 都把 ClearCodec 算进来） | lib 已解好的 Uncompressed/AVC420/ClearCodec 输出（RGBA）→ 写入 surface。 | 按建议改 |  |<!-- entry {"no": "C-104", "cls": "C", "file": "src/rdp_session/egfx/surfaces.rs", "key": "/// lib 已解好的 Uncompressed/AVC420 输出（RGBA）→ 写入 surface。", "decision": "", "done": ""} -->
+| C-101 | `src/rdp_session/egfx/decoder_vt.rs:482` | `decode_sync` | 回调未触发或提前失败，无需释放 image。 | decoder_vt.rs:481-487：紧接着的代码正是「若 output.image 非空就 from_raw 释放」。decode_frame 返回非 0 时回调仍可能已执行并 retain 了 image（0273 的 SAFETY 也是这么说的），所以不是「无需释放」 | decode_frame 失败时回调可能已经 retain 了 image，要取回释放；回调没触发则 image 为空，什么都不用做。 | 按建议改 | 2026-11-22 |<!-- entry {"no": "C-101", "cls": "C", "file": "src/rdp_session/egfx/decoder_vt.rs", "key": "// 回调未触发或提前失败，无需释放 image。", "decision": "", "done": ""} -->
+| C-102 | `src/rdp_session/egfx/mod.rs:71`–72 | `build_dvc_client` | 现有 capabilities()（V8.1+V8）生效，服务端将选 AVC420（与下一行 0352 合起来读） | egfx/mod.rs:282-327：capabilities() 现经 advertised_capabilities(small_cache, avc444_enabled())，macOS 默认把 V10.7 排最前再带 V8.1、V8（ADR 0015）；同文件头注释 0339 也写 V10.7+V8.1+V8。库侧「decoder 接上后 start() 不再过滤 AVC 能力集」仍成立（ironrdp-egfx 538af77 client.rs:1285-1301，无 decoder 才过滤） | decoder 接上后，库 start() 不再过滤 AVC 能力集，capabilities() 原样发出（macOS 默认 V10.7+V8.1+V8，见 advertised_capabilities） | 按建议改 | 2026-11-22 |<!-- entry {"no": "C-102", "cls": "C", "file": "src/rdp_session/egfx/mod.rs", "key": "/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，现有 capabilities()（V8.1+V8）", "decision": "", "done": ""} -->
+| C-103 | `src/rdp_session/egfx/mod.rs:72`–73 | `(顶层)` | 服务端将选 AVC420 | 同 0351：macOS 默认声明 V10.7，服务端可选 AVC444（egfx/mod.rs:282-287、avc444_stream 路径 mod.rs:678-705） | 服务端按能力选 AVC420 或 AVC444（仍会混发 ClearCodec 小块与 Progressive）。 | 按建议改 | 2026-11-22 |<!-- entry {"no": "C-103", "cls": "C", "file": "src/rdp_session/egfx/mod.rs", "key": "/// 生效，服务端将选 AVC420（仍会混发 ClearCodec 小块与 Progressive）。", "decision": "", "done": ""} -->
+| C-104 | `src/rdp_session/egfx/surfaces.rs:235`–236 | `Compositor` | lib 已解好的 Uncompressed/AVC420 输出（RGBA） | write_bitmap 是 on_bitmap_updated 的落点（egfx/mod.rs:417-455），ClearCodec 同样经此写入（mod.rs:416 注释、surfaces.rs:4 文件头 0389 都把 ClearCodec 算进来） | lib 已解好的 Uncompressed/AVC420/ClearCodec 输出（RGBA）→ 写入 surface。 | 按建议改 | 2026-11-22 |<!-- entry {"no": "C-104", "cls": "C", "file": "src/rdp_session/egfx/surfaces.rs", "key": "/// lib 已解好的 Uncompressed/AVC420 输出（RGBA）→ 写入 surface。", "decision": "", "done": ""} -->
 
 ## 批次 rdp-2
 

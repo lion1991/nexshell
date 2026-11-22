@@ -68,8 +68,9 @@ use super::{DirtyRect, RdpEvent, RdpFramebuffer, RdpStats};
 
 /// 挂 EGFX 合成 handler + VideoToolbox 解码器的 DVC 静态通道。
 ///
-/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，现有 capabilities()（V8.1+V8）
-/// 生效，服务端将选 AVC420（仍会混发 ClearCodec 小块与 Progressive）。
+/// decoder 接上后，库 `start()` 不再过滤 AVC 能力集，capabilities() 原样发出（macOS 默认
+/// V10.7+V8.1+V8，见 advertised_capabilities）。服务端按能力选 AVC420 或 AVC444（仍会混发
+/// ClearCodec 小块与 Progressive）。
 pub fn build_dvc_client(
     framebuffer: Arc<Mutex<RdpFramebuffer>>,
     event_tx: async_channel::Sender<RdpEvent>,
@@ -394,7 +395,7 @@ impl GraphicsPipelineHandler for EgfxHandler {
     }
 
     fn on_map_surface_to_scaled_output(&mut self, pdu: &MapSurfaceToScaledOutputPdu) {
-        // 缩放输出：v1 只取原点，忽略 target 缩放（少见；缩放渲染后续再做）。
+        // 缩放输出：只取原点，忽略 target 缩放。TODO(T-004)
         self.diag.on_map(true);
         if self.trace {
             eprintln!(

@@ -479,7 +479,7 @@ unsafe fn decode_sync(vt: &VtSession, data: &[u8]) -> Result<CFRetained<CVPixelB
         )
     };
     if status != 0 {
-        // 回调未触发或提前失败，无需释放 image。
+        // decode_frame 失败时回调可能已经 retain 了 image，要取回释放；回调没触发则 image 为空，什么都不用做。
         if let Some(img) = NonNull::new(output.image) {
             // SAFETY: 若回调已 retain，取回并释放。
             drop(unsafe { CFRetained::<CVPixelBuffer>::from_raw(img) });

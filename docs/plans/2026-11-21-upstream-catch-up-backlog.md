@@ -44,6 +44,7 @@
   - 上游有多个破坏性改动，NexShell 代码要跟着改：#2182 / #2401 displaycontrol、#2012 session、#2115 / #2368 connector。
   - 改完要在 Win11 实机上回归。
   - 做法照 ADR 0011 / 0013：新开分支重放补丁，旧分支保留作回退。
+  - 顺带评估 `docs/todo.md` 的 T-005：Progressive 改用库的 begin_frame / end_frame，去掉 NexShell 侧的二次解析。
 
 ## russh：落后多，升级成本大
 

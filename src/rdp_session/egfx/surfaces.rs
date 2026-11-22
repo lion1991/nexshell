@@ -228,7 +228,7 @@ impl Compositor {
         self.surfaces.get_mut(&surface_id)
     }
 
-    /// lib 已解好的 Uncompressed/AVC420 输出（RGBA）→ 写入 surface。
+    /// lib 已解好的 Uncompressed/AVC420/ClearCodec 输出（RGBA）→ 写入 surface。
     pub fn write_bitmap(&mut self, update: &BitmapUpdate) -> Option<SurfaceRect> {
         let surface = self.surfaces.get_mut(&update.surface_id)?;
         let rect = &update.destination_rectangle;
@@ -614,7 +614,7 @@ struct TileSubRect {
 // 这里再解一遍 progressive stream，是为取本 PDU 的 REGION rects 与全量 tile 坐标：
 // 库返回的 DecodedTile.update_rectangles 只覆盖本 PDU 解出的 tile，裁不了 ADR 0008 第⑤步
 // 要求的"用本 PDU rects 裁剪先前 PDU 累积 tile（frame.tile_pixels）"，删掉会回归拖窗描边残留。
-// 改进方向：让 fork 的 decode_bitmap 顺带把 REGION rects 一起返回。
+// TODO(T-005): 评估改用库的 begin_frame / end_frame + DecodedTile.update_rectangles。
 fn progressive_paint_plan(bitmap_data: &[u8]) -> ProgressivePaintPlan {
     let Ok(blocks) = decode_progressive_stream(bitmap_data) else {
         return ProgressivePaintPlan::default();
