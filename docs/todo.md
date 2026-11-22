@@ -7,3 +7,4 @@
 | 编号 | 要做什么 | 登记日期 |
 |---|---|---|
 | T-001 | 分屏后关掉原 pane（tab 级 ssh handle 属于第一个连接），确认文件面板和远程编辑还能不能用；不能用再定 handle 跟哪个 pane。代码位置：`src/root_view/terminal_section/split.rs` 的 `split_active_pane`。 | 2026-11-22 |
+| T-002 | 主机概览一次性为每台主机起连接线程，主机多时加并发闸门（信号量分批）。现在只靠 fd 软上限提到 10240 缓解 EMFILE，没有限流。代码位置：`src/host_overview_fleet.rs` 的 `HostOverviewFleet::start`。 | 2026-11-22 |

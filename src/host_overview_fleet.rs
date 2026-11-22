@@ -42,7 +42,7 @@ impl HostOverviewFleet {
 
     /// 对每台主机起监控（已在跑的跳过，幂等）；当前筛选外的主机暂停但保留快照。
     /// 返回新起的事件流，由调用方消费后回调 `apply_event_for_generation`。
-    // TODO: 主机数很大时这里会一次性起 N 个连接线程，后续可加并发闸门（信号量分批）。
+    // TODO(T-002): 主机数很大时这里会一次性起 N 个连接线程，后续可加并发闸门（信号量分批）。
     pub fn start(&mut self, hosts: &[(String, HostConnectionConfig)]) -> Vec<FleetStream> {
         let desired = hosts.iter().map(|(id, _)| id.as_str()).collect();
         self.retain_targets(&desired);
