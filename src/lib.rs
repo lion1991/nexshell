@@ -2724,42 +2724,17 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(view.terminal_hosts[0].session_id, Some("sshtool"));
     }
 
-    // Host-management storage is intentionally disabled in the default
-    // WarpUI spike build while rusqlite conflicts with Warp's sqlite stack.
-    #[cfg(any())]
-    #[test]
-    fn host_management_snapshot_matches_legacy_page_structure() {
-        let snapshot = host_management::legacy_host_management_snapshot();
-
-        assert_eq!(snapshot.title, "主机管理");
-        assert_eq!(snapshot.top_actions, ["隐私", "导入", "云同步", "新建主机"]);
-        assert_eq!(snapshot.groups[0].label, "所有主机");
-        assert_eq!(snapshot.groups[0].count, 10);
-        assert!(snapshot.groups[0].selected);
-        assert_eq!(snapshot.groups[1].label, "默认分组");
-        assert_eq!(snapshot.search_placeholder, "搜索主机...");
-        assert_eq!(snapshot.protocol_filter_label, "所有协议");
-        assert_eq!(snapshot.available_tags, ["测试标签"]);
-        assert_eq!(snapshot.hosts.len(), 10);
-        assert_eq!(snapshot.hosts[0].name, "7省-X86");
-        assert_eq!(snapshot.hosts[0].protocol, "SSH");
-        assert_eq!(snapshot.hosts[0].endpoint, "root@192.168.248.120:22");
-        assert!(snapshot.hosts.iter().any(|host| host.protocol == "Serial"));
-    }
-
-    #[cfg(any())]
     #[test]
     fn host_management_unavailable_snapshot_has_no_demo_hosts() {
         let snapshot = host_management::unavailable_host_management_snapshot();
 
         assert_eq!(snapshot.title, "主机管理");
-        assert_eq!(snapshot.groups[0].label, "所有主机");
+        assert_eq!(snapshot.groups[0].id, "all");
         assert_eq!(snapshot.groups[0].count, 0);
         assert!(snapshot.hosts.is_empty());
         assert!(snapshot.available_tags.is_empty());
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_initializes_missing_database_as_empty_real_store() {
         let db_path = std::env::temp_dir().join(format!(
@@ -2834,7 +2809,6 @@ Inter-|   Receive                                                |  Transmit
         );
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_state_filters_by_query_group_tag_and_protocol() {
         let mut state = host_management::HostManagementState::new(
@@ -2871,7 +2845,6 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(state.filtered_hosts()[0].name, "串口连接");
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_state_selects_deletes_and_adds_local_hosts() {
         let mut state = host_management::HostManagementState::new(
@@ -2899,7 +2872,6 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(state.notice.as_deref(), Some("已新增本地草稿主机"));
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_state_search_input_and_view_toggles_are_stateful() {
         let mut state = host_management::HostManagementState::new(
@@ -2921,53 +2893,6 @@ Inter-|   Receive                                                |  Transmit
         assert!(!state.privacy_mode);
         state.toggle_privacy_mode();
         assert!(state.privacy_mode);
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn host_management_state_builds_ssh_command_for_quick_connect() {
-        let state = host_management::HostManagementState::new(
-            host_management::legacy_host_management_snapshot(),
-        );
-
-        assert_eq!(
-            state.connect_command_for("seven-province-x86").as_deref(),
-            Some(b"ssh -p 22 root@192.168.248.120\r".as_slice())
-        );
-        assert_eq!(state.connect_command_for("serial"), None);
-    }
-
-    #[cfg(any())]
-    #[test]
-    fn host_management_state_builds_direct_pty_plan_for_quick_connect() {
-        let state = host_management::HostManagementState::new(
-            host_management::legacy_host_management_snapshot(),
-        );
-
-        assert_eq!(
-            state.connection_plan_for("seven-province-x86"),
-            Some(host_management::HostConnectionPlan::DirectPty {
-                session_id: "host-seven-province-x86".to_string(),
-                title: "7省-X86".to_string(),
-                command: host_management::PtyCommandSpec {
-                    program: "ssh".to_string(),
-                    args: vec![
-                        "-p".to_string(),
-                        "22".to_string(),
-                        "root@192.168.248.120".to_string(),
-                    ],
-                    status: "connecting SSH: root@192.168.248.120:22".to_string(),
-                },
-            })
-        );
-
-        let serial = state
-            .connection_plan_for("serial")
-            .expect("serial should produce a direct pty plan");
-        assert!(matches!(
-            serial,
-            host_management::HostConnectionPlan::DirectPty { .. }
-        ));
     }
 
     #[test]
@@ -3077,7 +3002,6 @@ Inter-|   Receive                                                |  Transmit
         let _ = std::fs::remove_file(db_path);
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_persists_draft_create_and_selected_delete_to_database() {
         let db_path = std::env::temp_dir().join(format!(
@@ -3133,6 +3057,8 @@ Inter-|   Receive                                                |  Transmit
         )
         .expect("seed temp db");
         drop(conn);
+        // 生产路径总是先 initialize_host_database 跑迁移（补 sort_order 等列），再读写。
+        host_management::initialize_host_database(&db_path).expect("migrate seeded db");
 
         let draft_id = host_management::create_draft_host_in_db_path(&db_path, Some("default"))
             .expect("create draft host");
@@ -3154,7 +3080,6 @@ Inter-|   Receive                                                |  Transmit
         let _ = std::fs::remove_file(db_path);
     }
 
-    #[cfg(any())]
     #[test]
     fn host_management_updates_basic_host_fields_in_database() {
         let db_path = std::env::temp_dir().join(format!(
