@@ -232,8 +232,6 @@ pub struct TerminalInputEditor {
     revision: u64,
     /// Tab 补全后 shell 接管行编辑，按键直通 PTY
     shell_owns_line: bool,
-    /// 基于历史的 autosuggestion（类 zsh-autosuggestions）
-    suggestion: Option<String>,
 }
 
 impl TerminalInputEditor {
@@ -347,7 +345,6 @@ impl TerminalInputEditor {
         self.buffer.clear();
         self.cursor_byte_index = 0;
         self.marked_text = None;
-        self.suggestion = None;
         self.shell_owns_line = false;
         self.revision = self.revision.wrapping_add(1);
     }
@@ -377,7 +374,6 @@ impl TerminalInputEditor {
     }
 
     pub fn submit_bytes(&mut self) -> Option<Vec<u8>> {
-        self.suggestion = None;
         let mut bytes = Vec::with_capacity(self.buffer.len() + 1);
         bytes.extend_from_slice(self.buffer.as_bytes());
         bytes.push(b'\r');
@@ -401,7 +397,6 @@ impl TerminalInputEditor {
         self.buffer.clear();
         self.cursor_byte_index = 0;
         self.marked_text = None;
-        self.suggestion = None;
         self.revision = self.revision.wrapping_add(1);
         self.shell_owns_line = true;
         Some(bytes)
@@ -415,18 +410,9 @@ impl TerminalInputEditor {
         self.buffer.clear();
         self.cursor_byte_index = 0;
         self.marked_text = None;
-        self.suggestion = None;
         self.revision = self.revision.wrapping_add(1);
         self.shell_owns_line = true;
         bytes
-    }
-
-    pub fn suggestion(&self) -> Option<&str> {
-        self.suggestion.as_deref()
-    }
-
-    pub fn set_suggestion(&mut self, suggestion: Option<String>) {
-        self.suggestion = suggestion;
     }
 }
 
@@ -459,8 +445,7 @@ pub fn terminal_snapshot_with_input_editor(
     editor: &TerminalInputEditor,
 ) -> TerminalGridSnapshot {
     let has_content = !editor.is_empty();
-    let has_suggestion = editor.suggestion().is_some() && !editor.buffer().is_empty();
-    if (!has_content && !has_suggestion) || !terminal_input_editor_should_capture(snapshot) {
+    if !has_content || !terminal_input_editor_should_capture(snapshot) {
         return snapshot.clone();
     }
 
@@ -468,17 +453,6 @@ pub fn terminal_snapshot_with_input_editor(
     let cols = projected.cols.max(1);
     let rows = projected.rows.max(1);
     let start_cursor_index = projected.cursor_row * cols + projected.cursor_col;
-
-    let ghost_style_id = projected.styles.len() as u16;
-    projected.styles.push(TerminalCellStyleSnapshot {
-        fg: TerminalColorSnapshot::Rgb {
-            r: 100,
-            g: 100,
-            b: 100,
-        },
-        bg: TerminalColorSnapshot::Named("background"),
-        underline_color: None,
-    });
 
     let (buffer_before_cursor, buffer_after_cursor) =
         editor.buffer().split_at(editor.cursor_byte_index());
@@ -512,24 +486,7 @@ pub fn terminal_snapshot_with_input_editor(
         rows,
     );
 
-    let ghost_end = if let Some(suggestion) = editor.suggestion() {
-        if let Some(suffix) = suggestion.strip_prefix(editor.buffer()) {
-            project_ghost_text(
-                &mut projected,
-                suffix,
-                ghost_style_id,
-                end_index,
-                cols,
-                rows,
-            )
-        } else {
-            end_index
-        }
-    } else {
-        end_index
-    };
-
-    let clear_from = ghost_end;
+    let clear_from = end_index;
     let clear_row = clear_from / cols;
     let clear_col = clear_from % cols;
     if clear_row < rows && clear_col < cols {
@@ -636,60 +593,6 @@ fn empty_input_editor_cell() -> TerminalGridCellSnapshot {
         flags: TerminalCellFlags::empty(),
         hyperlink: None,
     }
-}
-
-fn ghost_text_cell(ch: char, wide: bool, style_id: u16) -> TerminalGridCellSnapshot {
-    let mut flags = TerminalCellFlags::empty();
-    flags.set(TerminalCellFlags::WIDE_CHAR, wide);
-    TerminalGridCellSnapshot {
-        ch,
-        content: Arc::from(ch.to_string()),
-        style_id,
-        flags,
-        hyperlink: None,
-    }
-}
-
-fn project_ghost_text(
-    projected: &mut TerminalGridSnapshot,
-    text: &str,
-    style_id: u16,
-    mut cursor_index: usize,
-    cols: usize,
-    rows: usize,
-) -> usize {
-    for ch in text.chars() {
-        let width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width == 0 {
-            continue;
-        }
-        let row = cursor_index / cols;
-        let col = cursor_index % cols;
-        if row >= rows {
-            break;
-        }
-        ensure_projected_line_cells(&mut projected.lines, row, cols);
-        projected.lines[row].cells[col] = ghost_text_cell(ch, width > 1, style_id);
-        cursor_index += 1;
-        if width > 1 {
-            let sr = cursor_index / cols;
-            let sc = cursor_index % cols;
-            if sr < rows {
-                ensure_projected_line_cells(&mut projected.lines, sr, cols);
-                let mut flags = TerminalCellFlags::empty();
-                flags.insert(TerminalCellFlags::WIDE_CHAR_SPACER);
-                projected.lines[sr].cells[sc] = TerminalGridCellSnapshot {
-                    ch: ' ',
-                    content: Arc::from(" "),
-                    style_id,
-                    flags,
-                    hyperlink: None,
-                };
-            }
-            cursor_index += 1;
-        }
-    }
-    cursor_index
 }
 
 fn terminal_line_text_from_cells(cells: &[TerminalGridCellSnapshot]) -> String {

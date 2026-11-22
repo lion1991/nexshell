@@ -45,7 +45,6 @@ pub mod git_ops;
 pub mod git_panel;
 pub mod glass_backdrop;
 pub mod herdr_bridge;
-pub mod history_suggester;
 pub mod host_management;
 pub mod host_overview;
 pub mod host_overview_fleet;
