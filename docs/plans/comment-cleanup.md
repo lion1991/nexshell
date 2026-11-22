@@ -1202,7 +1202,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：行为是对的（没有 marker 就不该永远占位），只是「临时方案」措辞暗示以后会改而实际无此计划；建议保留逻辑、把注释改成「远端 / 串口 / Telnet 没有 marker，spawn 即视为 bootstrap 完成」
 - 决定：保留
 - 拍板备注：行为是对的：远端没有 marker，不能一直占位。把「暂不…（…麻烦）」「临时方案」这类措辞去掉，改成如实描述：远端 / 串口 / Telnet 没有 shell integration marker，spawn 即视为 bootstrap 完成。
-- 完成：
+- 完成：2026-11-22（保留行为，改写措辞）
 
 #### B-066 `src/ui_colors.rs:2`–3 `(顶层)`
 

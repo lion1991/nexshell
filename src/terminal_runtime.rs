@@ -3110,9 +3110,8 @@ impl LocalTerminalRuntime {
         let mut runtime_state =
             TerminalRuntimeState::new(session_id, true, status.into(), cols, rows);
         runtime_state.shell_display_name = Some("ssh".to_string());
-        // 远程 shell 我们暂不注入 shell integration（要在远端写 rc 麻烦），
-        // 没有 marker 时 bootstrapped 永远 false → 一直占位，不能这样。
-        // 临时方案：远端 spawn 即视为 bootstrap 完成（直接连上就开始接受用户输入）。
+        // 远端（SSH / 串口 / Telnet）没有 shell integration marker，等不到 bootstrap 信号：
+        // spawn 即视为 bootstrap 完成，连上就接受用户输入。
         runtime_state.bootstrapped = true;
         // 第一帧就盖上过渡层，免得先闪一下空终端和光标。
         let target = format!(
