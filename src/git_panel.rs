@@ -699,7 +699,6 @@ fn build_repo_watcher(
         None,
         move |result: DebounceEventResult| {
             let Ok(events) = result else { return };
-            // 任何一个事件不是噪声 → 触发 Refresh
             if events.iter().any(|ev| !is_noisy_event(&root_buf, ev)) {
                 let _ = tx.send(GitRequest::Refresh);
             }
@@ -1254,7 +1253,6 @@ mod tests {
         let (handle, evt_rx) = spawn_git_worker("test").unwrap();
         assert!(handle.send(GitRequest::SetCwd(repo.to_path_buf())));
 
-        // 收 events 直到拿到 Snapshot
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1280,7 +1278,6 @@ mod tests {
         assert_eq!(snap.branch.as_deref(), Some("main"));
         assert!(snap.untracked.iter().any(|e| e.path == "b.txt"));
 
-        // stage b.txt
         assert!(handle.send(GitRequest::Stage {
             expected_repo: repo_root.clone(),
             paths: vec!["b.txt".into()],
@@ -1806,7 +1803,6 @@ mod tests {
             .build()
             .unwrap();
 
-        // 1) 收第一帧 Snapshot（干净状态）
         rt.block_on(async {
             for _ in 0..10 {
                 if let Ok(Ok(ev)) =

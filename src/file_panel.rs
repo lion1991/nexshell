@@ -671,7 +671,6 @@ impl SftpWorkerHandle {
 impl Drop for SftpWorkerHandle {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::Relaxed);
-        // drop 时让所有未完成传输也尽快退出
         if let Ok(map) = self.cancels.lock() {
             for flag in map.values() {
                 flag.store(true, Ordering::Relaxed);
@@ -1815,7 +1814,6 @@ async fn run_upload_dir(
             .await;
         return;
     }
-    // 远端先按深度顺序建好子目录
     let mut dirs = tree.dirs.clone();
     dirs.sort_by_key(|d| d.matches('/').count());
     for d in &dirs {
@@ -1904,7 +1902,6 @@ async fn run_download(
     evt_tx: &async_channel::Sender<SftpEvent>,
     cancel: &AtomicBool,
 ) {
-    // 进度先转一遍：sftp_ops::TransferEvent → SftpEvent::DownloadProgress
     let (prog_tx, mut prog_rx) = mpsc::unbounded_channel::<crate::sftp_ops::TransferEvent>();
     let evt_tx_progress = evt_tx.clone();
     let evt_tx_started = evt_tx.clone();
@@ -2125,7 +2122,6 @@ async fn run_list(
         .unwrap_or_else(|_| path.to_string());
     match sftp_ops::list_dir(sftp, &resolved).await {
         Ok(mut entries) => {
-            // 目录优先、名字升序；隐藏 . 和 ..
             entries.retain(|e| e.name != "." && e.name != "..");
             sort_file_panel_entries(&mut entries);
             let _ = evt_tx

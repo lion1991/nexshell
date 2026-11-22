@@ -431,8 +431,6 @@ async fn run_container_monitor(
     }
 }
 
-// ---- 解析 ----
-
 #[derive(Deserialize)]
 struct PsJson {
     #[serde(rename = "ID", default)]
@@ -607,7 +605,6 @@ fn parse_size(raw: &str) -> Option<u64> {
     if s.is_empty() {
         return None;
     }
-    // 数值前缀（含小数）与单位后缀分界。
     let split = s.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(s.len());
     let (num, unit) = s.split_at(split);
     let value = num.trim().parse::<f64>().ok()?;

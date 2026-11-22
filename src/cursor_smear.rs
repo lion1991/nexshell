@@ -69,7 +69,6 @@ impl CursorSmear {
     pub fn update(&mut self, target: RectF, now: Instant) -> Option<SmearQuad> {
         let goals = rect_corners(target);
         if self.target.is_none() {
-            // 首次出现：直接落格不补间。
             self.corners = goals;
             self.target = Some(target);
             self.last_tick = Some(now);

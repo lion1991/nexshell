@@ -33,8 +33,6 @@ use warpui::{Entity, ReadModel, UpdateModel};
 const RDP_DEFAULT_PORT: u16 = 3389;
 const TELNET_DEFAULT_PORT: u16 = 23;
 
-// ── 数据模型 ──
-
 #[derive(Clone, Debug)]
 pub struct HostEditDraft {
     pub id: String,
@@ -152,8 +150,6 @@ impl HostEditDraft {
     }
 }
 
-// ── 焦点字段 ──
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditField {
     Name,
@@ -186,8 +182,6 @@ pub enum HostDropdownKind {
     RdpResolution,
 }
 
-// ── Model (跨窗口通信) ──
-
 #[derive(Clone, Debug)]
 pub enum HostEditEvent {
     Saved(HostEditDraft),
@@ -205,8 +199,6 @@ pub struct HostEditModel {
 impl warpui::Entity for HostEditModel {
     type Event = HostEditEvent;
 }
-
-// ── Action ──
 
 #[derive(Clone, Debug)]
 pub enum HostEditAction {
@@ -239,8 +231,6 @@ pub enum HostEditAction {
 impl Entity for HostEditView {
     type Event = ();
 }
-
-// ── View ──
 
 struct FieldStates {
     close_btn_state: MouseStateHandle,
@@ -1180,8 +1170,6 @@ impl warpui::TypedActionView for HostEditView {
         }
     }
 }
-
-// ── 渲染函数 ──
 
 const TEXT_FIELD_HEIGHT: f32 = 38.0;
 const SETTINGS_TEXT_FIELD_HEIGHT: f32 = TEXT_FIELD_HEIGHT;
@@ -2538,7 +2526,6 @@ fn protocol_segment(
     .finish()
 }
 
-// RDP 显示质量二选一：标准 / 高清 HiDPI。
 fn render_rdp_quality_toggle(
     current: RdpDisplayQuality,
     standard_state: &MouseStateHandle,

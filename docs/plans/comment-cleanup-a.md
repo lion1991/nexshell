@@ -240,12 +240,14 @@
 
 ## core-1（32）
 
+已清理：2026-11-22（删 29 条，跳过 3 条：实为「为什么」或字段含义 3；工具依赖 0 条）
+
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
 | `src/container_overview.rs` | 434 | `PsJson` | // ---- 解析 ---- |  |
 | `src/container_overview.rs` | 610 | `parse_size` | // 数值前缀（含小数）与单位后缀分界。 |  |
 | `src/cursor_smear.rs` | 72 | `CursorSmear.update` | // 首次出现：直接落格不补间。 |  |
-| `src/file_drop_target.rs` | 106 | `FileDropTarget.dispatch_event` | // 默认 child-first：child 没消费再判定 bounds。 |  |
+| `src/file_drop_target.rs` | 106 | `FileDropTarget.dispatch_event` | // 默认 child-first：child 没消费再判定 bounds。 | 保留（实为「为什么」：intercept 关闭时才 child-first） |
 | `src/file_panel.rs` | 674 | `SftpWorkerHandle.drop` | // drop 时让所有未完成传输也尽快退出 |  |
 | `src/file_panel.rs` | 1818 | `run_upload_dir` | // 远端先按深度顺序建好子目录 |  |
 | `src/file_panel.rs` | 1907 | `run_download` | // 进度先转一遍：sftp_ops::TransferEvent → SftpEvent::DownloadProgress |  |
@@ -272,8 +274,8 @@
 | `src/host_edit_window.rs` | 243 | `FieldStates` | // ── View ── |  |
 | `src/host_edit_window.rs` | 1184 | `(顶层)` | // ── 渲染函数 ── |  |
 | `src/host_edit_window.rs` | 2541 | `render_rdp_quality_toggle` | // RDP 显示质量二选一：标准 / 高清 HiDPI。 |  |
-| `src/host_management.rs` | 501 | `HostManagementState` | // 密钥页：当前选中查看详情的密钥 id |  |
-| `src/host_management.rs` | 679 | `HostManagementState` | // 单选：若当前唯一选中即此项则取消，否则清空并只选中目标 |  |
+| `src/host_management.rs` | 501 | `HostManagementState` | // 密钥页：当前选中查看详情的密钥 id | 保留（字段含义，同组字段都有注释） |
+| `src/host_management.rs` | 679 | `HostManagementState` | // 单选：若当前唯一选中即此项则取消，否则清空并只选中目标 | 保留（实为「为什么」：再点同一项是取消选中，函数名看不出来） |
 
 ## core-2（18）
 

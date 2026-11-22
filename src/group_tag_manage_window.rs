@@ -22,8 +22,6 @@ use nexshell::host_management::{
 use warpui::ui_components::components::UiComponent;
 use warpui::{CursorInfo, ModelAsRef, ReadModel, UpdateModel};
 
-// ── Model ──
-
 #[derive(Clone, Debug)]
 pub enum GroupTagManageEvent {
     Closed { changed: bool },
@@ -40,8 +38,6 @@ impl Entity for GroupTagManageModel {
     type Event = GroupTagManageEvent;
 }
 
-// ── Action ──
-
 #[derive(Clone, Debug)]
 pub enum GroupTagManageAction {
     AddGroup,
@@ -50,8 +46,6 @@ pub enum GroupTagManageAction {
     DeleteTag(String),
     Close,
 }
-
-// ── View ──
 
 struct ManageStates {
     add_group_state: MouseStateHandle,
@@ -224,10 +218,8 @@ impl View for GroupTagManageView {
 
         root.add_child(render_header(&states.close_state, ui_font, &hc));
 
-        // scrollable content
         let mut content = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-        // groups section
         content.add_child(render_section_title(
             &rust_i18n::t!("manage_groups"),
             ui_font,
@@ -258,7 +250,6 @@ impl View for GroupTagManageView {
             &hc,
         ));
 
-        // tags section
         content.add_child(render_section_title(
             &rust_i18n::t!("manage_tags"),
             ui_font,
@@ -360,8 +351,6 @@ impl warpui::TypedActionView for GroupTagManageView {
         }
     }
 }
-
-// ── Render helpers ──
 
 fn render_header(
     close_state: &MouseStateHandle,

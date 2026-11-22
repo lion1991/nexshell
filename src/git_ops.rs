@@ -444,8 +444,6 @@ pub fn detect_main_branch(repo: &Path) -> Option<String> {
     None
 }
 
-// ── 状态采集 ────────────────────────────────────────────────────────────────
-
 /// 单个文件的工作区状态分类。porcelain v2 XY 字段：
 /// X = 暂存区相对 HEAD 的状态，Y = 工作区相对暂存区的状态。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -628,8 +626,6 @@ fn classify_xy(x: char, y: char) -> GitFileStage {
     }
 }
 
-// ── 最近 commit ─────────────────────────────────────────────────────────────
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitFileChange {
     pub path: String,
@@ -674,8 +670,6 @@ pub fn recent_commits_page(repo: &Path, skip: usize, n: usize) -> Result<Vec<Com
 pub fn recent_commits(repo: &Path, n: usize) -> Result<Vec<CommitRow>, String> {
     recent_commits_page(repo, 0, n)
 }
-
-// ── Diff preview ───────────────────────────────────────────────────────────
 
 pub const MAX_DIFF_PREVIEW_BYTES: usize = 512 * 1024;
 
@@ -1105,8 +1099,6 @@ fn leading_u32(text: &str) -> Option<u32> {
     let digits: String = text.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
 }
-
-// ── 修改操作 ────────────────────────────────────────────────────────────────
 
 /// 跑一条以 pathspec 收尾的 git 命令。每个 path 包 `:(literal)` 前缀，
 /// 防止文件名里的 glob 元字符(* ? [])被 git 当通配解释而误伤其它文件。
