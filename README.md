@@ -35,7 +35,7 @@ Warp 源码是终端工程与 UI 打磨的首要参考——目标是把稳定�
 
 数据无缝（与旧 Tauri 共用同一 `com.matt.nexshell/nexshell.db`），但旧版两项 host-library 邻近功能 native 端暂未实现，对应旧表成为库内孤儿数据（无害、不阻塞）：
 
-- **快捷命令**（旧 `quick_commands` 表）：native 仅有 history ghost-text 补全，无用户自定义命令片段联想。
+- **快捷命令**（旧 `quick_commands` 表）：native 没有命令补全，也没有用户自定义命令片段联想。
 - **标签自定义颜色**（旧 `tag_styles` 表）：native 标签用统一主题色，无 per-tag 配色。
 
 即"功能对等"指 SSH / 主机库 / 终端 / 系统集成四大块 0 blocker，不含上述两项。若后续补齐，复用同库即可读回旧数据。
