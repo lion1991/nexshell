@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use nexshell::click_through::ClickThrough;
 use nexshell::connect_spinner::ConnectSpinner;
-use nexshell::ssh_connect_progress::{ssh_connect_fraction, SshConnectProgress, SshConnectStage};
+use nexshell::ssh_connect_progress::{SshConnectProgress, SshConnectStage};
 use nexshell::terminal_runtime::TerminalPalette;
 use warpui::color::ColorU;
 use warpui::elements::{
@@ -16,7 +16,8 @@ use warpui::elements::{
 use warpui::{fonts, Element};
 
 use crate::connect_overlay_helpers::{
-    connect_overlays_animating, format_connect_elapsed, step_connect_overlay,
+    connect_overlays_animating, format_connect_elapsed, mix_color, stage_transition,
+    step_connect_overlay, StageLook,
 };
 use crate::host_management_view::constants::ICON_TERMINAL;
 use crate::host_management_view::host_card::{mask_endpoint, system_icon_path};
@@ -27,6 +28,8 @@ const SPINNER_DIAMETER: f32 = 64.0;
 const SPINNER_THICKNESS: f32 = 3.0;
 const BAR_WIDTH: f32 = 280.0;
 const BAR_HEIGHT: f32 = 3.0;
+/// 阶段符号的固定槽宽：✓ ● ○ 字宽不同，换符号时整行不能跟着挪。
+const STAGE_GLYPH_SLOT: f32 = 12.0;
 
 fn faded(color: ColorU, opacity: f32) -> ColorU {
     ColorU::new(
@@ -59,6 +62,7 @@ impl RootView {
         let overlay = self.render_connect_overlay(
             &frame.progress,
             frame.opacity,
+            frame.bar,
             host_id,
             host_label,
             palette,
@@ -79,6 +83,7 @@ impl RootView {
         &self,
         progress: &SshConnectProgress,
         opacity: f32,
+        bar_fraction: f32,
         host_id: Option<&str>,
         host_label: &str,
         palette: &TerminalPalette,
@@ -129,38 +134,52 @@ impl RootView {
             .with_color(secondary)
             .finish();
 
+        // (符号, 符号色, 文字色)；切阶段时新旧两种样子交叉淡变，字重不变，避免整行宽度跳。
+        let look_style = |look: StageLook| match look {
+            StageLook::Done => ("✓", done, done),
+            StageLook::Current => ("●", accent, primary),
+            StageLook::Pending => ("○", dim, dim),
+        };
         let mut stages = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
         for (index, stage) in SshConnectStage::ALL.into_iter().enumerate() {
-            let (glyph, color, bold) = match stage.index().cmp(&progress.stage.index()) {
-                std::cmp::Ordering::Less => ("✓", done, false),
-                std::cmp::Ordering::Equal => ("●", accent, true),
-                std::cmp::Ordering::Greater => ("○", dim, false),
-            };
+            let (from, to, k) = stage_transition(stage, progress, now);
+            let (from_glyph, from_glyph_color, from_text) = look_style(from);
+            let (to_glyph, to_glyph_color, to_text) = look_style(to);
             let label = match stage {
                 SshConnectStage::Tcp => rust_i18n::t!("ssh_connect_stage_tcp"),
                 SshConnectStage::Auth => rust_i18n::t!("ssh_connect_stage_auth"),
                 SshConnectStage::Shell => rust_i18n::t!("ssh_connect_stage_shell"),
             };
-            let weight = if bold {
-                fonts::Weight::Bold
-            } else {
-                fonts::Weight::Normal
+            let glyph_text = |glyph: &'static str, color: ColorU| {
+                Align::new(
+                    Text::new_inline(glyph, self.ui_font, 11.0)
+                        .with_color(color)
+                        .finish(),
+                )
+                .finish()
             };
+            let mut glyph = Stack::new();
+            if from != to && k < 1.0 {
+                glyph.add_child(glyph_text(from_glyph, faded(from_glyph_color, 1.0 - k)));
+                glyph.add_child(glyph_text(to_glyph, faded(to_glyph_color, k)));
+            } else {
+                glyph.add_child(glyph_text(to_glyph, to_glyph_color));
+            }
             let item = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(
                     Container::new(
-                        Text::new_inline(glyph, self.ui_font, 11.0)
-                            .with_color(color)
+                        ConstrainedBox::new(glyph.finish())
+                            .with_width(STAGE_GLYPH_SLOT)
+                            .with_height(14.0)
                             .finish(),
                     )
-                    .with_margin_right(5.0)
+                    .with_margin_right(4.0)
                     .finish(),
                 )
                 .with_child(
                     Text::new_inline(label.to_string(), self.ui_font, 12.0)
-                        .with_color(if bold { primary } else { color })
-                        .with_style(fonts::Properties::default().weight(weight))
+                        .with_color(mix_color(from_text, to_text, k))
                         .finish(),
                 )
                 .finish();
@@ -171,7 +190,7 @@ impl RootView {
             );
         }
 
-        let fraction = ssh_connect_fraction(progress, now).clamp(0.0, 1.0);
+        let fraction = bar_fraction.clamp(0.0, 1.0);
         let bar = ConstrainedBox::new(
             Container::new(
                 Flex::row()

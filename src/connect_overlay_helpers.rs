@@ -1,9 +1,10 @@
-//! SSH 连接过渡层的纯函数：每个会话的淡入淡出状态机、计时文字。无 &self。
+//! SSH 连接过渡层的纯函数：每个会话的淡入淡出状态机、进度条平滑、阶段切换过渡、计时文字。无 &self。
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use nexshell::ssh_connect_progress::SshConnectProgress;
+use nexshell::ssh_connect_progress::{ssh_connect_fraction, SshConnectProgress, SshConnectStage};
+use warpui::color::ColorU;
 
 const FADE_IN: Duration = Duration::from_millis(150);
 const FADE_OUT: Duration = Duration::from_millis(220);
@@ -11,6 +12,10 @@ const FADE_OUT: Duration = Duration::from_millis(220);
 const STALE_AFTER: Duration = Duration::from_secs(1);
 /// 最近画过的过渡层才驱动 UI tick；看不见的不空转。
 const ANIMATING_WINDOW: Duration = Duration::from_millis(300);
+/// 进度条追目标值的时间常数：切阶段时目标跳一段，显示值约 0.4 s 内滑过去。
+const BAR_FOLLOW_SECS: f32 = 0.12;
+/// 阶段切换时颜色、符号交叉淡变的时长。
+const STAGE_FADE: Duration = Duration::from_millis(320);
 
 pub(crate) struct ConnectOverlayAnim {
     /// 最近一次看到的连接进度；淡出时冻结在这一帧。
@@ -18,11 +23,63 @@ pub(crate) struct ConnectOverlayAnim {
     shown_at: Instant,
     fade_from: Option<Instant>,
     last_rendered: Instant,
+    /// 进度条当前显示的比例（平滑后），只增不减。
+    bar: f32,
 }
 
 pub(crate) struct ConnectOverlayFrame {
     pub progress: SshConnectProgress,
     pub opacity: f32,
+    pub bar: f32,
+}
+
+/// 阶段在清单里的样子。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StageLook {
+    Pending,
+    Current,
+    Done,
+}
+
+fn look_at(stage: SshConnectStage, current: usize) -> StageLook {
+    match stage.index().cmp(&current) {
+        std::cmp::Ordering::Less => StageLook::Done,
+        std::cmp::Ordering::Equal => StageLook::Current,
+        std::cmp::Ordering::Greater => StageLook::Pending,
+    }
+}
+
+/// 这一帧某阶段从哪个样子过渡到哪个样子，及过渡进度 0..=1（已缓动）。
+/// 阶段只会逐个前进，所以「上一刻」就是当前阶段的前一个。
+pub(crate) fn stage_transition(
+    stage: SshConnectStage,
+    progress: &SshConnectProgress,
+    now: Instant,
+) -> (StageLook, StageLook, f32) {
+    let current = progress.stage.index();
+    let to = look_at(stage, current);
+    let from = look_at(stage, current.saturating_sub(1));
+    let k = ease_out(ratio(
+        now.saturating_duration_since(progress.stage_started_at),
+        STAGE_FADE,
+    ));
+    (from, to, k)
+}
+
+/// 两色按 k 线性混合（含透明度）。
+pub(crate) fn mix_color(a: ColorU, b: ColorU, k: f32) -> ColorU {
+    let k = k.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * k).round() as u8;
+    ColorU::new(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a))
+}
+
+/// 显示值按指数平滑追目标，`dt` 是距上一帧的时间；不倒退。
+fn follow(shown: f32, target: f32, dt: Duration) -> f32 {
+    if target <= shown {
+        return shown;
+    }
+    let k = 1.0 - (-dt.as_secs_f32() / BAR_FOLLOW_SECS).exp();
+    shown + (target - shown) * k
 }
 
 fn ease_out(x: f32) -> f32 {
@@ -52,6 +109,7 @@ pub(crate) fn step_connect_overlay(
                     shown_at: now,
                     fade_from: None,
                     last_rendered: now,
+                    bar: ssh_connect_fraction(progress, now),
                 })
         }
         (Some(progress), Some(anim)) => {
@@ -64,7 +122,13 @@ pub(crate) fn step_connect_overlay(
             anim
         }
     };
+    let dt = now.saturating_duration_since(anim.last_rendered);
     anim.last_rendered = now;
+    // 淡出时进度冻结，进度条也停在原处。
+    if anim.fade_from.is_none() {
+        let target = ssh_connect_fraction(&anim.progress, now).clamp(0.0, 1.0);
+        anim.bar = follow(anim.bar, target, dt);
+    }
     let fade_in = ease_out(ratio(now.saturating_duration_since(anim.shown_at), FADE_IN));
     let fade_out = match anim.fade_from {
         Some(from) => {
@@ -80,6 +144,7 @@ pub(crate) fn step_connect_overlay(
     Some(ConnectOverlayFrame {
         progress: anim.progress.clone(),
         opacity: fade_in * fade_out,
+        bar: anim.bar,
     })
 }
 
@@ -138,6 +203,46 @@ mod tests {
         // 别的会话一画，过期的那个被清掉。
         step_connect_overlay(&mut anims, "visible", Some(&p), t0 + STALE_AFTER);
         assert!(!anims.contains_key("hidden"));
+    }
+
+    #[test]
+    fn bar_slides_instead_of_jumping_on_stage_change() {
+        let t0 = Instant::now();
+        let mut anims = HashMap::new();
+        let mut p = progress(t0);
+        let mut t = t0;
+        let mut last = 0.0;
+        // 停在 TCP 1 秒，再进入身份验证：目标跳一段，显示值逐帧追上，不一步到位、不倒退。
+        for frame in 0..120 {
+            t = t0 + Duration::from_millis(16 * frame);
+            if frame == 60 {
+                p.advance(SshConnectStage::Auth, t);
+            }
+            let bar = step_connect_overlay(&mut anims, "s1", Some(&p), t)
+                .unwrap()
+                .bar;
+            assert!(bar >= last);
+            if frame == 61 {
+                assert!(bar - last < 0.1, "切阶段后一帧跳了 {}", bar - last);
+            }
+            last = bar;
+        }
+        let target = ssh_connect_fraction(&p, t);
+        assert!((target - last).abs() < 0.02);
+    }
+
+    #[test]
+    fn stage_transition_hands_current_to_next() {
+        let t0 = Instant::now();
+        let mut p = progress(t0);
+        let t1 = t0 + Duration::from_secs(1);
+        p.advance(SshConnectStage::Auth, t1);
+        let (from, to, k) = stage_transition(SshConnectStage::Tcp, &p, t1);
+        assert_eq!((from, to, k), (StageLook::Current, StageLook::Done, 0.0));
+        let (from, to, _) = stage_transition(SshConnectStage::Auth, &p, t1);
+        assert_eq!((from, to), (StageLook::Pending, StageLook::Current));
+        let (_, _, k) = stage_transition(SshConnectStage::Shell, &p, t1 + STAGE_FADE);
+        assert_eq!(k, 1.0);
     }
 
     #[test]
