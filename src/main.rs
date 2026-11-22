@@ -21,7 +21,6 @@ mod input_cursor;
 mod macos_window_util;
 mod settings_view;
 mod sidebar_helpers;
-mod sidebar_push;
 mod terminal_grid_glass_dirty;
 mod terminal_view_helpers;
 mod throttle;

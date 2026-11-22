@@ -398,7 +398,7 @@ impl RootView {
         }
     }
 
-    // === 面板滑动收尾（文件 / git 两个面板共用；16ms tick 与切标签时调用）===
+    // === 面板滑动收尾（文件 / git / 概览面板共用；16ms tick 与切标签时调用）===
 
     /// 面板关门滑出收敛后落闸：真正关闭，并发跟随的邻居 snap(0) 无缝换基。
     /// 返回是否发生落闸（需要重绘）。
@@ -437,6 +437,15 @@ impl RootView {
             }
             changed = true;
         }
+        // 概览落闸：与 git 同理，跟随的文件面板 snap(0) 换基。
+        if self.overview_panel_closing.get() && !self.overview_panel_slide.borrow().is_animating() {
+            self.overview_panel_closing.set(false);
+            self.overview_panel_slide.borrow_mut().snap(0.0);
+            if self.should_render_file_panel() && self.file_panel_closing.borrow().is_none() {
+                self.file_panel_slide.borrow_mut().snap(0.0);
+            }
+            changed = true;
+        }
         changed
     }
 
@@ -453,10 +462,13 @@ impl RootView {
                 tab.git_panel_open = false;
             }
         }
+        self.overview_panel_closing.set(false);
         self.file_panel_slide.borrow_mut().snap(0.0);
         self.git_panel_slide.borrow_mut().snap(0.0);
+        self.overview_panel_slide.borrow_mut().snap(0.0);
         self.file_panel_slide_pending.set(false);
         self.git_panel_slide_pending.set(false);
+        self.overview_panel_slide_pending.set(false);
     }
 }
 

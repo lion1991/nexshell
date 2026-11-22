@@ -1,10 +1,11 @@
-// host_monitor_section::overview — 概览侧栏：assembler（render_sidebar_panel）+ 通用渲染件（头部/状态/chip/键值/分隔行等）。
+// host_monitor_section::overview — 右侧概览面板：assembler（render_overview_panel）+ 通用渲染件（头部/状态/chip/键值/分隔行等）。
 // 本文件只含 impl RootView，无自由函数。
 
+use crate::file_panel_view_helpers::{panel_slide_in_from_right, PANEL_BORDER_W};
 use crate::host_monitor_view_helpers::{
     format_kernel_short, format_uptime, overview_status_dot_color,
 };
-use crate::sidebar_helpers::OVERVIEW_SIDEBAR_WIDTH;
+use crate::sidebar_helpers::OVERVIEW_PANEL_WIDTH;
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::ui_colors::HostOverviewColors;
 use crate::{RootView, TerminalSessionTab, ICON_PATH_COPY, ICON_PATH_EXPAND};
@@ -19,11 +20,10 @@ use warpui::elements::{
 use warpui::{fonts, AppContext, Element};
 
 impl RootView {
-    // 终端 tab 内嵌的主机监控左侧栏 assembler；与 render_file_panel / render_git_panel 对称，
+    // 终端 tab 右侧的主机概览面板 assembler；与 render_file_panel / render_git_panel 对称，
     // 由 terminal_section 的 render_active_tab_body_with_side_panels 跨 section 调用。
-    // tab_index 通常是 overview_tab_index()（Git Diff / 代码查看器显示来源终端的概览）；
-    // 侧栏收起滑出途中可能是已切走的上一个标签。
-    pub(in crate::root_view) fn render_sidebar_panel(
+    // tab_index 是 overview_tab_index()（Git Diff / 代码查看器显示来源终端的概览）。
+    pub(in crate::root_view) fn render_overview_panel(
         &self,
         tab_index: usize,
         app: &AppContext,
@@ -57,7 +57,7 @@ impl RootView {
         content.add_child(self.render_overview_divider(&colors));
         content.add_child(self.render_overview_disk_section(active_tab, snapshot, &colors));
 
-        Container::new(
+        let panel = Container::new(
             ConstrainedBox::new(
                 Container::new(content.finish())
                     .with_padding_left(10.0)
@@ -66,12 +66,26 @@ impl RootView {
                     .with_padding_bottom(10.0)
                     .finish(),
             )
-            .with_width(OVERVIEW_SIDEBAR_WIDTH)
+            .with_width(OVERVIEW_PANEL_WIDTH)
             .finish(),
         )
         .with_background_color(colors.panel_bg)
-        .with_border(Border::right(1.0).with_border_color(colors.panel_border))
-        .finish()
+        .with_border(Border::left(1.0).with_border_color(colors.panel_border))
+        .finish();
+        // 开门滑入同 git 面板：pending 首帧按实际宽度起搏，偏移取整防亚像素抖动。
+        let offset = {
+            let mut slide = self.overview_panel_slide.borrow_mut();
+            if self.overview_panel_slide_pending.take() {
+                slide.snap(OVERVIEW_PANEL_WIDTH + PANEL_BORDER_W);
+                slide.set_target(0.0);
+            }
+            slide.sample(std::time::Instant::now()).round()
+        };
+        // 文件面板动画期间也走 overlay：压栈序在后 = 画在上层，文件面板从概览底下钻过。
+        let file_animating = self.file_panel_slide.borrow().is_animating()
+            || self.file_panel_slide_pending.get()
+            || self.file_panel_closing.borrow().is_some();
+        panel_slide_in_from_right(panel, OVERVIEW_PANEL_WIDTH, offset, file_animating)
     }
 
     pub(in crate::root_view) fn render_overview_header(

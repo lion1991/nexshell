@@ -1,6 +1,8 @@
 // host_monitor_section::actions — host_monitor 的 action handler 与开页/杀进程操作。
 // 本文件只含 impl RootView，无自由函数。由 root_view/mod.rs handle_action 单行分发。
 
+use crate::file_panel_view_helpers::PANEL_BORDER_W;
+use crate::sidebar_helpers::OVERVIEW_PANEL_WIDTH;
 use crate::{RootView, TerminalSessionKind};
 use nexshell::host_management::HostConnectionPlan;
 use nexshell::host_overview::{NetworkSortKey, ProcessSortKey};
@@ -9,6 +11,50 @@ use warpui::clipboard::ClipboardContent;
 use warpui::ViewContext;
 
 impl RootView {
+    /// 右侧概览面板开关。开合动画同 git 面板：面板是最右一块，文件面板已开时被它推着锁步平移。
+    pub(in crate::root_view) fn handle_toggle_overview_panel(
+        &mut self,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        // 按钮在没有概览的标签上已收起，这里只是兜底。
+        if self.overview_panel_source().is_none() {
+            return;
+        }
+        let outer_w = OVERVIEW_PANEL_WIDTH + PANEL_BORDER_W;
+        let file_follows =
+            self.should_render_file_panel() && self.file_panel_closing.borrow().is_none();
+        if self.overview_panel_closing.get() {
+            // 关门滑出途中再按 = 取消关门滑回（跟随的文件面板同步回位）。
+            self.overview_panel_closing.set(false);
+            self.overview_panel_open = true;
+            self.overview_panel_slide.borrow_mut().set_target(0.0);
+            if file_follows {
+                self.file_panel_slide.borrow_mut().set_target(0.0);
+            }
+        } else if self.overview_panel_open {
+            // 开始关门：采集立即停，面板滑出收敛后 finalize_panel_closes 落闸。
+            self.overview_panel_open = false;
+            self.overview_panel_closing.set(true);
+            self.overview_panel_slide.borrow_mut().set_target(outer_w);
+            if file_follows {
+                self.file_panel_slide.borrow_mut().set_target(outer_w);
+            }
+        } else {
+            self.overview_panel_open = true;
+            // 首帧按实际宽度起搏滑入；文件面板布局左移同量，补偏移从旧位置滑过去。
+            self.overview_panel_slide_pending.set(true);
+            if file_follows {
+                let mut slide = self.file_panel_slide.borrow_mut();
+                let current = slide.sample(std::time::Instant::now());
+                slide.snap(current + outer_w);
+                slide.set_target(0.0);
+            }
+        }
+        self.sync_host_overview_monitor(ctx);
+        self.save_ui_settings();
+        ctx.notify();
+    }
+
     fn open_process_list_tab(
         &mut self,
         host_id: String,

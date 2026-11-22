@@ -101,7 +101,7 @@ Status: accepted (2026-05-27, revised 2026-05-28)
     字面方案被等价的目录子模块替代，反巨石目标一致、每文件 <800。`ShowTerminalContextMenu`
     菜单内容仍留 main.rs 待 step 9；`reset_active_terminal_view_state` /
     `set_terminal_font_size` 等共享 infra 留 main.rs，靠孙模块私有访问零 pub 改动。
-    `render_sidebar_panel`（终端 tab 左侧主机监控侧栏 assembler）按与 `render_file_panel` /
+    `render_sidebar_panel`（终端 tab 左侧主机监控侧栏 assembler；ADR 0023 起移到右侧，改名 `render_overview_panel`）按与 `render_file_panel` /
     `render_git_panel` 对称的归宿放进 `host_monitor_section/overview.rs`（与其调用的 6 个
     `render_overview_*` 叶子同住），terminal_section 仅通过
     `render_active_tab_body_with_side_panels` 跨 section 调一次，不再反向依赖 host_monitor 的 6 个 render。

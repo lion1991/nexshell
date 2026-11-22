@@ -88,7 +88,6 @@ use crate::host_edit_window::HostEditModel;
 use crate::host_management_view::HostManagementViewStates;
 #[cfg(target_os = "macos")]
 use crate::macos_window_util;
-use crate::sidebar_helpers::SidebarContent;
 use crate::terminal_grid_element::{
     CursorStyleChoice, FindPanelState, GlassQualityChoice, LanguageChoice, ScrollbarDrag,
     TerminalGridAction, TerminalImeLayout, TerminalShapedLineCache, ThemeChoice,
@@ -203,6 +202,9 @@ pub(crate) struct RootView {
     // === 标题栏 / Chrome（tab_bar_section）===
     sidebar_open: bool,
     sidebar_button_state: MouseStateHandle,
+    /// 右侧主机概览面板开关（全局持久化，不按标签存；没有概览的标签上只是不显示）。
+    overview_panel_open: bool,
+    overview_button_state: MouseStateHandle,
     host_tab_state: MouseStateHandle,
     new_tab_combo_state: MouseStateHandle,
     new_tab_plus_state: MouseStateHandle,
@@ -342,13 +344,11 @@ pub(crate) struct RootView {
     /// 底条弹簧是否已首帧落位（未落位前 snap 不滑动）。
     tab_accent_bar_init: std::cell::Cell<bool>,
     /// 标题栏按钮收展槽：侧栏按钮没有侧栏时收成 0（主页按钮和标签滑过去）；
-    /// 文件 / git 按钮在不支持的标签上收起（右侧按钮跟着滑）。
+    /// 文件 / git / 概览按钮在不支持的标签上收起（右侧按钮跟着滑）。
     sidebar_toggle_slot: SlotReveal,
-    /// 左侧概览栏推入推出 + 最后显示的概览所属标签（收起滑出途中照它画）。
-    sidebar_slide: SlotReveal,
-    sidebar_shown_tab: RefCell<Option<String>>,
     file_button_slot: SlotReveal,
     git_button_slot: SlotReveal,
+    overview_button_slot: SlotReveal,
     /// 底条 y（相对 tab 行）：直接取活动 tab 底边，缓存供缺位帧沿用。
     tab_accent_bar_y: std::cell::Cell<f32>,
     /// 面板开门滑入弹簧（内容右侧滑入偏移 px）+ 开门待起帧标志（首帧按实际宽度起搏）。
@@ -356,6 +356,10 @@ pub(crate) struct RootView {
     git_panel_slide: RefCell<SpringAnim>,
     file_panel_slide_pending: std::cell::Cell<bool>,
     git_panel_slide_pending: std::cell::Cell<bool>,
+    overview_panel_slide: RefCell<SpringAnim>,
+    overview_panel_slide_pending: std::cell::Cell<bool>,
+    /// 概览面板关门滑出在途：overview_panel_open 已置 false，收敛后由 tick 落闸。
+    overview_panel_closing: std::cell::Cell<bool>,
     /// 关门滑出在途（值 = 目标 tab id）；滑出收敛后由 tick 落闸真正关闭。
     file_panel_closing: RefCell<Option<String>>,
     git_panel_closing: RefCell<Option<String>>,
@@ -589,6 +593,8 @@ impl RootView {
             ui_font,
             sidebar_open: ui_settings.sidebar_open,
             sidebar_button_state: Arc::new(Mutex::new(MouseState::default())),
+            overview_panel_open: ui_settings.overview_panel_open,
+            overview_button_state: Arc::new(Mutex::new(MouseState::default())),
             host_tab_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_combo_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_plus_state: Arc::new(Mutex::new(MouseState::default())),
@@ -825,15 +831,17 @@ impl RootView {
             tab_accent_bar_w: RefCell::new(SpringAnim::new(0.0)),
             tab_accent_bar_init: std::cell::Cell::new(false),
             sidebar_toggle_slot: SlotReveal::new(),
-            sidebar_slide: SlotReveal::new(),
-            sidebar_shown_tab: RefCell::new(None),
             file_button_slot: SlotReveal::new(),
             git_button_slot: SlotReveal::new(),
+            overview_button_slot: SlotReveal::new(),
             tab_accent_bar_y: std::cell::Cell::new(0.0),
             file_panel_slide: RefCell::new(SpringAnim::new(0.0)),
             git_panel_slide: RefCell::new(SpringAnim::new(0.0)),
             file_panel_slide_pending: std::cell::Cell::new(false),
             git_panel_slide_pending: std::cell::Cell::new(false),
+            overview_panel_slide: RefCell::new(SpringAnim::new(0.0)),
+            overview_panel_slide_pending: std::cell::Cell::new(false),
+            overview_panel_closing: std::cell::Cell::new(false),
             file_panel_closing: RefCell::new(None),
             git_panel_closing: RefCell::new(None),
             toast: None,
@@ -1351,19 +1359,20 @@ impl RootView {
     ) {
         if self.app_page == AppPage::Terminal && page != AppPage::Terminal {
             self.release_rdp_held_input(self.active_tab_index);
+            // 面板弹簧只在渲染时推进，离开终端页不落定的话关门永不收敛，16ms tick 会一直空转。
+            self.settle_panel_slides();
         }
         self.app_page = page;
         self.sync_host_fleets(ctx);
         self.sync_host_overview_monitor(ctx);
     }
 
-    /// 侧栏的概览采集只跟着显示中的侧栏跑：收起侧栏或切走时停掉，保留最后一帧，
-    /// 再显示时接着采（`HostOverviewResume`）。详情页的采集就是页面本身，不跟侧栏走。
+    /// 概览面板的采集只跟着显示中的面板跑：收起面板或切走时停掉，保留最后一帧，
+    /// 再显示时接着采（`HostOverviewResume`）。详情页的采集就是页面本身，不跟面板走。
     fn sync_host_overview_monitor(&mut self, ctx: &mut ViewContext<Self>) {
-        let sidebar_tab = match self.sidebar_content() {
-            SidebarContent::HostOverview { source_tab } if self.sidebar_open => Some(source_tab),
-            _ => None,
-        };
+        let panel_tab = self
+            .overview_panel_source()
+            .filter(|_| self.overview_panel_open);
         let detail_tab = (self.app_page == AppPage::Terminal)
             .then_some(self.active_tab_index)
             .filter(|&index| {
@@ -1373,11 +1382,11 @@ impl RootView {
                     && self.tab_is_saved_ssh(index)
             });
         for (index, tab) in self.terminal_tabs.iter_mut().enumerate() {
-            if Some(index) != sidebar_tab && !Self::tab_is_host_overview_page(tab) {
+            if Some(index) != panel_tab && !Self::tab_is_host_overview_page(tab) {
                 tab.host_overview_monitor = None;
             }
         }
-        let Some(index) = detail_tab.or(sidebar_tab) else {
+        let Some(index) = detail_tab.or(panel_tab) else {
             return;
         };
 
@@ -1436,8 +1445,10 @@ impl RootView {
             }
         }
     }
-    fn should_render_host_overview_sidebar(&self) -> bool {
-        self.sidebar_open && matches!(self.sidebar_content(), SidebarContent::HostOverview { .. })
+    /// 关门滑出途中仍要画，直到落闸。
+    fn should_render_overview_panel(&self) -> bool {
+        (self.overview_panel_open || self.overview_panel_closing.get())
+            && self.overview_panel_source().is_some()
     }
 
     /// 查看伪 tab（CodeViewer / GitDiff）回溯到 host_id 指向的源终端 tab index；普通 tab 即 active 自身。
@@ -1533,11 +1544,12 @@ impl RootView {
             || self.tab_accent_bar_x.borrow().is_animating()
             || self.tab_accent_bar_w.borrow().is_animating()
             || self.sidebar_toggle_slot.is_animating()
-            || self.sidebar_slide.is_animating()
             || self.file_button_slot.is_animating()
             || self.git_button_slot.is_animating()
+            || self.overview_button_slot.is_animating()
             || self.file_panel_slide.borrow().is_animating()
             || self.git_panel_slide.borrow().is_animating()
+            || self.overview_panel_slide.borrow().is_animating()
             || self
                 .host_view_states
                 .borrow()
@@ -2207,6 +2219,7 @@ impl TypedActionView for RootView {
 
             // === 标题栏 Chrome（tab_bar_section）===
             TerminalGridAction::ToggleSidebar => self.handle_toggle_sidebar(ctx),
+            TerminalGridAction::ToggleOverviewPanel => self.handle_toggle_overview_panel(ctx),
             TerminalGridAction::WakeUiAnim => self.wake_ui_anim(ctx),
             TerminalGridAction::WindowMinimize => self.handle_window_minimize(ctx),
             TerminalGridAction::WindowToggleMaximize => self.handle_window_toggle_maximize(ctx),
@@ -3405,6 +3418,7 @@ impl RootView {
     fn save_ui_settings(&self) {
         save_ui_settings_to_disk(&UiSettings {
             sidebar_open: self.sidebar_open,
+            overview_panel_open: self.overview_panel_open,
             theme: self.current_theme,
             font_size: self.terminal_font_size,
             line_height_ratio: self.line_height_ratio,

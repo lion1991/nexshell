@@ -20,6 +20,6 @@
 
 ## 界面动画
 - 只给有空间连续性的变化加动画：面板 / 侧栏 / 标题栏按钮的出现消失、标签底条、悬停色。页面切换、标签内容、菜单、搜索过滤、加载转内容保持瞬时。
-- 不逐帧改终端尺寸（每帧都会 resize PTY）：左侧概览栏用 `sidebar_push::SidebarPush`（正文直接按最终宽度布局，与侧栏一起平移）；右侧面板保持槽位、只平移面板内容。
+- 不逐帧改终端尺寸（每帧都会 resize PTY）：左侧栏推入推出时正文直接按最终宽度布局、与侧栏一起平移（ADR 0023 第 2 步的主机列表沿用 `SidebarPush`）；右侧面板（文件 / git / 概览）保持槽位、只平移面板内容。
 - 用 `nexshell::ui_anim` 现成的：`SpringAnim` 管位移 / 宽度，`SlotReveal` 管收展槽，`TransitionMap` 管颜色（120 ms），`FloatTransitionMap` 管数值（350 ms），`ToastTimeline` 管提示条。render 里设目标，action 漏斗统一唤醒 16 ms tick；新动画源必须计入 `any_ui_anim_active`，否则会停在中间帧。
 - 操作结果 / 报错写 `host_state.notice`，由底部提示条（`toast_section`）淡入显示几秒再淡出，别另起提示 UI。

@@ -24,6 +24,7 @@ fn ui_settings_path() -> Option<std::path::PathBuf> {
 
 pub(crate) struct UiSettings {
     pub sidebar_open: bool,
+    pub overview_panel_open: bool,
     pub theme: ThemeChoice,
     pub font_size: f32,
     pub line_height_ratio: f32,
@@ -44,6 +45,7 @@ impl Default for UiSettings {
     fn default() -> Self {
         Self {
             sidebar_open: false,
+            overview_panel_open: false,
             theme: ThemeChoice::Dark,
             font_size: TERMINAL_FONT_SIZE_DEFAULT,
             line_height_ratio: TERMINAL_LINE_HEIGHT_RATIO_DEFAULT,
@@ -72,11 +74,17 @@ pub(crate) fn load_ui_settings() -> UiSettings {
 }
 
 fn ui_settings_from_value(v: serde_json::Value) -> UiSettings {
+    let sidebar_open = v
+        .get("sidebar_open")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false);
     UiSettings {
-        sidebar_open: v
-            .get("sidebar_open")
+        sidebar_open,
+        // 概览原先跟左栏共用 sidebar_open，没存过就沿用它。
+        overview_panel_open: v
+            .get("overview_panel_open")
             .and_then(|x| x.as_bool())
-            .unwrap_or(false),
+            .unwrap_or(sidebar_open),
         theme: v
             .get("theme")
             .and_then(|x| x.as_str())
@@ -194,6 +202,10 @@ fn write_ui_settings_to_object(
         serde_json::Value::Bool(settings.sidebar_open),
     );
     obj.insert(
+        "overview_panel_open".to_string(),
+        serde_json::Value::Bool(settings.overview_panel_open),
+    );
+    obj.insert(
         "theme".to_string(),
         serde_json::Value::String(settings.theme.id().to_string()),
     );
@@ -287,6 +299,19 @@ mod tests {
         }));
 
         assert_eq!(settings.glass_quality, GlassQualityChoice::Liquid);
+    }
+
+    #[test]
+    fn overview_panel_open_falls_back_to_legacy_sidebar_open() {
+        let legacy = ui_settings_from_value(serde_json::json!({ "sidebar_open": true }));
+        assert!(legacy.overview_panel_open);
+
+        let saved = ui_settings_from_value(serde_json::json!({
+            "sidebar_open": true,
+            "overview_panel_open": false
+        }));
+        assert!(saved.sidebar_open);
+        assert!(!saved.overview_panel_open);
     }
 
     #[test]

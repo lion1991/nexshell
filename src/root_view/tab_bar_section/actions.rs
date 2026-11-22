@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::vec2f;
 
-use crate::sidebar_helpers::{sidebar_content, SidebarContent};
+use crate::sidebar_helpers::{overview_panel_source, sidebar_content, SidebarContent};
 use crate::terminal_grid_element::TerminalGridAction;
 use crate::terminal_view_helpers::serial_port_from_host_config;
 use crate::terminal_view_helpers::{terminal_shortcut_label, TerminalShortcut};
@@ -26,8 +26,6 @@ impl RootView {
     // === Chrome / 窗口控制 ===
     pub(in crate::root_view) fn handle_toggle_sidebar(&mut self, ctx: &mut ViewContext<Self>) {
         self.sidebar_open = !self.sidebar_open;
-        // 打开时起采集，收起时停掉。
-        self.sync_host_overview_monitor(ctx);
         self.save_ui_settings();
         ctx.notify();
     }
@@ -373,8 +371,13 @@ impl RootView {
         }
     }
 
-    /// 左侧栏内容；标题栏按钮、侧栏渲染、概览采集都按它判断。
+    /// 左侧栏内容；标题栏按钮和侧栏渲染都按它判断。
     pub(in crate::root_view) fn sidebar_content(&self) -> SidebarContent {
+        sidebar_content(self.app_page)
+    }
+
+    /// 右侧概览面板显示的标签；标题栏按钮、面板渲染、概览采集都按它判断。
+    pub(in crate::root_view) fn overview_panel_source(&self) -> Option<usize> {
         let active_kind = self
             .terminal_tabs
             .get(self.active_tab_index)
@@ -382,15 +385,13 @@ impl RootView {
         let ssh_source_tab = self
             .source_terminal_tab_index()
             .filter(|&index| self.tab_is_saved_ssh(index));
-        sidebar_content(self.app_page, active_kind, ssh_source_tab)
+        overview_panel_source(self.app_page, active_kind, ssh_source_tab)
     }
 
-    /// 概览数据所在的 tab：有侧栏时取其来源终端，否则为当前 tab（进程 / 网络 / 系统信息详情页）。
+    /// 概览数据所在的 tab：有概览面板时取其来源终端，否则为当前 tab（进程 / 网络 / 系统信息详情页）。
     pub(in crate::root_view) fn overview_tab_index(&self) -> usize {
-        match self.sidebar_content() {
-            SidebarContent::HostOverview { source_tab } => source_tab,
-            _ => self.active_tab_index,
-        }
+        self.overview_panel_source()
+            .unwrap_or(self.active_tab_index)
     }
 
     pub(in crate::root_view) fn tab_is_saved_ssh(&self, index: usize) -> bool {

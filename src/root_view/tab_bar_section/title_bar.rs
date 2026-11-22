@@ -1,4 +1,4 @@
-// tab_bar_section::title_bar — RootView 标题栏 chrome 渲染：tab bar 容器 + 侧栏/文件/git/设置按钮 +
+// tab_bar_section::title_bar — RootView 标题栏 chrome 渲染：tab bar 容器 + 侧栏/文件/git/概览/设置按钮 +
 // 新建标签复合按钮 + Windows 窗口控制 + host tab + 下拉菜单委托。
 // 本文件只含 impl RootView，无自由函数。单个 tab 渲染见 tab_render.rs。
 //
@@ -13,7 +13,7 @@ use crate::title_bar_chrome::{
 use crate::{
     AppPage, RootView, TabBarDropTargetData, TabBarLocation, TabModel,
     FILE_PANEL_BUTTON_POSITION_ID, GIT_PANEL_BUTTON_POSITION_ID, ICON_BUTTON_PADDING,
-    ICON_BUTTON_SIZE, ICON_PATH_CHEVRON_DOWN, ICON_PATH_FOLDER, ICON_PATH_GEAR,
+    ICON_BUTTON_SIZE, ICON_PATH_ACTIVITY, ICON_PATH_CHEVRON_DOWN, ICON_PATH_FOLDER, ICON_PATH_GEAR,
     ICON_PATH_GIT_BRANCH, ICON_PATH_HOME, ICON_PATH_PLUS, ICON_PATH_SIDEBAR_OPEN,
     NEW_TAB_BUTTON_HEIGHT, NEW_TAB_BUTTON_LEFT_MARGIN, NEW_TAB_BUTTON_POSITION_ID,
     NEW_TAB_CHEVRON_WIDTH, NEW_TAB_PLUS_WIDTH, SETTINGS_BUTTON_POSITION_ID,
@@ -39,6 +39,7 @@ const BTN_SIDEBAR: usize = 0;
 const BTN_FILE: usize = 1;
 const BTN_GIT: usize = 2;
 const BTN_SETTINGS: usize = 3;
+const BTN_OVERVIEW: usize = 4;
 
 impl RootView {
     /// 图标按钮背景 eased 过渡：on(hover||active) → hover_bg，否则回落 base_bg。
@@ -137,6 +138,15 @@ impl RootView {
             (TAB_BAR_PADDING_LEFT, 0.0),
             || self.render_git_panel_button(),
         );
+        // 没有概览的标签（非已保存 SSH 来源）收起；与 git 按钮互斥，两者占同一位置。
+        let overview_panel_button = self.render_icon_button_slot(
+            &self.overview_button_slot,
+            self.overview_panel_source().is_some(),
+            ICON_PATH_ACTIVITY,
+            self.overview_panel_open,
+            (TAB_BAR_PADDING_LEFT, 0.0),
+            || self.render_overview_panel_button(),
+        );
         let settings_button = Container::new(Align::new(self.render_settings_button()).finish())
             .with_margin_left(TAB_BAR_PADDING_LEFT)
             .finish();
@@ -163,6 +173,7 @@ impl RootView {
         // warp view.rs:17462-17465 settings button 在 shrinkable 之后。
         bar_row.add_child(file_panel_button);
         bar_row.add_child(git_panel_button);
+        bar_row.add_child(overview_panel_button);
         bar_row.add_child(settings_button);
         if chrome_layout.windows_controls_width > 0.0 {
             bar_row.add_child(
@@ -443,6 +454,50 @@ impl RootView {
         .finish();
 
         SavePosition::new(Align::new(button).finish(), GIT_PANEL_BUTTON_POSITION_ID).finish()
+    }
+
+    /// 主机概览面板开关按钮（git 按钮位置，两者互斥）。
+    fn render_overview_panel_button(&self) -> Box<dyn Element> {
+        let state = self.overview_button_state.clone();
+        let is_open = self.overview_panel_open;
+        let uc = self.ui_colors();
+        let icon_active = uc.icon_color_active;
+        let icon_inactive = uc.icon_color_inactive;
+        let hover_bg = uc.icon_button_hover_bg;
+        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
+        let btn_bg = self.titlebar_btn_bg(
+            BTN_OVERVIEW,
+            is_hovered_now || is_open,
+            hover_bg,
+            uc.title_bar_bg,
+        );
+
+        let button = Hoverable::new(state, move |_mouse| {
+            let icon_color = if is_open { icon_active } else { icon_inactive };
+            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_ACTIVITY, icon_color).finish())
+                .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
+                .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
+                .finish();
+            Container::new(
+                ConstrainedBox::new(Align::new(icon).finish())
+                    .with_width(ICON_BUTTON_SIZE)
+                    .with_height(ICON_BUTTON_SIZE)
+                    .finish(),
+            )
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
+            .with_background_color(btn_bg)
+            .finish()
+        })
+        .with_cursor(warpui::platform::Cursor::PointingHand)
+        .on_hover(|_, ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
+        })
+        .on_click(|ctx, _, _| {
+            ctx.dispatch_typed_action(TerminalGridAction::ToggleOverviewPanel);
+        })
+        .finish();
+
+        Align::new(button).finish()
     }
 
     fn render_settings_button(&self) -> Box<dyn Element> {
