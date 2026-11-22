@@ -47,6 +47,11 @@ impl<T> Receiver<T> {
     pub fn recv(&self) -> Result<T, mpsc::RecvError> {
         self.rx.recv()
     }
+
+    #[cfg(windows)]
+    pub fn recv_timeout(&self, timeout: std::time::Duration) -> Result<T, mpsc::RecvTimeoutError> {
+        self.rx.recv_timeout(timeout)
+    }
 }
 
 impl<T> event::Source for Receiver<T> {

@@ -162,20 +162,38 @@ fn run_telnet_event_loop(
     let disconnect_status = match write(&mut stream, &start, &mut last_write) {
         Err(error) => error,
         Ok(()) => loop {
-            let request = match keepalive {
-                Some(interval) => {
-                    let wait = interval.saturating_sub(last_write.elapsed());
-                    match request_rx.recv_timeout(wait) {
-                        Ok(request) => request,
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let mut sync_reply = Vec::new();
+            for reply in remote_finish_expired_sync(&state, &wakeup_tx) {
+                sync_reply.extend(codec.send(&encoding.encode_input(&reply)));
+            }
+            if let Err(error) = write(&mut stream, &sync_reply, &mut last_write) {
+                break error;
+            }
+            let keepalive_wait =
+                keepalive.map(|interval| interval.saturating_sub(last_write.elapsed()));
+            let sync_wait = state
+                .lock()
+                .sync_output_deadline()
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+            let wait = match (keepalive_wait, sync_wait) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            let request = match wait {
+                Some(wait) => match request_rx.recv_timeout(wait) {
+                    Ok(request) => request,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let keepalive_due =
+                            keepalive.is_some_and(|interval| last_write.elapsed() >= interval);
+                        if keepalive_due {
                             if let Err(error) = write(&mut stream, &KEEPALIVE, &mut last_write) {
                                 break error;
                             }
-                            continue;
                         }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => break closed(),
+                        continue;
                     }
-                }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break closed(),
+                },
                 None => match request_rx.recv() {
                     Ok(request) => request,
                     Err(_) => break closed(),

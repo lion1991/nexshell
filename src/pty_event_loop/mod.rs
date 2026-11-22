@@ -22,7 +22,7 @@
 
 pub mod mio_channel;
 
-use std::{borrow::Cow, io, sync::Arc, thread::JoinHandle};
+use std::{borrow::Cow, io, sync::Arc, thread::JoinHandle, time::Instant};
 
 #[cfg(unix)]
 use std::{
@@ -36,7 +36,10 @@ use std::{
 #[cfg(windows)]
 use std::{
     io::{Read, Write},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::RecvTimeoutError,
+    },
     thread,
 };
 
@@ -59,15 +62,10 @@ const READ_BUFFER_SIZE: usize = 0x4_0000;
 #[cfg(unix)]
 const MAX_LOCKED_READ: usize = 0x1_0000;
 
-// Note: `warp/app/src/terminal/local_tty/event_loop.rs:365` passes
-// `state.parser.sync_output_remaining_timeout()` to `mio::Poll::poll`
-// so it can call `finish_sync_output(...)` after BSU/ESU's internal
-// timeout. vte 0.15 doesn't expose that timeout (it's all hidden behind
-// `Processor::advance`'s own state machine), so we pass `None` and let
-// vte's internal hard timeout drive sync-output stop. The trade-off is
-// that a program that emits BSU then immediately stops sending bytes
-// will hold rendering until vte's internal timeout (~150 ms) — same
-// upper bound as Warp, just without the externally-visible early stop.
+// 同步输出（`?2026h` … `?2026l`）：vte 只在收到 ESU 或缓冲攒满 2 MiB 时结束同步，
+// 不会自己按时间收尾。程序发了 BSU 却没发 ESU（画到一半被杀）时，读循环要在
+// `PtySink::sync_output_deadline` 到点后调 `finish_expired_sync_output`，否则标签页一直不刷新。
+// 做法同 Warp 的 `crates/warp_terminal/src/local_tty/event_loop.rs` poll 超时后 finish_sync_output。
 
 #[cfg(unix)]
 const CHANNEL_TOKEN: Token = Token(0);
@@ -103,8 +101,13 @@ fn pty_debug_bytes(bytes: &[u8]) -> String {
 pub enum Message {
     Input(Cow<'static, [u8]>),
     Resize(PtySize),
-    ClearVisibleScreen { preserve_prompt_prefix: bool },
+    ClearVisibleScreen {
+        preserve_prompt_prefix: bool,
+    },
     Shutdown,
+    /// Windows 读线程 → 事件线程：开始了一段同步输出，事件线程据此改按截止时间等待。
+    #[cfg(windows)]
+    SyncOutputStarted,
 }
 
 /// Things the PTY event loop pushes to the UI side. We separate
@@ -133,6 +136,10 @@ pub trait PtySink: Send + 'static {
     fn handle_resize(&mut self, size: PtySize);
     fn clear_visible_screen(&mut self, preserve_prompt_prefix: bool);
     fn mark_disconnected(&mut self, status: String);
+    /// 同步输出（`?2026h`）的截止时间；读循环的等待不能超过它。
+    fn sync_output_deadline(&self) -> Option<Instant>;
+    /// 截止时间已过仍没等到 `?2026l`：强制结束同步。没到点返回 None，否则返回要写回的应答字节。
+    fn finish_expired_sync_output(&mut self, now: Instant) -> Option<Vec<Cow<'static, [u8]>>>;
 }
 
 /// Wakeup channel handle returned to the UI thread.
@@ -179,6 +186,8 @@ struct State {
     write_list: VecDeque<Cow<'static, [u8]>>,
     writing: Option<Writing>,
     pending_clear_visible_screen: Option<bool>,
+    /// 解析器同步输出的截止时间，每次读完输出时从 sink 抄下来，poll 前不用再锁 sink。
+    sync_deadline: Option<Instant>,
 }
 
 #[cfg(unix)]
@@ -188,6 +197,7 @@ impl Default for State {
             write_list: VecDeque::new(),
             writing: None,
             pending_clear_visible_screen: None,
+            sync_deadline: None,
         }
     }
 }
@@ -373,15 +383,30 @@ impl<S: PtySink> EventLoop<S> {
             FairMutexGuard::bump(sink);
         }
 
-        // vte 0.15 does not expose a sync_output buffer length, so we
-        // wake the UI any time we processed bytes — equivalent to
-        // Warp's `> sync_output_buffer_len.unwrap_or(0)` when the inner
-        // value is `None`.
+        if let Some(sink) = &sink {
+            state.sync_deadline = sink.sync_output_deadline();
+        }
+
+        // 同步缓冲期间也照常唤醒 UI（画面不变，只是多一次重绘）；
+        // Warp 在 `bytes_processed > sync_output_buffer_len` 时才唤醒。
         if bytes_processed > 0 {
             let _ = self.wakeup_tx.try_send(());
         }
 
         Ok(())
+    }
+
+    fn finish_expired_sync_output(&mut self, state: &mut State) {
+        let now = Instant::now();
+        if !state.sync_deadline.is_some_and(|deadline| now >= deadline) {
+            return;
+        }
+        let mut sink = self.sink.lock();
+        if let Some(replies) = sink.finish_expired_sync_output(now) {
+            state.write_list.extend(replies);
+            let _ = self.wakeup_tx.try_send(());
+        }
+        state.sync_deadline = sink.sync_output_deadline();
     }
 
     /// Mirrors `event_loop.rs:279 fn pty_write`.
@@ -467,10 +492,10 @@ impl<S: PtySink> EventLoop<S> {
         'event_loop: loop {
             events.clear();
 
-            // See `event_loop.rs:363-379`. vte 0.15 hides its sync
-            // state — see the SYNC_FALLBACK_TIMEOUT comment near the
-            // top of this file — so we always wait indefinitely.
-            if let Err(err) = self.poll.poll(&mut events, None) {
+            let timeout = state
+                .sync_deadline
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+            if let Err(err) = self.poll.poll(&mut events, timeout) {
                 match err.kind() {
                     ErrorKind::Interrupted => continue,
                     _ => {
@@ -518,6 +543,8 @@ impl<S: PtySink> EventLoop<S> {
                     _ => {}
                 }
             }
+
+            self.finish_expired_sync_output(&mut state);
 
             while can_read || (state.needs_write() && can_write) {
                 if can_read {
@@ -690,6 +717,7 @@ pub fn spawn_event_loop<S: PtySink>(
             .name("PTY reader".into())
             .spawn(move || {
                 let mut buf = vec![0u8; READ_BUFFER_SIZE];
+                let mut announced_sync_deadline = None;
                 loop {
                     if shutdown.load(Ordering::Relaxed) {
                         break;
@@ -709,10 +737,19 @@ pub fn spawn_event_loop<S: PtySink>(
                             break;
                         }
                         Ok(got) => {
-                            let replies = sink.lock().process_output(&buf[..got]);
+                            let (replies, sync_deadline) = {
+                                let mut sink = sink.lock();
+                                let replies = sink.process_output(&buf[..got]);
+                                (replies, sink.sync_output_deadline())
+                            };
                             for reply in replies {
                                 let _ = message_tx.send(Message::Input(reply));
                             }
+                            // 每段同步的截止时间都不同，只在出现新的一段时叫醒事件线程。
+                            if sync_deadline.is_some() && sync_deadline != announced_sync_deadline {
+                                let _ = message_tx.send(Message::SyncOutputStarted);
+                            }
+                            announced_sync_deadline = sync_deadline;
                             let _ = wakeup_tx.try_send(());
                         }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -761,35 +798,38 @@ pub fn spawn_event_loop<S: PtySink>(
         thread::Builder::new()
             .name("PTY event loop".into())
             .spawn(move || {
-                while let Ok(msg) = rx.recv() {
-                    match msg {
-                        Message::Input(input) => {
-                            if let Err(error) = writer.write_all(input.as_ref()) {
-                                if !shutdown.swap(true, Ordering::Relaxed) {
-                                    let status = format!("pty write error: {error}");
-                                    sink.lock().mark_disconnected(status.clone());
-                                    let _ = wakeup_tx.try_send(());
-                                    let _ = event_tx.try_send(PtyEvent::Disconnected(status));
+                'events: while let Ok(batch) = recv_or_finish_sync(&rx, &sink, &wakeup_tx) {
+                    for msg in batch {
+                        match msg {
+                            Message::Input(input) => {
+                                if let Err(error) = writer.write_all(input.as_ref()) {
+                                    if !shutdown.swap(true, Ordering::Relaxed) {
+                                        let status = format!("pty write error: {error}");
+                                        sink.lock().mark_disconnected(status.clone());
+                                        let _ = wakeup_tx.try_send(());
+                                        let _ = event_tx.try_send(PtyEvent::Disconnected(status));
+                                    }
+                                    break 'events;
                                 }
-                                break;
                             }
-                        }
-                        Message::Resize(size) => {
-                            if let Err(error) = master.resize(size) {
-                                let _ = event_tx.try_send(PtyEvent::Disconnected(format!(
-                                    "pty resize error: {error}"
-                                )));
-                            } else {
-                                sink.lock().handle_resize(size);
+                            Message::Resize(size) => {
+                                if let Err(error) = master.resize(size) {
+                                    let _ = event_tx.try_send(PtyEvent::Disconnected(format!(
+                                        "pty resize error: {error}"
+                                    )));
+                                } else {
+                                    sink.lock().handle_resize(size);
+                                }
                             }
+                            Message::ClearVisibleScreen {
+                                preserve_prompt_prefix,
+                            } => {
+                                sink.lock().clear_visible_screen(preserve_prompt_prefix);
+                                let _ = wakeup_tx.try_send(());
+                            }
+                            Message::Shutdown => break 'events,
+                            Message::SyncOutputStarted => {}
                         }
-                        Message::ClearVisibleScreen {
-                            preserve_prompt_prefix,
-                        } => {
-                            sink.lock().clear_visible_screen(preserve_prompt_prefix);
-                            let _ = wakeup_tx.try_send(());
-                        }
-                        Message::Shutdown => break,
                     }
 
                     if shutdown.load(Ordering::Relaxed) {
@@ -809,6 +849,31 @@ pub fn spawn_event_loop<S: PtySink>(
         thread: Some(thread),
         killer,
     })
+}
+
+/// Windows 事件线程取下一批消息。同步输出（`?2026h`）没收尾时最多等到截止时间，
+/// 到点强制结束同步，解析器的应答当作输入消息交回去写进 PTY。
+#[cfg(windows)]
+fn recv_or_finish_sync<S: PtySink>(
+    rx: &mio_channel::Receiver<Message>,
+    sink: &FairMutex<S>,
+    wakeup_tx: &async_channel::Sender<()>,
+) -> Result<Vec<Message>, ()> {
+    let Some(deadline) = sink.lock().sync_output_deadline() else {
+        return rx.recv().map(|msg| vec![msg]).map_err(drop);
+    };
+    match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(msg) => Ok(vec![msg]),
+        Err(RecvTimeoutError::Timeout) => {
+            let replies = sink.lock().finish_expired_sync_output(Instant::now());
+            let Some(replies) = replies else {
+                return Ok(Vec::new());
+            };
+            let _ = wakeup_tx.try_send(());
+            Ok(replies.into_iter().map(Message::Input).collect())
+        }
+        Err(RecvTimeoutError::Disconnected) => Err(()),
+    }
 }
 
 #[cfg(not(any(unix, windows)))]

@@ -1483,11 +1483,39 @@ impl TerminalGridCore {
     }
 
     pub fn process_output(&mut self, bytes: &[u8]) {
+        self.run_parser(bytes, |parser, term| parser.advance(term, bytes));
+    }
+
+    /// 同步输出（`?2026h`）的截止时间；没在同步时为 None。
+    pub fn sync_output_deadline(&self) -> Option<Instant> {
+        self.parser.sync_timeout().sync_timeout()
+    }
+
+    /// 到截止时间仍没等到 `?2026l`（程序画到一半被杀、连接中途断开）：
+    /// 强制结束同步，把缓冲的输出画出来。vte 自己不按时间收尾，只认 ESU 或攒满 2 MiB。
+    /// 返回是否真的结束了一次同步。
+    pub fn finish_expired_sync_output(&mut self, now: Instant) -> bool {
+        if !self
+            .sync_output_deadline()
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return false;
+        }
+        self.run_parser(&[], |parser, term| parser.stop_sync(term));
+        true
+    }
+
+    /// `bytes` 只用来判断清屏、退出备用屏这类意图；解析由 `parse` 完成。
+    fn run_parser(
+        &mut self,
+        bytes: &[u8],
+        parse: impl FnOnce(&mut ansi::Processor, &mut Term<TerminalEventProxy>),
+    ) {
         let before = self.dirty_state();
         let snap_to_bottom = terminal_output_should_snap_to_bottom_after_clear(bytes);
         let alt_before = self.term.mode().contains(TermMode::ALT_SCREEN);
         let bytes_request_alt_exit = bytes_contain_alt_screen_exit(bytes);
-        self.parser.advance(&mut self.term, bytes);
+        parse(&mut self.parser, &mut self.term);
         // TUI 退出 alt-screen 时常漏发 mouse / focus / bracketed-paste 关闭
         // 序列，残留会让 shell readline 把后续 SGR 鼠标报告、focus event、
         // paste 包裹当成普通字符 echo。覆盖 ?1049l / ?1047l / ?47l 与单 chunk
@@ -2672,23 +2700,12 @@ fn apply_term_event(state: &mut TerminalRuntimeState, event: Event) {
     }
 }
 
-/// `PtySink` impl for `TerminalRuntimeState`. The PTY event loop holds the
-/// `Arc<FairMutex<TerminalRuntimeState>>`, locks it inside `pty_read`, and
-/// calls these methods. Mirrors how Warp's event loop calls
-/// `state.parser.parse_bytes(terminal.deref_mut(), bytes, writer)` —
-/// parser advances the terminal model and any reply bytes flow back into
-/// the loop's `write_list`.
-impl PtySink for TerminalRuntimeState {
-    fn process_output(&mut self, bytes: &[u8]) -> Vec<Cow<'static, [u8]>> {
-        if let Some(recorder) = self.recorder.as_mut() {
-            recorder.push_bytes(bytes);
-        }
-        self.scan_bootstrap_marker(bytes);
-        self.scan_osc7(bytes);
+impl TerminalRuntimeState {
+    /// 解析器跑完一段输出后：收集要回给对端的应答（DSR、光标位置等），应用终端事件，刷新查找结果。
+    fn after_grid_output(&mut self) -> Vec<Cow<'static, [u8]>> {
         let window_size = self.window_size;
         let mut replies: Vec<Cow<'static, [u8]>> = Vec::new();
         let events: Vec<Event> = if let Some(grid) = &mut self.grid {
-            grid.process_output(bytes);
             let events = grid.drain_events();
             for event in &events {
                 if let Some(reply) =
@@ -2710,7 +2727,37 @@ impl PtySink for TerminalRuntimeState {
         self.revision = self.revision.wrapping_add(1);
         replies
     }
+}
 
+/// `PtySink` impl for `TerminalRuntimeState`. The PTY event loop holds the
+/// `Arc<FairMutex<TerminalRuntimeState>>`, locks it inside `pty_read`, and
+/// calls these methods. Mirrors how Warp's event loop calls
+/// `state.parser.parse_bytes(terminal.deref_mut(), bytes, writer)` —
+/// parser advances the terminal model and any reply bytes flow back into
+/// the loop's `write_list`.
+impl PtySink for TerminalRuntimeState {
+    fn process_output(&mut self, bytes: &[u8]) -> Vec<Cow<'static, [u8]>> {
+        if let Some(recorder) = self.recorder.as_mut() {
+            recorder.push_bytes(bytes);
+        }
+        self.scan_bootstrap_marker(bytes);
+        self.scan_osc7(bytes);
+        if let Some(grid) = &mut self.grid {
+            grid.process_output(bytes);
+        }
+        self.after_grid_output()
+    }
+
+    fn sync_output_deadline(&self) -> Option<Instant> {
+        self.grid.as_ref()?.sync_output_deadline()
+    }
+
+    fn finish_expired_sync_output(&mut self, now: Instant) -> Option<Vec<Cow<'static, [u8]>>> {
+        if !self.grid.as_mut()?.finish_expired_sync_output(now) {
+            return None;
+        }
+        Some(self.after_grid_output())
+    }
     fn handle_resize(&mut self, size: PtySize) {
         self.window_size = terminal_window_size(
             size.cols,
@@ -4026,6 +4073,14 @@ fn run_serial_event_loop(
             break;
         }
 
+        // 读超时 20 ms，每轮都会走到这里，不用另设定时。
+        for reply in remote_finish_expired_sync(&state, &wakeup_tx) {
+            if let Err(error) = port.write_all(reply.as_ref()) {
+                disconnect_status = format!("serial write error: {error}");
+                break 'serial;
+            }
+        }
+
         loop {
             match request_rx.try_recv() {
                 Ok(SerialRequest::Data(bytes)) => {
@@ -4335,7 +4390,18 @@ async fn run_remote_ssh_event_loop(
             break "SSH session closed".to_string();
         }
 
+        for reply in remote_finish_expired_sync(&state, &wakeup_tx) {
+            let encoded = terminal_encoding.encode_input(&reply);
+            if let Err(error) = channel.data(&encoded[..]).await {
+                break 'remote format!("SSH channel write error: {error}");
+            }
+        }
+        let sync_deadline = state.lock().sync_output_deadline();
+
         tokio::select! {
+            // 到点后回到循环顶部收尾同步输出。
+            _ = tokio::time::sleep_until(sync_deadline.unwrap_or_else(Instant::now).into()),
+                if sync_deadline.is_some() => {}
             msg = channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
@@ -4628,6 +4694,18 @@ fn remote_process_output(
     let replies = {
         let mut guard = state.lock();
         guard.process_output(data)
+    };
+    let _ = wakeup_tx.try_send(());
+    replies
+}
+
+/// 同步输出到点仍没收尾时强制画出缓冲内容，返回要回给对端的应答；没到点返回空。
+fn remote_finish_expired_sync(
+    state: &Arc<FairMutex<TerminalRuntimeState>>,
+    wakeup_tx: &async_channel::Sender<()>,
+) -> Vec<Cow<'static, [u8]>> {
+    let Some(replies) = state.lock().finish_expired_sync_output(Instant::now()) else {
+        return Vec::new();
     };
     let _ = wakeup_tx.try_send(());
     replies
@@ -5577,13 +5655,48 @@ mod tests {
     }
 
     #[test]
+    fn unfinished_sync_output_is_flushed_after_deadline() {
+        // 程序发了 ?2026h 就被杀，没有 ?2026l：到截止时间要把缓冲画出来，缓冲里的查询也要应答。
+        let mut state = TerminalRuntimeState::new("sync", true, "running", 80, 24);
+        let replies = state.process_output(b"\x1b[?2026hhalf-drawn\x1b[6n");
+        assert!(replies.is_empty());
+        assert!(!screen_text(&mut state).contains("half-drawn"));
+        let deadline = state.sync_output_deadline().expect("同步中应有截止时间");
+
+        assert!(state
+            .finish_expired_sync_output(deadline - Duration::from_millis(1))
+            .is_none());
+        assert!(!screen_text(&mut state).contains("half-drawn"));
+
+        let replies = state
+            .finish_expired_sync_output(deadline)
+            .expect("到点应强制结束同步");
+        assert!(screen_text(&mut state).contains("half-drawn"));
+        assert_eq!(replies.len(), 1, "缓冲里的 DSR 要应答");
+        assert!(state.sync_output_deadline().is_none());
+        assert!(state.finish_expired_sync_output(deadline).is_none());
+    }
+
+    #[test]
+    fn finished_sync_output_needs_no_deadline() {
+        let mut state = TerminalRuntimeState::new("sync", true, "running", 80, 24);
+        state.process_output(b"\x1b[?2026hframe\x1b[?2026l");
+        assert!(screen_text(&mut state).contains("frame"));
+        assert!(state.sync_output_deadline().is_none());
+    }
+
+    #[test]
     fn connect_overlay_hands_back_a_text_banner_on_prompt_or_failure() {
         let mut state = TerminalRuntimeState::new("ssh", true, "connecting", 80, 24);
         state.set_connect_stage(SshConnectStage::Tcp, "root@h:22");
         state.set_connect_stage(SshConnectStage::Auth, "root@h:22");
         // 过渡层在时不往终端写字。
         assert_eq!(
-            state.snapshot_arc().connect_progress.as_ref().map(|p| p.stage),
+            state
+                .snapshot_arc()
+                .connect_progress
+                .as_ref()
+                .map(|p| p.stage),
             Some(SshConnectStage::Auth)
         );
         assert!(!screen_text(&mut state).contains("root@h:22"));
