@@ -2,8 +2,7 @@
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
 // create_find_editor 由 RootView::new() 调用；handle_* / close_find_bar 由 mod.rs handle_action
-// 分发；render_find_bar 由 mod.rs impl View::render 调用——均用 pub(in crate::root_view)。
-// 仅本文件内调用的 handle_find_editor_event 保持私有。find_match_label 已于 step 10 归 terminal_view_helpers。
+// 分发；render_find_bar 由 mod.rs impl View::render 调用。
 
 use nexshell::terminal_runtime::{encode_terminal_key_event_with_modes, TerminalInputModes};
 use nexshell::text_editor::{
@@ -79,7 +78,7 @@ impl RootView {
         }
     }
 
-    // warp: view.rs:18177-18210 (show_find_bar)
+    // warp terminal/view.rs 的 show_find_bar
     pub(in crate::root_view) fn handle_open_find_bar(&mut self, ctx: &mut ViewContext<Self>) {
         let query = self.find_state.lock().ok().map(|mut state| {
             state.active = true;

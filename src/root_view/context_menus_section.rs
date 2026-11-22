@@ -1,6 +1,6 @@
 // context_menus_section — RootView 的右键 / 上下文菜单：tab 右键、终端、文件面板、git 面板、
 // 主机卡片、进程列表。render_* 由 mod.rs View::render 调用、show_* / toggle_* 由 mod.rs
-// handle_action 分发——均 pub(in crate::root_view)。*_items 仅本文件内构造，保持私有。
+// handle_action 分发。*_items 仅本文件内构造，保持私有。
 // 菜单具体内容（i18n key / disable 条件）按面板分别成 fn。
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
@@ -138,7 +138,7 @@ impl RootView {
         anchor: TabContextMenuAnchor,
         ctx: &mut ViewContext<Self>,
     ) {
-        // warp/app/src/workspace/view.rs:6488-6507.
+        // warp workspace/view.rs 的 toggle_tab_right_click_menu。
         if self.show_tab_right_click_menu.is_some() {
             self.show_tab_right_click_menu = None;
             ctx.notify();
@@ -166,7 +166,7 @@ impl RootView {
         ctx.notify();
     }
 
-    // warp: view.rs:16064-16113 (rebuild_alt_screen_context_menu_items)
+    // warp terminal/view.rs 的 rebuild_alt_screen_context_menu_items
     pub(crate) fn show_terminal_context_menu(
         &mut self,
         position: Vector2F,
@@ -204,7 +204,7 @@ impl RootView {
 
         let mut items = vec![];
 
-        // warp: view.rs:16074-16080 — Copy（有选区时）
+        // warp terminal/view.rs 的 rebuild_alt_screen_context_menu_items — Copy（有选区时）
         if has_selection {
             items.push(
                 MenuItemFields::new(rust_i18n::t!("menu_copy"))

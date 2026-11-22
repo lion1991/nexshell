@@ -371,8 +371,8 @@ impl RootView {
                     mode,
                 });
             });
-        // 文件双击 → 内置只读查看器（二进制/超大由 handler 回退「用外部程序打开」）；
-        // 目录双击在树里靠单击展开，不处理。编辑仍走右键「编辑」。
+        // 文件双击 → 内置编辑器（二进制/超大由 handler 回退「用外部程序打开」）；
+        // 目录双击在树里靠单击展开，不处理。右键「编辑」走配置的外部编辑器。
         if !is_dir {
             let path_for_dbl = path.clone();
             hover = hover.on_double_click(move |ctx, _, _| {

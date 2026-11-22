@@ -82,7 +82,7 @@ impl RootView {
     }
 
     /// 容器 start/stop/restart：一次性远端 exec，不阻塞 UI；成功静默（fleet 5s 内自然刷新），
-    /// 失败写回该主机容器快照的 status 让卡片区显示（无 toast 机制，见 ADR 0009 Step3）。
+    /// 失败写回该主机容器快照的 status 让卡片区显示。
     pub(in crate::root_view) fn handle_container_exec(
         &mut self,
         host_id: String,

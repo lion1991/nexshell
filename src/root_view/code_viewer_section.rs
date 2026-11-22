@@ -831,7 +831,7 @@ impl RootView {
         }
     }
 
-    /// 渲染只读代码查看器主体（不含侧栏）。侧栏由 render_active_tab_body_with_side_panels 包裹，
+    /// 渲染内置代码编辑器主体（不含侧栏）。侧栏由 render_active_tab_body_with_side_panels 包裹，
     /// 与 GitDiff 同属「内容 + 可选文件/git 侧栏」类，故打开文件后文件面板按钮仍可用。
     pub(in crate::root_view) fn render_code_viewer_page(
         &self,

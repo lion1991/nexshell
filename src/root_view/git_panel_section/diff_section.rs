@@ -1,4 +1,4 @@
-// diff section — RootView 的 git diff 视图：select_diff handler + GitDiff tab 打开 + diff preview 渲染。
+// diff section — RootView 的 git diff 视图：GitDiff tab 打开 + diff 页 / preview 渲染。
 //
 // 详见 docs/adr/0001-root-view-multi-file-impl.md。本文件只含 impl RootView，无自由函数。
 // 跨 section 调用：open_git_diff_tab 同时被 status_section::handle_git_panel_select_entry 使用。

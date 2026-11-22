@@ -1,9 +1,7 @@
 // RootView 多文件 impl 容器。
 // 详细决策见 docs/adr/0001-root-view-multi-file-impl.md。
 //
-// step 1-9 抽出 9 个 section（git_panel / file_panel / host_library / host_monitor /
-// settings / tab_bar / terminal / find / context_menus）；step 11 收尾把
-// struct RootView / new() / impl Entity / impl View / impl TypedActionView 整体迁入本文件。
+// 本文件放 struct RootView / new() / impl Entity / impl View / impl TypedActionView。
 // main.rs 仅留启动装配与伴生类型（TabModel / TerminalSessionTab / 常量等），经 crate:: 互引。
 
 mod code_viewer_section;
@@ -324,7 +322,7 @@ pub(crate) struct RootView {
     reuse_view_tab: bool,
     available_monospace_fonts: Vec<String>,
     available_all_fonts: Vec<String>,
-    // warp: appearance_page.rs:499-500
+    // warp appearance_page.rs 的 font_family_dropdown / font_weight_dropdown 字段
     font_family_dropdown:
         warpui::ViewHandle<warp_filterable_dropdown::FilterableDropdown<TerminalGridAction>>,
     font_weight_dropdown: warpui::ViewHandle<warp_dropdown_view::Dropdown<TerminalGridAction>>,
@@ -389,7 +387,7 @@ impl RootView {
         let monospace_font = fonts::Cache::handle(ctx).update(ctx, |cache, _| {
             load_nexshell_monospace_font(cache, Some(&ui_settings.font_family))
         });
-        // UI font for chrome (tabs / titlebar). Falls back to monospace if Helvetica Neue 不可用。
+        // UI 字体：按 font_enumeration::ui_font_families 候选 → 内置 Roboto，全部失败才回退等宽字体。
         let ui_font = fonts::Cache::handle(ctx).update(ctx, |cache, _| {
             load_nexshell_ui_font(cache).unwrap_or(monospace_font)
         });
@@ -415,7 +413,7 @@ impl RootView {
         let terminal = Arc::new(Mutex::new(terminal));
         let terminal_tabs: Vec<TerminalSessionTab> = Vec::new();
 
-        // Only drives blink and bell decay while PTY is idle.
+        // 100ms 空闲定时：录制红点闪烁 / push 动画 / 过渡 tick 兜底 / 提示条接走 notice。
         Self::schedule_idle_refresh(ctx);
         Self::watch_app_visibility(ctx);
 
@@ -469,7 +467,6 @@ impl RootView {
             });
         }
 
-        // warp: appearance_page.rs:995-1015 — FilterableDropdown for font family
         let monospace_fonts = enumerate_monospace_fonts();
         let all_fonts = enumerate_all_system_fonts();
         let font_family_dropdown = {
@@ -495,7 +492,6 @@ impl RootView {
             })
         };
 
-        // warp: appearance_page.rs:1017-1035 — Dropdown for font weight
         let open_file_editor_dropdown = {
             let current = ui_settings.open_file_editor;
             let editors = crate::external_editor::detect_installed_editors();
@@ -664,7 +660,6 @@ impl RootView {
                 menu
             },
             tab_right_click_menu: {
-                // warp/app/src/workspace/view.rs:1744-1750.
                 let menu = ctx.add_typed_action_view(|_| nexshell::menu::Menu::new());
                 ctx.subscribe_to_view(&menu, |me, menu, event: &nexshell::menu::Event, ctx| {
                     if matches!(event, nexshell::menu::Event::Close { .. }) {
@@ -679,7 +674,6 @@ impl RootView {
             rdp_conn_info_refreshing: false,
             rdp_resize_ticking: false,
             terminal_context_menu: {
-                // warp: view.rs:3696-3702
                 let menu = ctx.add_typed_action_view(|_| {
                     nexshell::menu::Menu::new()
                         .with_drop_shadow()
@@ -1943,7 +1937,7 @@ impl View for RootView {
             .get(self.active_tab_index)
             .map_or(false, |t| matches!(t.kind, TerminalSessionKind::Rdp))
         {
-            // RDP：整页，无侧栏（照 ProcessList/CodeViewer 全页先例，不参与 split）。
+            // RDP：整页，无文件 / git / 概览侧栏，不参与 split。
             self.render_rdp_page(app)
         } else {
             let active_tab = self.terminal_tabs.get(self.active_tab_index);
@@ -1986,7 +1980,7 @@ impl View for RootView {
             .with_child(Expanded::new(1.0, body).finish())
             .finish();
 
-        // warp: workspace/view.rs:22848-22875 — 背景图片渲染
+        // 背景图片渲染（对照 warp workspace/view.rs 里 theme.background_image() 的处理）
         let theme_for_bg = &self.cached_warp_theme;
         let mut root = Stack::new().with_event_dispatch_mode(root_overlay_event_dispatch_mode());
         if let Some(img) = theme_for_bg.background_image() {
@@ -2063,7 +2057,7 @@ impl View for RootView {
                 None,
             )
             .finish();
-        // warp: view.rs:26674-26679 — 无背景图主题给根容器铺主题背景色兜底，
+        // 无背景图主题给根容器铺主题背景色兜底，
         // 否则 bootstrap 占位、面板滑动等未着色帧会透出桌面。
         if theme_for_bg.background_image().is_some() {
             root.add_child(main_layout);
@@ -2104,7 +2098,6 @@ impl View for RootView {
         if let Some((_tab_index, TabContextMenuAnchor::Pointer(position))) =
             self.show_tab_right_click_menu
         {
-            // warp/app/src/workspace/view.rs:22172-22187.
             root.add_positioned_overlay_child(
                 self.render_tab_right_click_menu(),
                 OffsetPositioning::offset_from_parent(
@@ -2117,7 +2110,7 @@ impl View for RootView {
         }
 
         if let Some(position) = self.show_terminal_context_menu {
-            // warp: view.rs:16543-16576 (show_context_menu)
+            // warp terminal/view/context_menu.rs 的 show_context_menu
             root.add_positioned_overlay_child(
                 self.render_terminal_context_menu(),
                 OffsetPositioning::offset_from_parent(
@@ -3186,7 +3179,6 @@ impl RootView {
         }
     }
 
-    // warp: workspace/view.rs:11886-11950
     fn close_terminal_tab(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
         // 未保存保护（ADR 0003）：dirty 的 CodeViewer 关闭前先弹确认，否则直接关。
         let needs_confirm = self.terminal_tabs.get(index).map_or(false, |t| {

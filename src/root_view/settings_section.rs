@@ -5,7 +5,7 @@
 // 故各 handler 取 owned 形参（String / Copy enum），调用方传 *choice / name.clone() 等。
 // 设置页主体渲染在独立 crate::settings_view 模块，render_settings_page 仅薄委托。
 // 横切/infra（save_ui_settings 持久化、set_terminal_font_size 字号、apply_window_opacity 透明度）
-// 留 main.rs，本文件跨文件 self.xxx() / Self::xxx() 调用。
+// 留 root_view/mod.rs，本文件跨文件 self.xxx() / Self::xxx() 调用。
 
 use crate::external_editor::EditorChoice;
 use crate::settings_view;
@@ -53,7 +53,7 @@ impl RootView {
         )
     }
 
-    // warp/app/src/workspace/view.rs:8282-8413 user_menu_items
+    // warp workspace/view.rs 的 user_menu_items
     fn settings_menu_items() -> Vec<nexshell::menu::MenuItem<TerminalGridAction>> {
         use nexshell::menu::MenuItemFields;
         vec![
@@ -312,7 +312,7 @@ impl RootView {
         ctx.notify();
     }
 
-    // warp: appearance_page.rs:2268-2271
+    // warp: appearance_page.rs 的 toggle_all_available_fonts
     pub(in crate::root_view) fn handle_toggle_view_all_fonts(
         &mut self,
         ctx: &mut ViewContext<Self>,

@@ -693,7 +693,7 @@ impl RootView {
     }
 
     /// 动态分辨率检测定时器（~100ms tick）：内容区尺寸稳定 ~400ms 且换算 ≠ 当前会话分辨率
-    /// 时向会话发 resize 请求（防抖在 ResizeDebounce）。无已连接 RDP tab 即停表。
+    /// 时向会话发 resize 请求（防抖在 ResizeDebounce）。无可轮询的 RDP tab（已连接 + EGFX + 非固定分辨率）即停表。
     fn schedule_rdp_resize_tick(ctx: &mut ViewContext<Self>) {
         ctx.spawn(Timer::after(Duration::from_millis(100)), |me, _, ctx| {
             // 与下方循环同一门槛：固定分辨率 / 非 EGFX 的 tab 不参与轮询，全都不需要就停表。

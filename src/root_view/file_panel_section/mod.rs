@@ -5,7 +5,7 @@
 //
 // 切分：
 // - mod.rs   ：面板 chrome（shell / divider / header / input_bar）+ worker 数据装配 + 入口判定
-//              + 文件 / git 面板滑动收尾（落闸、切标签落定）
+//              + 文件 / git / 概览面板滑动收尾（落闸、切标签落定）
 // - body.rs  ：列表 / 目录树 / 远程目录 / 传输任务区渲染
 // - actions.rs：handle_* action handler + inline 输入编辑器 + 上传/下载/reveal
 
@@ -137,13 +137,13 @@ impl RootView {
 
     /// 左缘拖拽条：透明命中区域。Hoverable 提供 ResizeLeftRight 光标 + cursor 反馈，
     /// EventHandler 只接 mouse_down 起 anchor。dragged/up 由 RootView 根 EventHandler
-    /// 全局接收，避免鼠标超出 6px 命中区时事件丢失（参考 warp pane_group/mod.rs:7943
+    /// 全局接收，避免鼠标超出 6px 命中区时事件丢失（参考 warp pane_group/mod.rs 的 render（外层 EventHandler）
     /// 在外层包 dragged 的同样目的）。
     fn render_file_panel_divider(&self) -> Box<dyn Element> {
         // warpui::Draggable 提供"按住-离开元素也持续派发"的 capture flow
         // （ui_components/slider.rs 同款）。EventHandler.on_mouse_dragged 是 hit-test
         // 派发，鼠标移出 6px 命中区就停了。
-        // Draggable 在 mouse_down 时硬写 set_cursor(PointingHand)（draggable.rs:611），
+        // Draggable 在 mouse_down 时硬写 set_cursor(PointingHand)（draggable.rs 的 mouse_down 处理），
         // 所以 on_drag_start / on_drag 里用更高 z 的 Overlay 覆盖回 ResizeLeftRight。
         let drag_state = self.file_panel_divider_drag_state.clone();
         Hoverable::new(self.file_panel_divider_state.clone(), move |_mouse| {

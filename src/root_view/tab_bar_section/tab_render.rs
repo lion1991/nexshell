@@ -130,10 +130,10 @@ impl RootView {
             ColorU::from(AnsiColorIdentifier::Red.to_ansi_color(&terminal_colors))
         });
 
-        // warp tab.rs:1458 — SavePosition ID for the draggable tab.
+        // warp tab.rs 的 draggable tab SavePosition ID。
         let tab_position_id = format!("nexshell_tab_position_{index}");
         let tab_position_id_for_close = tab_position_id.clone();
-        // warp tab.rs:922 — tooltip 定位锚点 ID
+        // warp tab.rs 的 tab_text_position_id：tooltip 定位锚点 ID
         let tab_text_position_id = format!("nexshell_tab_text_{index}");
         let tab_text_position_id_for_tooltip = tab_text_position_id.clone();
 
@@ -178,7 +178,7 @@ impl RootView {
                 tab_border_inactive
             };
 
-            // warp tab.rs:1272-1275 — SavePosition 包裹文字用于 tooltip 定位
+            // warp tab.rs — SavePosition 包裹文字用于 tooltip 定位
             let tab_content = if is_tab_being_renamed {
                 Align::new(
                     TextInput::new(
@@ -244,7 +244,7 @@ impl RootView {
             .with_horizontal_padding(TAB_CONTENT_HORIZONTAL_PADDING)
             .finish();
 
-            // warp tab.rs:1295-1313 — compact tab switches to icon-only
+            // warp tab.rs — compact tab switches to icon-only
             // below COMPACT_TAB_WIDTH_THRESHOLD.
             // 紧凑模式没地方放红点，改为按相位把终端图标染红。
             let compact_icon_color = if let Some(red) = offline_red {
@@ -270,7 +270,7 @@ impl RootView {
             )
             .finish();
 
-            // warp tab.rs:1371-1407 — close button is overlaid on full
+            // warp tab.rs — close button is overlaid on full
             // tabs, and only on the active tab in compact mode.
             let close_action = if is_settings {
                 TerminalGridAction::CloseSettingsTab
@@ -397,7 +397,6 @@ impl RootView {
                 .finish();
 
                 let mut stack = Stack::new().with_child(base);
-                // warp tab.rs:1594-1603
                 stack.add_positioned_overlay_child(
                     tooltip,
                     OffsetPositioning::offset_from_save_position_element(
@@ -415,7 +414,7 @@ impl RootView {
         .with_hover_in_delay(Duration::from_millis(500));
 
         let constrained_tab = match TabWidthConstraint::from_hover_width(hover_fixed_width) {
-            // warp tab.rs:1647-1656 — fixed width while close hover is
+            // warp tab.rs — fixed width while close hover is
             // active; otherwise each tab can shrink from max width 200.
             TabWidthConstraint::Fixed(width) => ConstrainedBox::new(tab_with_tooltip.finish())
                 .with_width(width)
@@ -440,7 +439,7 @@ impl RootView {
             })
             .with_drag_axis(DragAxis::HorizontalOnly)
             .finish();
-        // warp tab.rs:1673-1678 — save the draggable tab position and
+        // warp tab.rs — save the draggable tab position and
         // make the whole tab participate in flex shrinking.
         let full_tab = SavePosition::new(tab_with_drag, &tab_position_id).finish();
         Shrinkable::new(1.0, full_tab).finish()

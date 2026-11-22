@@ -65,7 +65,7 @@ impl RootView {
         app: &AppContext,
     ) -> Box<dyn Element> {
         let bar_contents = ConstrainedBox::new(
-            // warp/app/src/workspace/view.rs:17539-17549:
+            // warp workspace/view.rs 的 render_tab_bar：
             // whole tab bar is a drop target after the last tab.
             DropTarget::new(
                 self.render_tab_bar_contents(tabs, app),
@@ -79,8 +79,7 @@ impl RootView {
         .finish();
 
         let tab_bar_container = Container::new(
-            // warp/app/src/workspace/view.rs:17555-17566:
-            // EventHandler wraps Clipped(render_tab_bar_hoverable(contents)).
+            // 同 warp render_tab_bar：EventHandler wraps Clipped(render_tab_bar_hoverable(contents)).
             EventHandler::new(Clipped::new(self.render_tab_bar_hoverable(bar_contents)).finish())
                 .on_back_mouse_down(move |ctx, _app, _position| {
                     ctx.dispatch_typed_action(TerminalGridAction::ActivatePrevTab);
@@ -99,12 +98,11 @@ impl RootView {
         )
         .finish();
 
-        // warp/app/src/workspace/view.rs:17574-17584 saves TAB_BAR_POSITION_ID.
+        // 同 warp render_tab_bar，存 TAB_BAR_POSITION_ID。
         SavePosition::new(tab_bar_container, TAB_BAR_POSITION_ID).finish()
     }
 
     fn render_tab_bar_hoverable(&self, content: Box<dyn Element>) -> Box<dyn Element> {
-        // warp/app/src/workspace/view.rs:16946-16953.
         Hoverable::new(self.tab_bar_hover_state.clone(), |_| content)
             // 关标签后冻结的宽度：鼠标没经过新补位的关闭按钮就离开时，在这里兜底解冻。
             .on_hover(|is_hover, ctx, _, _| {
@@ -170,7 +168,7 @@ impl RootView {
         bar_row.add_child(new_tab_button);
         bar_row
             .add_child(Shrinkable::new(0.5, Align::new(Empty::new().finish()).finish()).finish());
-        // warp view.rs:17462-17465 settings button 在 shrinkable 之后。
+        // settings 按钮放在 shrinkable 之后（同 warp render_tab_bar_contents）。
         bar_row.add_child(file_panel_button);
         bar_row.add_child(git_panel_button);
         bar_row.add_child(overview_panel_button);
@@ -570,7 +568,7 @@ impl RootView {
         .finish()
     }
 
-    // warp/app/src/workspace/view.rs:17617-17758 render_new_session_button:
+    // warp workspace/view.rs 的 render_new_session_button：
     // 复合按钮 = [Plus button] + [ChevronDown menu button],
     // 整体外层圆角 4，左半 with_left 圆角，右半 with_right 圆角；
     // 外层 hover 时整体提亮 (neutral_1)，内半 hover 时各自再提亮 (neutral_2)。
