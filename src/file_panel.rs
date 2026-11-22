@@ -170,9 +170,6 @@ pub struct TransferProgress {
     pub transferred: u64,
 }
 
-// 旧名兼容：上传场景沿用历史命名
-pub type UploadProgress = TransferProgress;
-
 /// Worker → UI 的事件。
 #[derive(Clone, Debug)]
 pub enum SftpEvent {
@@ -1727,7 +1724,7 @@ async fn run_upload(
         while let Some(ev) = prog_rx.recv().await {
             if let crate::sftp_ops::TransferEvent::Progress { transferred } = ev {
                 let _ = evt_tx_progress
-                    .send(SftpEvent::UploadProgress(UploadProgress {
+                    .send(SftpEvent::UploadProgress(TransferProgress {
                         transfer_id,
                         file_name: name_progress.clone(),
                         total,
@@ -1837,7 +1834,7 @@ async fn run_upload_dir(
         while let Some(ev) = prog_rx.recv().await {
             if let crate::sftp_ops::TransferEvent::Progress { transferred } = ev {
                 let _ = evt_tx_progress
-                    .send(SftpEvent::UploadProgress(UploadProgress {
+                    .send(SftpEvent::UploadProgress(TransferProgress {
                         transfer_id,
                         file_name: name_progress.clone(),
                         total,
