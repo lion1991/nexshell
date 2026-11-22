@@ -4511,7 +4511,7 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(runs[0].cols, 2);
         assert_eq!(&*runs[1].text, "好");
         assert_eq!(runs[1].cols, 2);
-        // Total visible text spans 4 cells.
+        // 整行 20 列：4 列文字（你好）+ 16 个单列空 run。
         let total: usize = runs.iter().map(|r| r.cols).sum();
         assert_eq!(total, 20);
     }
@@ -4570,8 +4570,7 @@ Inter-|   Receive                                                |  Transmit
         let cleared = runtime.snapshot();
         assert!(cleared.marked_text.is_none());
 
-        // Empty marked text is treated as "clear" — matches Warp's
-        // `replace_and_mark_text_in_range` behaviour for empty `new_text`.
+        // 空串视为清除。
         runtime.set_marked_text(String::new(), 0..0);
         assert!(runtime.snapshot().marked_text.is_none());
     }

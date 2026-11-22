@@ -1,7 +1,5 @@
-// 标题栏的实际渲染高度（main.rs `title_bar` 用 `.h(px(36.0))`）。
-// 这个常量喂给 `ShellLayout`，进而决定 `terminal_host.y`，
-// 鼠标坐标解算靠它把窗口坐标换算成 cell 行号。两边对不上时，
-// 选择跨行时会出现“稍稍上移就跳到上一行”的偏移。
+// 旧 native shell 布局（`ShellLayout`）用的标题栏高度，与 main.rs 的 TITLE_BAR_HEIGHT 无关；
+// 喂给 `ShellLayout` 决定 `terminal_host.y`。
 pub const TITLE_BAR_HEIGHT: u32 = 36;
 pub const ACTIVITY_RAIL_WIDTH: u32 = 70;
 pub const TAB_BAR_HEIGHT: u32 = 52;

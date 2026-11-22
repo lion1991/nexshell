@@ -106,31 +106,31 @@ const DEFAULT_WINDOW_HEIGHT: f32 = 768.0;
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 30;
 
-// warp tab.rs:529 TAB_BAR_HEIGHT = 34。
+// warp workspace/view.rs TAB_BAR_HEIGHT = 34。
 const TITLE_BAR_HEIGHT: f32 = 34.0;
 const TITLE_BAR_BORDER_HEIGHT: f32 = 1.0;
 const TRAFFIC_LIGHT_RESERVED_WIDTH: f32 = 80.0;
 const TAB_BAR_PADDING_LEFT: f32 = 4.0;
 const TAB_BAR_PADDING_RIGHT: f32 = 8.0;
 const WINDOWS_WINDOW_CONTROL_BUTTON_WIDTH: f32 = 46.0;
-// warp buttons.rs:73-74 ICON_DIMENSIONS=24, padding=4 → icon 区 16x16。
+// warp_core ui/icons.rs ICON_DIMENSIONS=24, padding=4 → icon 区 16x16。
 const ICON_BUTTON_SIZE: f32 = 24.0;
 const ICON_BUTTON_PADDING: f32 = 4.0;
-// warp view.rs:17146 最后一个 left toolbar button margin_right(8.)。
+// warp workspace/view.rs 最后一个 left toolbar button 的 margin_right(8.)。
 const SIDEBAR_TOGGLE_MARGIN_RIGHT: f32 = 8.0;
-// warp view.rs:17619-17622: BUTTON_HEIGHT=24, SIDE_MENU_WIDTH=16, BUTTON_WIDTH=24+16, BUTTON_LEFT_MARGIN=4。
+// warp workspace/view.rs 新建标签按钮区：BUTTON_HEIGHT=24, SIDE_MENU_WIDTH=16, BUTTON_WIDTH=24+16, BUTTON_LEFT_MARGIN=4。
 const NEW_TAB_BUTTON_HEIGHT: f32 = 24.0;
 const NEW_TAB_PLUS_WIDTH: f32 = 24.0;
 const NEW_TAB_CHEVRON_WIDTH: f32 = 16.0;
 const NEW_TAB_BUTTON_LEFT_MARGIN: f32 = 4.0;
-// Warp tab.rs:1280 horizontal_padding(8.)。
+// Warp tab.rs 标签内容 horizontal_padding(8.)。
 const TAB_CONTENT_HORIZONTAL_PADDING: f32 = 8.0;
-// Warp tab.rs:1419 vertical_padding(2.)。
+// Warp tab.rs 标签 vertical_padding(2.)。
 const TAB_VERTICAL_PADDING: f32 = 2.0;
-// Warp tab.rs:67 / 75。
+// Warp tab.rs TAB_CLOSE_BUTTON_WIDTH / TAB_CLOSE_BUTTON_HORIZONTAL_INSET。
 const TAB_CLOSE_BUTTON_WIDTH: f32 = 20.0;
 const TAB_CLOSE_BUTTON_HORIZONTAL_INSET: f32 = 2.0;
-// warp_core/src/ui/appearance.rs:12 DEFAULT_UI_FONT_SIZE = 12.0。
+// warp_core ui/appearance.rs DEFAULT_UI_FONT_SIZE = 12.0。
 const UI_FONT_SIZE: f32 = 12.0;
 const WARP_2_TAB_COLOR_OPACITY: u8 = 25;
 const WARP_2_HOVERED_TAB_COLOR_OPACITY: u8 = 50;
@@ -455,7 +455,7 @@ impl HostFleetSyncDebounce {
     }
 }
 
-/// RDP 整页 tab 的连接状态三态（连接中 / 已连接渲染帧 / 已断开）。
+/// RDP 整页 tab 的连接阶段（连接中 / 已连接 / 自动重连中 / 已断开 / 证书待确认）。
 enum RdpConnectionPhase {
     Connecting,
     Connected,
@@ -491,7 +491,7 @@ impl RdpConnectionPhase {
 /// RDP 会话随 tab 生命周期存活的状态。drop = 断开（RdpSessionHandle::Drop 优雅关闭），
 /// 关 tab 时随 TerminalSessionTab 一并 drop，不走终端 shutdown 路径。
 struct RdpTabState {
-    /// 协议层句柄（framebuffer / 帧事件 / 输入通道占位）。
+    /// 协议层句柄（framebuffer / 帧事件 / 输入通道）。
     handle: nexshell::rdp_session::RdpSessionHandle,
     /// 重连用连接参数（分辨率连接时定一次，重连沿用同一分辨率）。
     config: nexshell::rdp_session::RdpSessionConfig,
@@ -503,7 +503,7 @@ struct RdpTabState {
     has_frame: bool,
     /// 远端桌面尺寸，按 Resized 事件跟踪，UI 线程不锁 framebuffer。
     desktop_size: (u16, u16),
-    /// 当前 letterbox 几何（Element 每帧回写），第 ④ 步鼠标→远端坐标反算用。
+    /// 当前 letterbox 几何（Element 每帧回写），鼠标→远端坐标反算用。
     viewport: std::sync::Arc<std::sync::Mutex<Option<rdp_view::RdpViewport>>>,
     /// 上次发往远端的鼠标坐标；相同则不重发 MouseMove（Element 每帧重建，故存共享层）。
     /// 拖窗时 AppKit 会持续投递重复/近重复 LeftMouseDragged，去重防窗口在移动循环里抖动。
@@ -906,8 +906,8 @@ fn register_warp_text_input_stack(ctx: &mut AppContext) {
     // CodeEditorView 自己的 action 键绑定（方向键/退格/删除/选择等）；可编辑后必需，
     // 单行 editor::init 不含（ADR 0003）。否则只有 IME 字符输入可用、方向键/功能键全失效。
     nexshell::code_editor::init_code_editor_view(ctx);
-    // 查找栏键盘导航（cmd-g / cmd-shift-G 跳下一处/上一处）：warp 在 lib.rs:1707 独立调用
-    // find::view::init（与 init_code_editor_view 是两个 init），解耦时漏调，致快捷键失效。
+    // 查找栏键盘导航（cmd-g / cmd-shift-G 跳下一处/上一处）：warp 在 app/src/lib.rs 的初始化里独立调用
+    // code::editor::find::view::init（与 init_code_editor_view 是两个 init），解耦时漏调，致快捷键失效。
     nexshell::code_editor::find::view::init(ctx);
 }
 
@@ -1140,7 +1140,7 @@ fn main() -> Result<()> {
         });
     }));
 
-    // 点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）
+    // 非 macOS（及 macOS 非主窗口）点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）；macOS 主窗口见下
     callbacks.on_should_close_window = Some(Box::new(move |window_id, ctx| {
         // macOS 主窗口的 X 只隐藏 App、保留会话，退出走菜单 / Dock（ADR 0022）。
         #[cfg(target_os = "macos")]
@@ -1277,7 +1277,7 @@ fn main() -> Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        // 对齐 warp（lib.rs:1037）：设 AppUserModelID（用 nexshell 自己的 bundle id），
+        // 对齐 warp app/src/lib.rs 的 set_app_user_model_id：设 AppUserModelID（用 nexshell 自己的 bundle id），
         // Windows 任务栏据此正确分组窗口 / 取应用图标 / 归集跳转列表与通知。
         use warpui::platform::windows::AppBuilderExt;
         app_builder.set_app_user_model_id("com.matt.nexshell".to_string());

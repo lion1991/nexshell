@@ -77,7 +77,7 @@ pub enum TransferEvent {
     Failed { error: String },
 }
 
-/// 分块大小：32 KiB。SFTP 协议单包最大 32768 字节，再大会被服务端拒。
+/// 分块大小：32 KiB。这是各 SFTP 服务端都应支持的保守包长，更大块在个别服务端上可能被拒。
 const CHUNK_SIZE: usize = 32 * 1024;
 
 pub async fn list_dir(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>, String> {

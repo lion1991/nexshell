@@ -234,7 +234,7 @@ fn guess_type_from_text(content: &str) -> String {
     }
 }
 
-// 推导 openssh 公钥（详情页展示 / 后续 copy-to-server 用）；加密无口令则 None。
+// 推导 openssh 公钥（详情页展示 / 复制到服务器用）；加密无口令则 None。
 pub fn derive_public_key(content: &str, passphrase: Option<&str>) -> Option<String> {
     use russh::keys::PublicKeyBase64;
     let key = decode(content, passphrase)?;
