@@ -1216,7 +1216,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：整组是模块文档注释，另含对现状的说明；归 B 是因为「保持旧名零改动」是在为保留兼容层辩护
 - 决定：记待办
 - 拍板备注：待办内容：把 233 处 `UiColors` / `HostOverviewColors` 改成 design_tokens 的 `ChromeColors` / `OverviewColors`，删掉 `ui_colors.rs`。纯改名，挑没有并行分支的时候做。
-- 完成：
+- 完成：2026-11-22（T-003）
 
 ### C 过期的「为什么」
 
