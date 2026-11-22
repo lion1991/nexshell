@@ -206,11 +206,11 @@
 
 ## rdp-1（6）
 
-已清理：2026-11-22（删 6 条，跳过 0 条；工具依赖 0 条）
+已清理：2026-11-22（删 5 条，跳过 1 条：字段含义 1，先删后恢复；工具依赖 0 条）
 
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
-| `src/rdp_session/clipboard/dib.rs` | 27 | `bitmap_to_dib` | // BI_RGB |  |
+| `src/rdp_session/clipboard/dib.rs` | 27 | `bitmap_to_dib` | // BI_RGB | 保留（字段含义：0u32 是 biCompression = BI_RGB；2026-11-22 删后恢复） |
 | `src/rdp_session/egfx/surfaces.rs` | 154 | `Compositor` | // ---- 生命周期 ---- |  |
 | `src/rdp_session/egfx/surfaces.rs` | 228 | `Compositor` | // ---- 写入 ---- |  |
 | `src/rdp_session/egfx/surfaces.rs` | 386 | `Compositor` | // ---- surface / cache 操作 ---- |  |

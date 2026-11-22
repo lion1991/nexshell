@@ -24,7 +24,7 @@ pub(super) fn bitmap_to_dib(bitmap: &Bitmap) -> Option<Vec<u8>> {
     out.extend_from_slice(&i32::try_from(bitmap.height).ok()?.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
     out.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
-    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
     out.extend_from_slice(&u32::try_from(size).ok()?.to_le_bytes());
     out.extend_from_slice(&[0; 16]); // X/Y 分辨率、clrUsed、clrImportant
     for line in bitmap.bgra[..size].chunks_exact(row).rev() {
