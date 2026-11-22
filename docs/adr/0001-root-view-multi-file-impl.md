@@ -581,11 +581,7 @@ fn handle_action(&mut self, action: TerminalGridAction, ctx: &mut ViewContext<Se
 | 150 | `GitCommitConfirm` | git_panel | |
 | 151 | `GitCommitDiscard` | git_panel | |
 | 152 | `GitPushConfirm` | git_panel | |
-| 153 | `ToggleSettingsMenu` | settings | 与 SettingsMenuWhatsNew/Documentation/Feedback/ViewLogs 同组，按菜单内容归 settings |
-| 154 | `SettingsMenuWhatsNew` | settings | |
-| 155 | `SettingsMenuDocumentation` | settings | |
-| 156 | `SettingsMenuFeedback` | settings | |
-| 157 | `SettingsMenuViewLogs` | settings | |
+| 153 | `ToggleSettingsMenu` | settings | 按菜单内容归 settings（154-157 四个占位项已于 2026-11-22 删除，见 comment-cleanup B-008） |
 | 158 | `ShowSettings` | settings | |
 | 159 | `ShowSettingsKeybindings` | settings | |
 | 160 | `CloseSettingsTab` | settings | |
