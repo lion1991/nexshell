@@ -82,7 +82,7 @@ Plan: [实施计划](../plans/2026-09-29-rdp-clipboard.md)
 7. **Mac 文件 → 远端**：
    - 本端声明 `STREAM_FILECLIP_ENABLED | FILECLIP_NO_FILE_PATHS | CAN_LOCK_CLIPDATA | HUGE_FILE_SUPPORT_ENABLED`。
    - 服务端来 FileContents 请求时按范围读本地文件，读取不占事件循环。
-8. **⌘C / ⌘X / ⌘V 转为 Ctrl 组合**，参照 `useCommandKeyForClipboard`，可以关掉。
+8. **⌘C / ⌘X / ⌘V / ⌘A / ⌘Z 转为 Ctrl 组合**，参照 `useCommandKeyForClipboard`。常开，没有开关（`rdp_view/keymap.rs` 的 `COMMAND_AS_CTRL`）。⌘A / ⌘Z 是实施计划第 5 步加的。原文写的「可以关掉」一直没做，2026-11-22 按现状改写，不加开关。
 9. **逐主机剪贴板模式**：四档，与 `redirectclipboard` 相同，默认双向。
 
 ## 风险

@@ -24,7 +24,16 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
      - `src/view_components/action_button.rs`：488、700、703、712、735、787、807–810、837、927
      - `src/menu.rs`：423、428、436、1425、1599、1607
      - `src/time_format.rs`：5
-   - 这一条超出了交办的范围（附表本来默认全删），等 Matt 确认；确认前这 26 条先别删。
+   - 这一条超出了交办的范围（附表本来默认全删）。2026-11-22 Matt 让按建议办：26 条保留，各批次清理时已跳过。
+
+### 清理完 8 个批次后的收尾（2026-11-22，Matt 让按建议办）
+
+- **dib.rs 的 `// BI_RGB`：恢复。** 附表把它判成 A，但它是字段含义（`0u32` 是 biCompression），同组的 biPlanes / biBitCount 注释都留着。
+- **RTT 采样 dup 的 fd 加 CLOEXEC：修。** B-050 审查时发现的老问题：会话期间起的子进程会继承这份 fd，旧 socket 关不掉。
+- **core-2 审查找到的死代码：删。** DirectPty 整条直连 PTY 路径（含 `TerminalSessionKind::Direct`）、`connect_command_for`、`load_host_management_snapshot()`；只有测试在用的 `create_draft_host_in_db_path`、`legacy_*` 样例改成 `#[cfg(test)]`。
+- **`history_suggester`（B-056）：删，不接线。** 连同输入框里画灰色补全的分支。要做历史补全另开需求。
+- **ADR 0016 决策 8：按代码现状改写，不加开关。** 否决「补一个开关」：没人要过，属于新功能。
+- **B-063 真机验证**：不是待决定的事，Matt 方便时在一台普通 Linux 和一台不支持 `posix-rename` 的设备上各保存一次远程文件。
 
 ### 真 bug 走哪条路
 
