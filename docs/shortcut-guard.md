@@ -21,10 +21,10 @@
 
 ## 范围
 
-NexShell 用到的语言里查 Rust、shell、YAML、TOML；`.m`（`warp_ime_shim.m`）、`.bat`、`.patch`、Markdown 不查，也不提示。语言捷径对 Rust 只有 `unwrap()` 一条：`tests/` 目录和 `#[cfg(test)]` 之后的代码算测试代码不查，`examples/` 照查。检查豁免只认注释形式的，Rust `#[allow(...)]` 这类属性不拦。不查：检查脚本所在目录 `.githooks/`（脚本与测试）、`docs/`、生成代码（头 5 行的注释里同时写有 generated 和 DO NOT EDIT，或写 `@generated`）、`testdata/`、`fixtures/`、`vendor/`、`*.snap`。
+NexShell 用到的语言里查 Rust、shell、YAML、TOML；`.m`（`warp_ime_shim.m`）、`.bat`、`.patch`、Markdown 不查，也不提示。语言捷径对 Rust 只有 `unwrap()` 一条：`tests/` 目录、`tests.rs` / `*_test.rs` / `*_tests.rs`，以及 `#[cfg(test)] mod x {`（含 `cfg(all(test, …))`）之后的代码算测试代码不查；只修饰单项的 `#[cfg(test)] use …` 不算，`examples/` 照查。检查豁免只认注释形式的，Rust `#[allow(...)]` 这类属性不拦。不查：检查脚本所在目录 `.githooks/`（脚本与测试）、`docs/`、生成代码（头 5 行的注释里同时写有 generated 和 DO NOT EDIT，或写 `@generated`）、`testdata/`、`fixtures/`、`vendor/`、`*.snap`。
 
 ## 启用与绕过
 
-本地启用：`git config core.hooksPath .githooks`，新克隆要各自执行一次。pre-push 查要推上去的新提交（推 main 查远端 main 之后的，其他分支查和 `origin/main` 分叉之后的，和 CI 一致），挡住 `git commit --no-verify` 之后直接推送。`git push --no-verify` 仍能绕过本地两道，CI（Forgejo 的 `go` runner）会再查一遍，但 CI 是推送之后才跑；要在服务端拦住，得在 Forgejo 给 main 开分支保护并把 shortcut-guard 设为必过。只推 GitHub（`origin`）不跑 CI。
+本地启用：`git config core.hooksPath .githooks`，新克隆要各自执行一次。pre-push 查要推上去的新提交（推 main 查远端 main 之后的，其他分支查和所推 remote 的 main 分叉之后的，和 CI 一致），挡住 `git commit --no-verify` 之后直接推送。`git push --no-verify` 仍能绕过本地两道，CI（Forgejo 的 `go` runner）会再查一遍，但 CI 是推送之后才跑；要在服务端拦住，得在 Forgejo 给 main 开分支保护并把 shortcut-guard 设为必过。只推 GitHub（`origin`）不跑 CI。
 
 回归用例：`python3 .githooks/test_check_shortcuts.py`。

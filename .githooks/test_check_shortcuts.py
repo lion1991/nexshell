@@ -320,6 +320,12 @@ class LanguageShortcuts(Case):
     def test_test_code_is_exempt(self):
         self.ok("tests/it.rs", "fn t() { s.parse::<i32>().unwrap(); }\n")
         self.ok("src/a.rs", "fn f() {}\n\n#[cfg(test)]\nmod tests {\n    fn t() { s.parse::<i32>().unwrap(); }\n}\n")
+        # 只修饰单项的 cfg(test) 不让后面的生产代码漏查；cfg(all(test, …)) 的模块、tests.rs 算测试代码
+        self.hit("src/a.rs", "#[cfg(test)] use std::fmt;\n#[cfg(test)]\nfn helper() {}\n\nfn f() { x.unwrap(); }\n", "rs-unwrap")
+        self.hit("src/a.rs", "#[cfg(not(test))]\nmod real {\n    fn f() { x.unwrap(); }\n}\n", "rs-unwrap")
+        self.ok("src/a.rs", "fn f() {}\n\n#[cfg(all(test, feature = \"x\"))]\n#[allow(dead_code)]\npub(crate) mod tests {\n    fn t() { x.unwrap(); }\n}\n")
+        self.ok("src/a.rs", "#[cfg(test)] mod tests {\n    fn t() { x.unwrap(); }\n}\n")
+        self.ok("src/rdp/tests.rs", "fn t() { x.unwrap(); }\n")
         self.ok("a_test.go", "package a\n\nfunc TestX(t *testing.T) {\n\tb, _ := json.Marshal(v)\n}\n")
         self.ok("tests/test_a.py", "try:\n    f()\nexcept:\n    pass\n")
         self.ok("a.spec.ts", "const x = y as any\n")

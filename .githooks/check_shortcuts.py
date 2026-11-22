@@ -72,9 +72,37 @@ def excluded(path, text, self_dir=None):
     return "@generated" in notes or bool(re.search(r"generated", notes, re.I) and re.search(r"DO NOT EDIT", notes, re.I))
 
 
+# cfg(test)、cfg(all(test, …))、cfg(all(unix, test))；not(test) 不算
+RS_CFG_TEST = re.compile(r"#\[cfg\(\s*(?:all\(\s*(?:[^()]*?,\s*)?)?test\s*[,)]")
+RS_MOD_BLOCK = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
+
+
+def rs_in_test_mod(lines, idx):
+    """第 idx 行是否在 #[cfg(test)] mod x { 之后：测试模块按惯例放在文件末尾，之后整段算测试代码。
+
+    只修饰单项的 #[cfg(test)] use …; / fn …（常在文件中间）不算，否则它后面的生产代码全部漏查。
+    """
+    for i in range(idx):
+        code = lines[i][0]
+        m = RS_CFG_TEST.search(code)
+        if not m:
+            continue
+        rest = code[code.find("]", m.end() - 1) + 1:].strip()
+        j = i
+        while not rest or rest.startswith("#["):
+            j += 1
+            if j >= idx:
+                break
+            rest = lines[j][0].strip()
+        if RS_MOD_BLOCK.match(rest):
+            return True
+    return False
+
+
 def is_test_path(path):
     base = os.path.basename(path)
-    return bool(base.endswith(("_test.go", "_test.py")) or re.match(r"test_.*\.py$", base) or base == "conftest.py"
+    return bool(base.endswith(("_test.go", "_test.py", "_test.rs", "_tests.rs")) or base == "tests.rs"
+                or re.match(r"test_.*\.py$", base) or base == "conftest.py"
                 or re.search(r"\.(test|spec)\.[cm]?[jt]sx?$", base)
                 or any(p in ("tests", "test", "__tests__") for p in path.split("/")[:-1]))
 
@@ -489,7 +517,7 @@ def check_code(path, lines, idx, ids, go_typed, raw=""):
         hits.append(("test-skip", "跳过测试要写原因：「@unittest.skip(\"原因\")」「pytest.mark.skip(reason=\"原因\")」；能修好的别跳过"))
     if ext in JS_FAMILY and re.search(r"\b(it|test|describe)\.(skip|todo)\(|\bx(it|describe|test)\(", s):
         hits.append(("test-skip", "跳过或占位的测试要写原因：行尾写「// shortcut-ok: <原因>」，没写完的用待办编号；能修好的别跳过"))
-    if is_test_path(path) or (ext == ".rs" and any("#[cfg(test)]" in l[0] for l in lines[:idx])):
+    if is_test_path(path) or (ext == ".rs" and rs_in_test_mod(lines, idx)):
         return hits  # 以下是语言捷径，测试代码不查
     if ext == ".go" and (go_blank_text(s) if go_typed is None else go_typed):
         hits.append(("go-blank", GO_FIX))
