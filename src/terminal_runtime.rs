@@ -11,7 +11,7 @@ use std::{
         Arc,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use parking_lot::FairMutex;
@@ -21,6 +21,9 @@ use crate::foreground_kind::ForegroundKind;
 use crate::osc7::parse_osc7_payload;
 use crate::pty_event_loop;
 use crate::pty_event_loop::{EventLoopHandle, Message, PtyEvent, PtySink};
+use crate::ssh_connect_progress::{
+    ssh_connect_banner, ssh_connect_banner_text, SshConnectProgress, SshConnectStage,
+};
 use crate::ssh_password_prompt::{PasswordInput, PasswordLineEditor};
 use crate::ssh_session::{
     self, ChannelRequest, SshConnectError, SshConnectOptions, SshHandle, SshHostKeyMismatch,
@@ -195,6 +198,8 @@ pub struct TerminalRuntimeSnapshot {
     pub bootstrapped: bool,
     /// 占位 "Starting {name}..." 显示名。
     pub shell_display_name: Option<String>,
+    /// SSH 连接中（UI 盖过渡动画层）；连上、失败或需要用户输入时为 None。
+    pub connect_progress: Option<SshConnectProgress>,
     /// Monotonic counter incremented every time the alacritty grid emits
     /// `Event::Bell`. The UI watches it for visual flash; using a counter
     /// avoids `Instant`'s lack of `Eq`/`Hash` and lets us survive snapshot
@@ -2364,6 +2369,10 @@ struct TerminalRuntimeState {
     osc7_scan_buf: Vec<u8>,
     /// 录制中为 Some；process_output 旁路 raw bytes 进去。
     recorder: Option<TerminalRecorder>,
+    /// SSH 连接过渡层状态（ssh_connect_progress）。
+    connect_progress: Option<SshConnectProgress>,
+    /// 过渡层已交还终端：之后的阶段直接写文字横幅。
+    connect_overlay_released: bool,
 }
 
 impl TerminalRuntimeState {
@@ -2408,6 +2417,46 @@ impl TerminalRuntimeState {
             herdr_cwd: None,
             osc7_scan_buf: Vec::new(),
             recorder: None,
+            connect_progress: None,
+            connect_overlay_released: false,
+        }
+    }
+
+    /// 进入新的连接阶段：过渡层还在就只更新状态，已交还终端就写文字横幅。
+    fn set_connect_stage(&mut self, stage: SshConnectStage, target: &str) {
+        let now = Instant::now();
+        if self.connect_overlay_released {
+            self.process_output(ssh_connect_banner(stage, target).as_bytes());
+            return;
+        }
+        match &mut self.connect_progress {
+            Some(progress) => progress.advance(stage, now),
+            None => {
+                let mut progress = SshConnectProgress::new(target.to_string(), now);
+                progress.advance(stage, now);
+                self.connect_progress = Some(progress);
+            }
+        }
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// 需要用户在终端里输入或连接失败：撤掉过渡层，写回当前阶段的文字横幅。
+    fn release_connect_overlay(&mut self) {
+        if self.connect_overlay_released {
+            return;
+        }
+        self.connect_overlay_released = true;
+        if let Some(progress) = self.connect_progress.take() {
+            self.process_output(ssh_connect_banner(progress.stage, &progress.target).as_bytes());
+            self.revision = self.revision.wrapping_add(1);
+        }
+    }
+
+    /// 连上了：撤掉过渡层（不写横幅，随后清屏交给 shell）。
+    fn finish_connect_overlay(&mut self) {
+        self.connect_overlay_released = true;
+        if self.connect_progress.take().is_some() {
+            self.revision = self.revision.wrapping_add(1);
         }
     }
 
@@ -2455,6 +2504,7 @@ impl TerminalRuntimeState {
             title: self.title.clone(),
             bootstrapped: self.bootstrapped,
             shell_display_name: self.shell_display_name.clone(),
+            connect_progress: self.connect_progress.clone(),
             bell_pulse: self.bell_pulse,
             find_pulse: self.find_pulse,
             find_query: self.find_query.clone(),
@@ -2687,6 +2737,8 @@ impl PtySink for TerminalRuntimeState {
     }
 
     fn mark_disconnected(&mut self, status: String) {
+        // 失败时把过渡层换回文字横幅，断开原因横幅上面还能看到连的是谁、卡在哪一步。
+        self.release_connect_overlay();
         self.connected = false;
         self.status = status;
         self.revision = self.revision.wrapping_add(1);
@@ -3021,6 +3073,15 @@ impl LocalTerminalRuntime {
         // 没有 marker 时 bootstrapped 永远 false → 一直占位，不能这样。
         // 临时方案：远端 spawn 即视为 bootstrap 完成（直接连上就开始接受用户输入）。
         runtime_state.bootstrapped = true;
+        // 第一帧就盖上过渡层，免得先闪一下空终端和光标。
+        let target = format!(
+            "{}@{}:{}",
+            config.username.trim(),
+            config.host.trim(),
+            config.port
+        );
+        runtime_state.set_connect_stage(SshConnectStage::Tcp, &target);
+        runtime_state.process_output(b"\x1b[?25l");
         let state = Arc::new(FairMutex::new(runtime_state));
         let (wakeup_tx, wakeup_rx) = async_channel::bounded::<()>(1);
         let (event_tx, event_rx) = async_channel::unbounded::<PtyEvent>();
@@ -3136,6 +3197,8 @@ impl LocalTerminalRuntime {
                 herdr_cwd: None,
                 osc7_scan_buf: Vec::new(),
                 recorder: None,
+                connect_progress: None,
+                connect_overlay_released: false,
             })),
             event_loop: None,
             remote_event_loop: None,
@@ -4083,23 +4146,7 @@ async fn run_remote_ssh_event_loop(
     let username = config.username.trim().to_string();
     let target = format!("{username}@{host}:{}", config.port);
 
-    // 连接阶段 banner 写入终端 grid
-    let banner = |state: &Arc<FairMutex<TerminalRuntimeState>>,
-                  wakeup: &async_channel::Sender<()>,
-                  step: &str,
-                  detail: &str| {
-        // \x1b[2J 清屏, \x1b[3J 清 scrollback, \x1b[H 归位, \x1b[?25l 隐藏光标
-        let mut buf = String::from("\x1b[2J\x1b[3J\x1b[H\x1b[?25l\r\n");
-        // 标题: 青色粗体
-        buf.push_str("  \x1b[1;36m⟐ NexShell SSH\x1b[0m\r\n\r\n");
-        // 目标: 白色
-        buf.push_str(&format!("  \x1b[37m  {detail}\x1b[0m\r\n\r\n"));
-        // 当前步骤: 黄色 + 旋转符号
-        buf.push_str(&format!("  \x1b[33m◌ {step}...\x1b[0m\r\n"));
-        remote_process_output(state, wakeup, buf.as_bytes());
-    };
-
-    banner(&state, &wakeup_tx, "正在建立 TCP 连接", &target);
+    remote_set_connect_stage(&state, &wakeup_tx, SshConnectStage::Tcp, &target);
     remote_update_status(&state, &wakeup_tx, format!("connecting SSH: {target}"));
 
     if shutdown.load(Ordering::Relaxed) {
@@ -4150,11 +4197,10 @@ async fn run_remote_ssh_event_loop(
                     return;
                 }
                 host_key_replaced = true;
-                banner(
+                remote_process_output(
                     &state,
                     &wakeup_tx,
-                    "已信任新主机密钥，正在重新连接",
-                    &target,
+                    ssh_connect_banner_text("已信任新主机密钥，正在重新连接", &target).as_bytes(),
                 );
             }
             Ok(Err(error)) => {
@@ -4179,7 +4225,7 @@ async fn run_remote_ssh_event_loop(
         return;
     }
 
-    banner(&state, &wakeup_tx, "正在进行身份验证", &target);
+    remote_set_connect_stage(&state, &wakeup_tx, SshConnectStage::Auth, &target);
     remote_update_status(&state, &wakeup_tx, format!("authenticating SSH: {target}"));
 
     let auth_timeout_secs = u64::from(config.auth_timeout.clamp(10, 120));
@@ -4249,7 +4295,7 @@ async fn run_remote_ssh_event_loop(
     // try_send 失败也无所谓：UI 没在等就丢掉（bounded(1)，正常情况下不会满）。
     let _ = ssh_handle_tx.try_send(session.handle());
 
-    banner(&state, &wakeup_tx, "正在打开远程终端", &target);
+    remote_set_connect_stage(&state, &wakeup_tx, SshConnectStage::Shell, &target);
     remote_update_status(&state, &wakeup_tx, format!("opening SSH PTY: {target}"));
 
     if let Err(error) = session.request_pty(u32::from(cols), u32::from(rows)).await {
@@ -4269,7 +4315,8 @@ async fn run_remote_ssh_event_loop(
         return;
     };
 
-    // 连接成功: 清屏 + 清 scrollback + 恢复光标
+    // 连接成功: 撤掉过渡层，清屏 + 清 scrollback + 恢复光标
+    state.lock().finish_connect_overlay();
     remote_process_output(&state, &wakeup_tx, b"\x1b[2J\x1b[3J\x1b[H\x1b[?25h");
     remote_update_status(&state, &wakeup_tx, format!("connected SSH: {target}"));
 
@@ -4418,6 +4465,8 @@ async fn remote_password_auth(
         return Ok(());
     }
 
+    // 要在终端里输密码：撤掉过渡层，提示接在文字横幅下面。
+    state.lock().release_connect_overlay();
     let (cols, rows) = size;
     for attempt in 0..PASSWORD_PROMPT_ATTEMPTS {
         let retry = if attempt == 0 {
@@ -4449,6 +4498,7 @@ async fn remote_confirm_host_key_change(
     wakeup_tx: &async_channel::Sender<()>,
     size: (&mut u16, &mut u16),
 ) -> Option<bool> {
+    state.lock().release_connect_overlay();
     let recorded = if mismatch.recorded.is_empty() {
         "-".to_string()
     } else {
@@ -4557,6 +4607,16 @@ fn remote_update_status(
         guard.status = status.into();
         guard.revision = guard.revision.wrapping_add(1);
     }
+    let _ = wakeup_tx.try_send(());
+}
+
+fn remote_set_connect_stage(
+    state: &Arc<FairMutex<TerminalRuntimeState>>,
+    wakeup_tx: &async_channel::Sender<()>,
+    stage: SshConnectStage,
+    target: &str,
+) {
+    state.lock().set_connect_stage(stage, target);
     let _ = wakeup_tx.try_send(());
 }
 
@@ -5511,6 +5571,52 @@ fn find_osc_terminator(payload: &[u8]) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn screen_text(state: &mut TerminalRuntimeState) -> String {
+        state.snapshot_arc().lines.join("\n")
+    }
+
+    #[test]
+    fn connect_overlay_hands_back_a_text_banner_on_prompt_or_failure() {
+        let mut state = TerminalRuntimeState::new("ssh", true, "connecting", 80, 24);
+        state.set_connect_stage(SshConnectStage::Tcp, "root@h:22");
+        state.set_connect_stage(SshConnectStage::Auth, "root@h:22");
+        // 过渡层在时不往终端写字。
+        assert_eq!(
+            state.snapshot_arc().connect_progress.as_ref().map(|p| p.stage),
+            Some(SshConnectStage::Auth)
+        );
+        assert!(!screen_text(&mut state).contains("root@h:22"));
+
+        // 要输密码：撤掉过渡层，写回当前阶段的文字横幅。
+        state.release_connect_overlay();
+        assert!(state.snapshot_arc().connect_progress.is_none());
+        let text = screen_text(&mut state);
+        assert!(text.contains("root@h:22") && text.contains("正在进行身份验证"));
+
+        // 交还之后的阶段直接写横幅，过渡层不再出现。
+        state.set_connect_stage(SshConnectStage::Shell, "root@h:22");
+        assert!(state.snapshot_arc().connect_progress.is_none());
+        assert!(screen_text(&mut state).contains("正在打开远程终端"));
+    }
+
+    #[test]
+    fn connect_overlay_failure_keeps_context_and_success_writes_nothing() {
+        let mut failed = TerminalRuntimeState::new("ssh", true, "connecting", 80, 24);
+        failed.set_connect_stage(SshConnectStage::Tcp, "root@h:22");
+        failed.mark_disconnected("TCP connection timeout".to_string());
+        assert!(failed.snapshot_arc().connect_progress.is_none());
+        assert!(screen_text(&mut failed).contains("正在建立 TCP 连接"));
+
+        let mut ok = TerminalRuntimeState::new("ssh", true, "connecting", 80, 24);
+        ok.set_connect_stage(SshConnectStage::Shell, "root@h:22");
+        ok.finish_connect_overlay();
+        assert!(ok.snapshot_arc().connect_progress.is_none());
+        assert!(!screen_text(&mut ok).contains("root@h:22"));
+        // 连上后会话结束断开，不再补横幅。
+        ok.mark_disconnected("closed".to_string());
+        assert!(!screen_text(&mut ok).contains("root@h:22"));
+    }
 
     #[test]
     fn resize_request_dedup_only_lets_through_actual_changes() {

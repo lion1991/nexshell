@@ -43,6 +43,7 @@ Status: accepted (2026-05-27, revised 2026-05-28)
 - `root_view/file_panel_section.rs`
 - `root_view/host_library_section.rs` — 主机管理列表页（区别于下条）
 - `root_view/host_list_section.rs` — 终端页左侧常驻主机列表（ADR 0023；纯函数在 `host_list_helpers.rs`，行渲染在 `host_management_view/host_list_nav.rs`）
+- `root_view/connect_overlay_section.rs` — SSH 连接中盖在终端上的过渡层（淡入淡出状态机在 `connect_overlay_helpers.rs`，进度环元件在 `nexshell::connect_spinner`）
 - `root_view/host_monitor_section.rs` — 终端 tab 内嵌的主机监控（进程/网络/系统信息）。
   改名自原 `host_overview_section`，避免与状态层 `src/host_overview.rs` 同名混淆
 - `root_view/settings_section.rs`

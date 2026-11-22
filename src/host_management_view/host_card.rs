@@ -346,7 +346,7 @@ pub(super) fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, Col
     }
 }
 
-pub(super) fn system_icon_path(system: HostSystemIcon) -> &'static str {
+pub(crate) fn system_icon_path(system: HostSystemIcon) -> &'static str {
     match system {
         HostSystemIcon::Terminal => ICON_TERMINAL,
         HostSystemIcon::Linux => ICON_LINUX,
@@ -765,7 +765,7 @@ fn render_system_icon_small(
     .finish()
 }
 
-pub(super) fn mask_endpoint(endpoint: &str) -> String {
+pub(crate) fn mask_endpoint(endpoint: &str) -> String {
     if let Some((user_host, port)) = endpoint.rsplit_once(':') {
         if let Some((user, host)) = user_host.split_once('@') {
             // 按字符截，非 ASCII 主机名按字节切会 panic。

@@ -7,6 +7,7 @@
 // main.rs 仅留启动装配与伴生类型（TabModel / TerminalSessionTab / 常量等），经 crate:: 互引。
 
 mod code_viewer_section;
+mod connect_overlay_section;
 mod context_menus_section;
 mod file_panel_section;
 mod find_section;
@@ -213,6 +214,8 @@ pub(crate) struct RootView {
     /// 主机列表搜索框；和主页的 host_search_editor 分开，两边的搜索词互不影响。
     host_list_search_editor: warpui::ViewHandle<EditorView>,
     host_list_query: String,
+    /// SSH 连接过渡层的淡入淡出状态，key = 会话 id（connect_overlay_section）。
+    connect_overlays: RefCell<HashMap<String, crate::connect_overlay_helpers::ConnectOverlayAnim>>,
     host_tab_state: MouseStateHandle,
     new_tab_combo_state: MouseStateHandle,
     new_tab_plus_state: MouseStateHandle,
@@ -614,6 +617,7 @@ impl RootView {
             host_list_collapsed: ui_settings.host_list_collapsed,
             host_list_search_editor,
             host_list_query: String::new(),
+            connect_overlays: RefCell::new(HashMap::new()),
             host_tab_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_combo_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_plus_state: Arc::new(Mutex::new(MouseState::default())),
@@ -1567,6 +1571,7 @@ impl RootView {
             || self.tab_accent_bar_w.borrow().is_animating()
             || self.sidebar_toggle_slot.is_animating()
             || self.host_list_slide.is_animating()
+            || self.connect_overlay_animating(now)
             || self.file_button_slot.is_animating()
             || self.git_button_slot.is_animating()
             || self.overview_button_slot.is_animating()

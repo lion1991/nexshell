@@ -3,6 +3,7 @@
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod connect_overlay_helpers;
 mod cursor_smear;
 mod external_editor;
 mod file_panel_view_helpers;

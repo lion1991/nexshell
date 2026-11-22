@@ -102,6 +102,8 @@ impl RootView {
                 &palette,
             );
         }
+        let session_id = runtime_snapshot.session_id.clone();
+        let connect_progress = runtime_snapshot.connect_progress.clone();
         let terminal_keyboard_enabled = self.terminal_keyboard_input_enabled(app);
         let glass_dirty_snapshot = Arc::clone(&runtime_snapshot);
         let snapshot = if terminal_keyboard_enabled {
@@ -146,16 +148,27 @@ impl RootView {
                     .unwrap_or_else(|_| Arc::new(AtomicBool::new(true))),
                 None,
                 terminal_keyboard_enabled,
-                palette,
+                palette.clone(),
             )
             .finish(),
         )
         .top_left()
         .finish();
-        match disconnect_notice {
+        let body = match disconnect_notice {
             Some(notice) => self.wrap_with_disconnect_banner(grid, &notice, disconnect_red),
             None => grid,
-        }
+        };
+        let tab = self.terminal_tabs.get(self.active_tab_index);
+        self.wrap_with_connect_overlay(
+            body,
+            &session_id,
+            connect_progress.as_ref(),
+            tab.and_then(|tab| tab.host_id.as_deref()),
+            tab.map_or("", |tab| {
+                tab.custom_label.as_deref().unwrap_or(&tab.fallback_label)
+            }),
+            &palette,
+        )
     }
 
     // 离线横幅：保留终端内容，底部钉一条细横幅显示断开原因（远程/串口共用）。
@@ -272,6 +285,8 @@ impl RootView {
                 );
             }
 
+            let session_id = runtime_snapshot.session_id.clone();
+            let connect_progress = runtime_snapshot.connect_progress.clone();
             let glass_dirty_snapshot = Arc::clone(&runtime_snapshot);
             let snapshot = if is_focused {
                 self.project_input_editor_snapshot(runtime_snapshot)
@@ -342,7 +357,7 @@ impl RootView {
                 fg_handle,
                 Some(pane_id),
                 is_focused,
-                palette,
+                palette.clone(),
             )
             .finish();
 
@@ -354,6 +369,14 @@ impl RootView {
                 }
                 None => pane_element,
             };
+            let pane_element = self.wrap_with_connect_overlay(
+                pane_element,
+                &session_id,
+                connect_progress.as_ref(),
+                tab.host_id.as_deref(),
+                tab.custom_label.as_deref().unwrap_or(&tab.fallback_label),
+                &palette,
+            );
 
             let title = terminal.lock().ok().and_then(|rt| rt.title());
             let fallback_label = tab.custom_label.as_deref().unwrap_or(&tab.fallback_label);

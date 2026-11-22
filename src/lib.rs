@@ -27,7 +27,9 @@ pub struct ReferencePolicy {
 
 pub mod actions;
 #[cfg(feature = "warpui-app")]
+pub mod click_through;
 pub mod code_editor;
+pub mod connect_spinner;
 pub mod container_fleet;
 pub mod container_overview;
 #[cfg(feature = "warpui-app")]
@@ -70,6 +72,7 @@ pub mod safe_triangle;
 pub mod sftp_ops;
 pub mod shell_chrome;
 pub mod shell_integration;
+pub mod ssh_connect_progress;
 pub mod ssh_key_store;
 pub mod ssh_password_prompt;
 pub mod ssh_session;
@@ -1553,6 +1556,7 @@ Inter-|   Receive                                                |  Transmit
                 title: None,
                 bootstrapped: true,
                 shell_display_name: None,
+                connect_progress: None,
                 bell_pulse: 0,
                 find_pulse: 0,
                 find_query: None,

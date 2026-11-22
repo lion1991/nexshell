@@ -388,6 +388,9 @@ host_group_nav: Groups
 host_list_ungrouped: Ungrouped
 host_list_ctx_new_session: New Session
 host_list_search_no_match: No matching hosts
+ssh_connect_stage_tcp: Connect
+ssh_connect_stage_auth: Authenticate
+ssh_connect_stage_shell: Open shell
 host_tag_filter: Tag filtering
 host_manage_groups_tags: Manage groups and tags
 host_protocol_all: All protocols
