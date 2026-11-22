@@ -1,5 +1,5 @@
 // 多主机状态总览卡片网格（ServerCat 风格）。本文件只放纯渲染自由函数。
-// 数据来自 RootView 的 HostOverviewFleet；点击卡片 = 快速连接该主机。
+// 数据来自 RootView 的 HostOverviewFleet；点击右上角终端快连按钮 = 快速连接该主机（卡片其他区域不响应）。
 // CPU/Mem 用 RingGauge 环形仪表（GPU Ring 原语），sweep 走 FloatTransition 过渡。
 
 use warpui::{

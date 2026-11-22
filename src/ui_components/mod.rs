@@ -1,4 +1,4 @@
-//! Warp ui_components 子集（menu 本地化所需：buttons + blended_colors + icons）。
+//! Warp ui_components 本地子集。
 pub mod avatar;
 pub(crate) mod blended_colors;
 pub mod buttons;

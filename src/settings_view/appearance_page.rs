@@ -123,7 +123,7 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- Theme --- warp: appearance_page.rs:2630-2713
+    // --- Theme --- warp: appearance_page.rs
     col.add_child(render_category_header(
         &rust_i18n::t!("appearance_theme"),
         appearance,
@@ -210,7 +210,7 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- Text --- warp: appearance_page.rs:3909-4054
+    // --- Text --- warp: appearance_page.rs
     col.add_child(render_category_header(
         &rust_i18n::t!("appearance_text"),
         appearance,
@@ -368,7 +368,7 @@ pub fn render_appearance_page(
     .finish()
 }
 
-// warp: appearance_page.rs:3909-4054 — Text 区块四列布局
+// warp: appearance_page.rs — Text 区块四列布局
 fn render_text_section(
     state: &AppearancePageState,
     _current_font_name: &str,
@@ -388,7 +388,7 @@ fn render_text_section(
 
     let mut row = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Start);
 
-    // (1) Terminal font — warp: appearance_page.rs:3927-3971
+    // (1) Terminal font — warp: appearance_page.rs
     let mut terminal_font = Flex::column();
     terminal_font.add_child(
         appearance
@@ -407,7 +407,7 @@ fn render_text_section(
             .finish(),
     );
 
-    // warp: appearance_page.rs:3932-3968 — "View all available system fonts" checkbox
+    // warp: appearance_page.rs — "View all available system fonts" checkbox
     terminal_font.add_child(
         Container::new(
             Flex::row()
@@ -447,7 +447,7 @@ fn render_text_section(
 
     row.add_child(Shrinkable::new(1.0, terminal_font.finish()).finish());
 
-    // (2) Font weight — warp: appearance_page.rs:3988-3992
+    // (2) Font weight — warp: appearance_page.rs
     let mut font_weight = Flex::column();
     font_weight.add_child(
         appearance
@@ -468,7 +468,7 @@ fn render_text_section(
     );
     row.add_child(Container::new(font_weight.finish()).finish());
 
-    // (3) Font size (px) — warp: appearance_page.rs:3996-4050
+    // (3) Font size (px) — warp: appearance_page.rs
     let mut font_size = Flex::column();
     font_size.add_child(
         appearance
@@ -504,7 +504,7 @@ fn render_text_section(
             .finish(),
     );
 
-    // (4) Line height — warp: appearance_page.rs:3806-3893
+    // (4) Line height — warp: appearance_page.rs
     let mut line_height = Flex::column();
     line_height.add_child(
         appearance
@@ -536,7 +536,7 @@ fn render_text_section(
         .finish(),
     );
 
-    // warp: appearance_page.rs:3861-3891 — "Reset to default"
+    // warp: appearance_page.rs — "Reset to default"
     let is_default = (line_height_ratio - 1.2).abs() < 0.01;
     let disabled_text_color = theme.disabled_text_color(theme.surface_2()).into();
     line_height.add_child(
@@ -668,7 +668,7 @@ fn render_inline_stepper_btn(
     .finish()
 }
 
-// warp: appearance_page.rs:2630-2713 — "Current theme" 行
+// warp: appearance_page.rs — "Current theme" 行
 fn render_current_theme_row(
     mouse_state: &MouseStateHandle,
     current_theme: ThemeChoice,

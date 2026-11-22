@@ -90,7 +90,7 @@ impl Default for NexSettingsViewState {
     }
 }
 
-// warp/app/src/settings_view/mod.rs:2265-2432
+// warp/app/src/settings_view/mod.rs 的 `SettingsView::render`
 pub fn render_settings_view(
     state: &NexSettingsViewState,
     current_theme: ThemeChoice,
@@ -220,7 +220,7 @@ pub fn render_settings_view(
     .finish();
 
     // --- Compose ---
-    // warp settings_view/mod.rs:2427-2432
+    // warp settings_view/mod.rs 的 `SettingsView::render`
     let mut main_row = Flex::row()
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
         .with_main_axis_size(MainAxisSize::Max)
@@ -237,7 +237,7 @@ pub fn render_settings_view(
         .finish()
 }
 
-// warp: theme_chooser.rs:855-869 — 主题选择器侧面板
+// warp: app/src/themes/theme_chooser.rs 的 `render` — 主题选择器侧面板
 fn render_theme_chooser_panel(
     state: &NexSettingsViewState,
     current_theme: ThemeChoice,
@@ -249,7 +249,7 @@ fn render_theme_chooser_panel(
     let text_color: ColorU = theme.active_ui_text_color().into();
 
     // --- Header: "Themes" 标题 + 关闭按钮 ---
-    // warp: theme_chooser.rs:637-688
+    // warp: app/src/themes/theme_chooser.rs 的 `render_title_row`
     let title = Text::new_inline(theme_chooser_title(), ui_font, THEME_TITLE_FONT_SIZE)
         .with_style(Properties::default().weight(Weight::Semibold))
         .with_color(text_color)
@@ -294,7 +294,7 @@ fn render_theme_chooser_panel(
     .finish();
 
     // --- 主题卡片列表 ---
-    // warp: theme_chooser.rs:898-1001
+    // warp: app/src/themes/theme_chooser.rs 的 `render_list`
     let mut list_col = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
@@ -343,7 +343,7 @@ fn render_theme_chooser_panel(
     .finish()
 }
 
-// warp: theme_chooser.rs:898-1001 — 单个主题卡片
+// warp: app/src/themes/theme_chooser.rs — 单个主题卡片
 fn render_theme_chooser_card(
     choice: ThemeChoice,
     is_selected: bool,

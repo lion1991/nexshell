@@ -1,7 +1,7 @@
 //! mio-friendly mpsc channel.
 //!
 //! Vendored verbatim (with module path adjustments) from Warp:
-//! `warp/app/src/terminal/local_tty/mio_channel.rs`. The same trick the
+//! `warp/crates/warp_terminal/src/local_tty/mio_channel.rs`. The same trick the
 //! Alacritty event loop uses — wake a `mio::Poll` whenever a message hits the
 //! mpsc queue, so the PTY thread can wait for either PTY readiness or new
 //! input on the same `Poll::poll()` call.

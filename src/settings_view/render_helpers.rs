@@ -19,7 +19,7 @@ pub const TOGGLE_BUTTON_RIGHT_PADDING: f32 = 5.0;
 const PAGE_TITLE_MARGIN_BOTTOM: f32 = 4.0;
 const SUBHEADER_MARGIN_BOTTOM: f32 = 4.0;
 
-// warp settings_page.rs:738-751
+// warp settings_page.rs 的 `render_page_title`
 pub fn render_page_title(text: &str, appearance: &Appearance) -> Box<dyn Element> {
     Container::new(
         Align::new(
@@ -39,7 +39,7 @@ pub fn render_page_title(text: &str, appearance: &Appearance) -> Box<dyn Element
     .finish()
 }
 
-// warp settings_page.rs:279-296
+// warp settings_page.rs 的 `render_sub_header`
 pub fn render_category_header(text: &str, appearance: &Appearance) -> Box<dyn Element> {
     Container::new(
         Align::new(
@@ -60,7 +60,7 @@ pub fn render_category_header(text: &str, appearance: &Appearance) -> Box<dyn El
     .finish()
 }
 
-// warp settings_page.rs:780-835 (simplified)
+// warp settings_page.rs 的 `render_body_item` (simplified)
 pub fn render_setting_row(label: Box<dyn Element>, control: Box<dyn Element>) -> Box<dyn Element> {
     let header = Shrinkable::new(
         1.0,
@@ -83,7 +83,7 @@ pub fn render_setting_row(label: Box<dyn Element>, control: Box<dyn Element>) ->
     .finish()
 }
 
-// warp settings_page.rs:380-385 — 分隔线
+// warp settings_page.rs 的 `render_separator` — 分隔线
 pub fn render_separator(appearance: &Appearance) -> Box<dyn Element> {
     Container::new(Empty::new().finish())
         .with_border(Border::bottom(2.).with_border_fill(appearance.theme().outline()))

@@ -1,7 +1,7 @@
 //! PTY event loop, ported from Warp.
 //!
 //! This module is a one-to-one Rust port of
-//! `warp/app/src/terminal/local_tty/event_loop.rs` (and its sibling
+//! `warp/crates/warp_terminal/src/local_tty/event_loop.rs` (and its sibling
 //! `mio_channel.rs`), adapted to drive a [`portable_pty`] master file
 //! descriptor instead of Warp's hand-rolled `Pty`.
 //!
@@ -18,7 +18,7 @@
 //!   (CHANNEL_TOKEN / PTY_TOKEN / SIGNALS_TOKEN).
 //! - Wakeups land on an `async_channel::Sender<()>` that the UI throttles
 //!   to 60 Hz, just like Warp's `WAKEUP_THROTTLE_PERIOD`
-//!   (`view.rs:644`).
+//!   (`app/src/terminal/view.rs`).
 
 pub mod mio_channel;
 
@@ -54,11 +54,11 @@ use signal_hook::consts::SIGCHLD;
 #[cfg(unix)]
 use signal_hook_mio::v1_0::Signals;
 
-/// Mirrors `warp/app/src/terminal/local_tty/event_loop.rs:28`.
+/// Mirrors `READ_BUFFER_SIZE` in `warp/crates/warp_terminal/src/local_tty/event_loop.rs`.
 #[cfg(any(unix, windows))]
 const READ_BUFFER_SIZE: usize = 0x4_0000;
 
-/// Mirrors `warp/app/src/terminal/local_tty/event_loop.rs:32`.
+/// Mirrors `MAX_LOCKED_READ` in `warp/crates/warp_terminal/src/local_tty/event_loop.rs`.
 #[cfg(unix)]
 const MAX_LOCKED_READ: usize = 0x1_0000;
 
@@ -164,9 +164,9 @@ pub struct EventLoopHandle {
 
 impl Drop for EventLoopHandle {
     fn drop(&mut self) {
-        // 1:1 与 Warp `terminal_manager.rs:189-205 shutdown_event_loop` 对齐：
-        // 只发 Shutdown + join，不自行 kill。子进程由 EventLoop drop 时关闭
-        // master fd → 内核给 slave 进程组发 SIGHUP 隐式回收（同 Warp）。
+        // 1:1 与 Warp `terminal_manager.rs` 的 `shutdown_event_loop` 对齐：
+        // 只发 Shutdown + join，这里不 kill。子进程还活着时，由事件循环线程退出前
+        // kill 掉（EventLoop::run 末尾，同 Warp event_loop 的 `self.pty.kill()`）。
         if let Err(e) = self.message_tx.send(Message::Shutdown) {
             log::info!("Failed to send Shutdown {e:?}");
         }
@@ -180,7 +180,7 @@ impl Drop for EventLoopHandle {
     }
 }
 
-/// `EventLoop::State` from `warp/app/src/terminal/local_tty/event_loop.rs:66`.
+/// `warp_terminal::local_tty::event_loop::State`.
 #[cfg(unix)]
 struct State {
     write_list: VecDeque<Cow<'static, [u8]>>,
@@ -319,7 +319,7 @@ impl<S: PtySink> EventLoop<S> {
         ChannelResult::Continue
     }
 
-    /// Mirrors `event_loop.rs:196 fn pty_read`. The lock acquisition
+    /// Mirrors `event_loop.rs`'s `fn pty_read`. The lock acquisition
     /// dance with `try_lock` -> "fill more buffer" -> blocking lock on
     /// `>= READ_BUFFER_SIZE` is exactly Warp's, including the
     /// `FairMutexGuard::bump` to yield the lock to a waiting UI thread
@@ -409,7 +409,7 @@ impl<S: PtySink> EventLoop<S> {
         state.sync_deadline = sink.sync_output_deadline();
     }
 
-    /// Mirrors `event_loop.rs:279 fn pty_write`.
+    /// Mirrors `event_loop.rs`'s `fn pty_write`.
     fn pty_write(&mut self, state: &mut State, can_write: &mut bool) -> io::Result<()> {
         state.ensure_next();
 
@@ -460,7 +460,7 @@ impl<S: PtySink> EventLoop<S> {
         let mut can_write = false;
 
         // Channel + PTY + SIGCHLD all share the same Poll, just like
-        // `event_loop.rs:342-350`.
+        // Warp's `event_loop.rs`.
         if let Err(err) =
             self.poll
                 .registry()
@@ -551,7 +551,7 @@ impl<S: PtySink> EventLoop<S> {
                     if let Err(err) = self.pty_read(&mut state, &mut buf, &mut can_read) {
                         // Linux: `read` on the leader side can return
                         // EIO if the follower hangs up. Warp's
-                        // `event_loop.rs:447` swallows it and waits for
+                        // `event_loop.rs` swallows it and waits for
                         // SIGCHLD. We do the same.
                         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
                         if err.kind() == ErrorKind::Other {
@@ -588,12 +588,12 @@ impl<S: PtySink> EventLoop<S> {
         let _ = self.poll.registry().deregister(&mut SourceFd(&self.pty_fd));
         let _ = self.poll.registry().deregister(&mut self.signals);
 
-        // 非本进程发起关闭时，在本线程终止 PTY 进程（Warp `event_loop.rs:471-477`）。
+        // 非本进程发起关闭时，在本线程终止 PTY 进程（同 Warp `event_loop.rs`）。
         if !child_exited {
             if let Err(err) = self.killer.kill() {
                 log::error!("Failed to kill PTY process {err:?}");
             }
-            // Final notification mirrors `event_loop.rs:479`.
+            // Final notification mirrors Warp's `event_loop.rs`.
             self.sink
                 .lock()
                 .mark_disconnected("pty disconnected".to_string());
@@ -603,7 +603,7 @@ impl<S: PtySink> EventLoop<S> {
 }
 
 /// Spawn the PTY event loop. Mirrors how `EventLoop::spawn` is called
-/// from `warp/app/src/terminal/local_tty/terminal_manager.rs:380`.
+/// from `warp/app/src/terminal/local_tty/terminal_manager.rs`.
 #[cfg(unix)]
 pub fn spawn_event_loop<S: PtySink>(
     sink: Arc<FairMutex<S>>,
@@ -630,8 +630,8 @@ pub fn spawn_event_loop<S: PtySink>(
     // Bounded(1) wakeup channel — coalesce multiple wakeups into one,
     // since the UI throttles at 60 Hz anyway. `async_channel::bounded(1)
     // .try_send` returns Full quietly when the slot is occupied, which
-    // is exactly the coalesce-on-overflow behaviour Warp comments on at
-    // `event_listener.rs:11`.
+    // is exactly the coalesce-on-overflow behaviour Warp comments on in
+    // `crates/warp_terminal/src/event_listener.rs`.
     let (wakeup_tx, wakeup_rx) = async_channel::bounded::<()>(1);
     let (event_tx, event_rx) = async_channel::unbounded::<PtyEvent>();
 
@@ -891,7 +891,7 @@ pub fn spawn_event_loop<S: PtySink>(
 
 #[cfg(unix)]
 fn set_nonblocking(fd: RawFd) -> io::Result<()> {
-    // Same trick as `warp/app/src/terminal/local_tty/unix.rs:543`.
+    // Same trick as `set_nonblocking` in `warp/crates/warp_terminal/src/local_tty/unix.rs`.
     unsafe {
         let flags = libc::fcntl(fd, libc::F_GETFL, 0);
         if flags < 0 {
