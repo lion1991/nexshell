@@ -689,7 +689,6 @@ async fn connect_and_run(
 
     audio_diag::log_advertised_static_channels(&connector.static_channels);
 
-    // 阶段一：明文协商到 TLS 升级点。
     let mut framed = ironrdp_tokio::TokioFramed::new(tcp);
     let should_upgrade = within(
         connect_deadline,
@@ -758,7 +757,6 @@ async fn connect_and_run(
         .ok_or_else(|| "extract server public key failed".to_string())?
         .to_owned();
 
-    // 阶段三：CredSSP(NLA) + 能力协商，收尾得到 ConnectionResult。
     let upgraded = ironrdp_tokio::mark_as_upgraded(should_upgrade, &mut connector);
     let mut upgraded_framed = ironrdp_tokio::TokioFramed::new(upgraded_stream);
     let mut network_client = NoopNetworkClient;
@@ -876,7 +874,6 @@ async fn connect_and_run(
     let mut marker_support = false;
     // acc 从空转非空时设 now+50ms；服务端只发 Begin 不发 End 的异常由它兜底发布。
     let mut frame_deadline: Option<tokio::time::Instant> = None;
-    // 每会话一次的管线诊断日志（surface-command 含 marker / 位图回退）。
     let mut pipeline_logged = false;
     // NEXSHELL_RDP_EGFX_DUMP 开时，2s 打一次累计收字节/发帧，核实接收码率统计（面板 0.0 Mbps 排查）。
     let egfx_dbg = std::env::var_os("NEXSHELL_RDP_EGFX_DUMP").is_some();
@@ -1030,7 +1027,6 @@ async fn connect_and_run(
             }
         }
 
-        // 本轮捕获的重激活 / 多传输请求（见 drain_outputs）。
         let mut signals = OutputSignals::default();
         let outputs = active_stage
             .process(&mut image, action, &payload)

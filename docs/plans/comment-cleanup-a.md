@@ -219,21 +219,23 @@
 
 ## rdp-2（18）
 
+已清理：2026-11-22（删 12 条，跳过 6 条：实为「为什么」或字段含义 6；工具依赖 0 条）
+
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
 | `src/rdp_session/framebuffer.rs` | 127 | `RdpFramebuffer.compose_surface` | // clip ∩ surface-output-rect ∩ framebuffer。 |  |
 | `src/rdp_session/mod.rs` | 692 | `connect_and_run` | // 阶段一：明文协商到 TLS 升级点。 |  |
 | `src/rdp_session/mod.rs` | 761 | `connect_and_run` | // 阶段三：CredSSP(NLA) + 能力协商，收尾得到 ConnectionResult。 |  |
 | `src/rdp_session/mod.rs` | 879 | `connect_and_run` | // 每会话一次的管线诊断日志（surface-command 含 marker / 位图回退）。 |  |
-| `src/rdp_session/mod.rs` | 973 | `connect_and_run` | // Display Control 通道未就绪，忽略。 |  |
+| `src/rdp_session/mod.rs` | 973 | `connect_and_run` | // Display Control 通道未就绪，忽略。 | 保留（实为「为什么」：说明 None 分支的含义） |
 | `src/rdp_session/mod.rs` | 1033 | `connect_and_run` | // 本轮捕获的重激活 / 多传输请求（见 drain_outputs）。 |  |
-| `src/rdp_session/mod.rs` | 1121 | `connect_and_run` | // 收到 DeactivateAll：跳出 drain，下方走重激活。 |  |
-| `src/rdp_session/mouse_cursor.rs` | 310 | `tests.pointer_body` | // pad |  |
-| `src/rdp_session/stats.rs` | 53 | `RdpStats.set_marker_mode` | // 未升到 EGFX 时标记为 RemoteFX 帧边界（1）。 |  |
+| `src/rdp_session/mod.rs` | 1121 | `connect_and_run` | // 收到 DeactivateAll：跳出 drain，下方走重激活。 | 保留（实为「为什么」：说明为什么 break 及之后的去向） |
+| `src/rdp_session/mouse_cursor.rs` | 310 | `tests.pointer_body` | // pad | 保留（字段含义） |
+| `src/rdp_session/stats.rs` | 53 | `RdpStats.set_marker_mode` | // 未升到 EGFX 时标记为 RemoteFX 帧边界（1）。 | 保留（实为「为什么」：说明魔数 1 和条件） |
 | `src/rdp_view/hotkey_guard.rs` | 81 | `hotkey_transition` | // 状态未变：不重复 Push/Pop |  |
-| `src/rdp_view/hotkey_guard.rs` | 96 | `HotkeyGuardSlot.set_engaged` | // Drop → Pop |  |
+| `src/rdp_view/hotkey_guard.rs` | 96 | `HotkeyGuardSlot.set_engaged` | // Drop → Pop | 保留（实为「为什么」：置 None 靠 Drop 触发 Pop） |
 | `src/rdp_view/keymap.rs` | 19 | `scancode_for_key` | // 单字符（字母/数字/符号/空格）。 |  |
-| `src/rdp_view/page_element.rs` | 134 | `RdpPageElement.send_mouse_move` | // 坐标未变，已处理但不重发 |  |
+| `src/rdp_view/page_element.rs` | 134 | `RdpPageElement.send_mouse_move` | // 坐标未变，已处理但不重发 | 保留（实为「为什么」：说明返回 true 的含义） |
 | `src/rdp_view/page_element.rs` | 425 | `RdpPageElement.layout` | // 占满内容区；画面通过 paint 内 letterbox 居中。 |  |
 | `src/rdp_view/page_element.rs` | 437 | `RdpPageElement.paint` | // 背景铺满（含 letterbox 黑边）。 |  |
 | `src/rdp_view/page_element.rs` | 447 | `RdpPageElement.paint` | // letterbox 几何（相对内容区）→ 叠加绝对 origin 后回写。 |  |

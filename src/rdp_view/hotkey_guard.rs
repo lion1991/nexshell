@@ -78,7 +78,7 @@ pub(crate) fn hotkey_transition(desired: bool, engaged: bool) -> HotkeyTransitio
     match (desired, engaged) {
         (true, false) => HotkeyTransition::Push,
         (false, true) => HotkeyTransition::Pop,
-        _ => HotkeyTransition::None, // 状态未变：不重复 Push/Pop
+        _ => HotkeyTransition::None,
     }
 }
 

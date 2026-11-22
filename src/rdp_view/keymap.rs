@@ -16,7 +16,6 @@ const NORM: bool = false;
 /// 归一化按键字符串 → (set-1 scancode, extended)。命中 `None` 表示不发送该键。
 /// `key` 应先小写。字母/数字/符号来自 key_without_modifiers，特殊键名来自 keystroke.key。
 pub fn scancode_for_key(key: &str) -> Option<(u8, bool)> {
-    // 单字符（字母/数字/符号/空格）。
     if key.chars().count() == 1 {
         if let Some(code) = scancode_for_char(key.chars().next().unwrap()) {
             return Some(code);

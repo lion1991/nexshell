@@ -422,7 +422,6 @@ impl Element for RdpPageElement {
         _: &mut LayoutContext,
         _: &AppContext,
     ) -> Vector2F {
-        // 占满内容区；画面通过 paint 内 letterbox 居中。
         let size = constraint.max;
         self.size = Some(size);
         size
@@ -434,7 +433,6 @@ impl Element for RdpPageElement {
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
         let size = self.size.unwrap_or_default();
 
-        // 背景铺满（含 letterbox 黑边）。
         ctx.scene
             .draw_rect_without_hit_recording(RectF::new(origin, size))
             .with_background(self.background);
@@ -444,7 +442,6 @@ impl Element for RdpPageElement {
             return;
         }
 
-        // letterbox 几何（相对内容区）→ 叠加绝对 origin 后回写。
         let vp = letterbox_rect(size, self.desktop_size);
         let abs_rect = RectF::new(origin + vp.content_rect.origin(), vp.content_rect.size());
         *self.viewport_out.lock().unwrap() = Some(RdpViewport {
@@ -452,7 +449,6 @@ impl Element for RdpPageElement {
             scale: vp.scale,
         });
 
-        // GPU 把整张桌面采样到 letterbox 矩形。
         if let Some(frame) = &self.frame {
             ctx.scene
                 .draw_live_image(abs_rect, Arc::clone(frame), 1.0, CornerRadius::default());
@@ -486,7 +482,6 @@ impl Element for RdpPageElement {
                 ..
             } => self.handle_key_down(keystroke, details, *is_composing, *is_repeat),
             Event::KeyUp { keystroke, details } => self.handle_key_up(keystroke, details),
-            // 修饰键：携带物理 KeyCode + 按下/抬起，维持远端修饰键状态。
             Event::ModifierKeyChanged { key_code, state } => {
                 let pressed = matches!(state, KeyState::Pressed);
                 // ⌘ 先压住，由下一个键决定当 Ctrl 还是 Win（keymap::ModifierTracker）。

@@ -124,7 +124,6 @@ impl RdpFramebuffer {
         let fb_h = i32::from(self.height);
         let sw = i32::from(src_w);
         let sh = i32::from(src_h);
-        // clip ∩ surface-output-rect ∩ framebuffer。
         let cx0 = i32::from(clip.x).max(origin_x).max(0);
         let cy0 = i32::from(clip.y).max(origin_y).max(0);
         let cx1 = (i32::from(clip.x) + i32::from(clip.width))
