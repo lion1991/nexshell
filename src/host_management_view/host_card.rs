@@ -346,16 +346,20 @@ pub(super) fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, Col
     }
 }
 
+pub(super) fn system_icon_path(system: HostSystemIcon) -> &'static str {
+    match system {
+        HostSystemIcon::Terminal => ICON_TERMINAL,
+        HostSystemIcon::Linux => ICON_LINUX,
+        HostSystemIcon::Serial => ICON_SERIAL,
+    }
+}
+
 fn render_system_icon(
     system: HostSystemIcon,
     protocol: &str,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
-    let icon_path = match system {
-        HostSystemIcon::Terminal => ICON_TERMINAL,
-        HostSystemIcon::Linux => ICON_LINUX,
-        HostSystemIcon::Serial => ICON_SERIAL,
-    };
+    let icon_path = system_icon_path(system);
     let (base_bg, icon_color) = protocol_colors(protocol, hc);
 
     Container::new(
@@ -739,11 +743,7 @@ fn render_system_icon_small(
     protocol: &str,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
-    let icon_path = match system {
-        HostSystemIcon::Terminal => ICON_TERMINAL,
-        HostSystemIcon::Linux => ICON_LINUX,
-        HostSystemIcon::Serial => ICON_SERIAL,
-    };
+    let icon_path = system_icon_path(system);
     let (base_bg, icon_color) = protocol_colors(protocol, hc);
 
     Container::new(

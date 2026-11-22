@@ -25,7 +25,6 @@ pub const ICON_KEY: &str = "icons/key.svg";
 pub const ICON_COPY: &str = "icons/copy.svg";
 #[allow(dead_code)]
 pub const ICON_FOLDER: &str = "icons/folder.svg";
-#[allow(dead_code)]
 pub const ICON_CHEVRON_DOWN: &str = "icons/chevron-down.svg";
 pub const ICON_CHEVRON_RIGHT: &str = "icons/chevron-right.svg";
 pub const ICON_PLAY: &str = "icons/play.svg";

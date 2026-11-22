@@ -25,6 +25,8 @@ fn ui_settings_path() -> Option<std::path::PathBuf> {
 pub(crate) struct UiSettings {
     pub sidebar_open: bool,
     pub overview_panel_open: bool,
+    /// 终端页左侧主机列表里折叠的分组 key。
+    pub host_list_collapsed: std::collections::BTreeSet<String>,
     pub theme: ThemeChoice,
     pub font_size: f32,
     pub line_height_ratio: f32,
@@ -46,6 +48,7 @@ impl Default for UiSettings {
         Self {
             sidebar_open: false,
             overview_panel_open: false,
+            host_list_collapsed: Default::default(),
             theme: ThemeChoice::Dark,
             font_size: TERMINAL_FONT_SIZE_DEFAULT,
             line_height_ratio: TERMINAL_LINE_HEIGHT_RATIO_DEFAULT,
@@ -85,6 +88,15 @@ fn ui_settings_from_value(v: serde_json::Value) -> UiSettings {
             .get("overview_panel_open")
             .and_then(|x| x.as_bool())
             .unwrap_or(sidebar_open),
+        host_list_collapsed: v
+            .get("host_list_collapsed")
+            .and_then(|x| x.as_array())
+            .map(|keys| {
+                keys.iter()
+                    .filter_map(|key| key.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
         theme: v
             .get("theme")
             .and_then(|x| x.as_str())
@@ -206,6 +218,10 @@ fn write_ui_settings_to_object(
         serde_json::Value::Bool(settings.overview_panel_open),
     );
     obj.insert(
+        "host_list_collapsed".to_string(),
+        serde_json::json!(settings.host_list_collapsed),
+    );
+    obj.insert(
         "theme".to_string(),
         serde_json::Value::String(settings.theme.id().to_string()),
     );
@@ -312,6 +328,21 @@ mod tests {
         }));
         assert!(saved.sidebar_open);
         assert!(!saved.overview_panel_open);
+    }
+
+    #[test]
+    fn host_list_collapsed_round_trips() {
+        let mut settings = UiSettings::default();
+        settings.host_list_collapsed = ["g1".to_string(), "__ungrouped__".to_string()].into();
+
+        let mut obj = serde_json::Map::new();
+        write_ui_settings_to_object(&mut obj, &settings);
+        let loaded = ui_settings_from_value(serde_json::Value::Object(obj));
+
+        assert_eq!(loaded.host_list_collapsed, settings.host_list_collapsed);
+        assert!(ui_settings_from_value(serde_json::json!({}))
+            .host_list_collapsed
+            .is_empty());
     }
 
     #[test]

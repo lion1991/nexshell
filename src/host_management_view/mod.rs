@@ -2,6 +2,7 @@ pub mod constants;
 pub mod container_view;
 pub mod group_nav;
 pub mod host_card;
+pub mod host_list_nav;
 pub mod key_manager_view;
 pub mod search_bar;
 pub mod selection_bar;
@@ -38,6 +39,7 @@ use status_view::render_status_view;
 pub struct HostManagementViewStates {
     pub search_bar: SearchBarStates,
     pub group_nav: GroupNavStates,
+    pub host_list_nav: host_list_nav::HostListNavStates,
     pub host_cards: HostCardStates,
     pub container_cards: ContainerCardStates,
     pub selection_bar: SelectionBarStates,
@@ -50,6 +52,7 @@ impl HostManagementViewStates {
         Self {
             search_bar: SearchBarStates::new(),
             group_nav: GroupNavStates::new(),
+            host_list_nav: host_list_nav::HostListNavStates::default(),
             host_cards: HostCardStates::new(),
             container_cards: ContainerCardStates::new(),
             selection_bar: SelectionBarStates::new(),

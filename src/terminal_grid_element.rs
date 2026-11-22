@@ -860,6 +860,10 @@ pub enum TerminalGridAction {
     HostEditOne(String),
     HostDeleteOne(String),
     HostQuickConnect(String),
+    /// 终端页左侧主机列表单击：开着就跳过去，没开就连。
+    HostListOpen(String),
+    /// 主机列表折叠 / 展开分组（参数为分组 key）。
+    HostListToggleSection(String),
     HostToggleSelect(String),
     HostSelectSingle(String),
     HostToggleSelectAll,

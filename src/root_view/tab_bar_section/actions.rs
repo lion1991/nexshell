@@ -373,7 +373,11 @@ impl RootView {
 
     /// 左侧栏内容；标题栏按钮和侧栏渲染都按它判断。
     pub(in crate::root_view) fn sidebar_content(&self) -> SidebarContent {
-        sidebar_content(self.app_page)
+        let active_kind = self
+            .terminal_tabs
+            .get(self.active_tab_index)
+            .map(|tab| tab.kind);
+        sidebar_content(self.app_page, active_kind)
     }
 
     /// 右侧概览面板显示的标签；标题栏按钮、面板渲染、概览采集都按它判断。

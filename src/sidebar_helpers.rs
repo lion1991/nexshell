@@ -13,12 +13,22 @@ pub(crate) enum SidebarContent {
     None,
     /// 主机管理页的分组导航。
     HostLibraryNav,
+    /// 终端页的常驻主机列表（ADR 0023）。
+    HostList,
 }
 
-pub(crate) fn sidebar_content(page: AppPage) -> SidebarContent {
+pub(crate) fn sidebar_content(
+    page: AppPage,
+    active_kind: Option<TerminalSessionKind>,
+) -> SidebarContent {
     match page {
         AppPage::HostManagement => SidebarContent::HostLibraryNav,
-        AppPage::Terminal | AppPage::Settings => SidebarContent::None,
+        // RDP 远端分辨率按整窗宽算，开关侧栏就要重设一次，第一版不显示。
+        AppPage::Terminal => match active_kind {
+            Some(TerminalSessionKind::Rdp) | None => SidebarContent::None,
+            Some(_) => SidebarContent::HostList,
+        },
+        AppPage::Settings => SidebarContent::None,
     }
 }
 
@@ -48,13 +58,45 @@ mod tests {
     use crate::{AppPage, TerminalSessionKind};
 
     #[test]
-    fn only_host_management_page_has_a_left_sidebar() {
+    fn left_sidebar_content_by_page() {
         assert_eq!(
-            sidebar_content(AppPage::HostManagement),
+            sidebar_content(AppPage::HostManagement, None),
             SidebarContent::HostLibraryNav
         );
-        assert_eq!(sidebar_content(AppPage::Terminal), SidebarContent::None);
-        assert_eq!(sidebar_content(AppPage::Settings), SidebarContent::None);
+        assert_eq!(
+            sidebar_content(AppPage::Settings, Some(TerminalSessionKind::Remote)),
+            SidebarContent::None
+        );
+    }
+
+    #[test]
+    fn terminal_page_shows_host_list_except_on_rdp() {
+        for kind in [
+            TerminalSessionKind::Local,
+            TerminalSessionKind::Remote,
+            TerminalSessionKind::Serial,
+            TerminalSessionKind::Telnet,
+            TerminalSessionKind::Direct,
+            TerminalSessionKind::ProcessList,
+            TerminalSessionKind::NetworkList,
+            TerminalSessionKind::SystemInfo,
+            TerminalSessionKind::GitDiff,
+            TerminalSessionKind::CodeViewer,
+        ] {
+            assert_eq!(
+                sidebar_content(AppPage::Terminal, Some(kind)),
+                SidebarContent::HostList,
+                "{kind:?}"
+            );
+        }
+        assert_eq!(
+            sidebar_content(AppPage::Terminal, Some(TerminalSessionKind::Rdp)),
+            SidebarContent::None
+        );
+        assert_eq!(
+            sidebar_content(AppPage::Terminal, None),
+            SidebarContent::None
+        );
     }
 
     #[test]

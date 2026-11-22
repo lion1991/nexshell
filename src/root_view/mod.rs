@@ -12,6 +12,7 @@ mod file_panel_section;
 mod find_section;
 mod git_panel_section;
 mod host_library_section;
+mod host_list_section;
 mod host_monitor_section;
 mod rdp_section;
 mod settings_section;
@@ -20,7 +21,7 @@ mod terminal_section;
 mod toast_section;
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
@@ -205,6 +206,10 @@ pub(crate) struct RootView {
     /// 右侧主机概览面板开关（全局持久化，不按标签存；没有概览的标签上只是不显示）。
     overview_panel_open: bool,
     overview_button_state: MouseStateHandle,
+    /// 终端页左侧主机列表推入推出（host_list_section）；开关沿用 sidebar_open。
+    host_list_slide: SlotReveal,
+    /// 主机列表里折叠的分组 key（持久化）。
+    host_list_collapsed: BTreeSet<String>,
     host_tab_state: MouseStateHandle,
     new_tab_combo_state: MouseStateHandle,
     new_tab_plus_state: MouseStateHandle,
@@ -595,6 +600,8 @@ impl RootView {
             sidebar_button_state: Arc::new(Mutex::new(MouseState::default())),
             overview_panel_open: ui_settings.overview_panel_open,
             overview_button_state: Arc::new(Mutex::new(MouseState::default())),
+            host_list_slide: SlotReveal::new(),
+            host_list_collapsed: ui_settings.host_list_collapsed,
             host_tab_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_combo_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_plus_state: Arc::new(Mutex::new(MouseState::default())),
@@ -1544,6 +1551,7 @@ impl RootView {
             || self.tab_accent_bar_x.borrow().is_animating()
             || self.tab_accent_bar_w.borrow().is_animating()
             || self.sidebar_toggle_slot.is_animating()
+            || self.host_list_slide.is_animating()
             || self.file_button_slot.is_animating()
             || self.git_button_slot.is_animating()
             || self.overview_button_slot.is_animating()
@@ -1583,6 +1591,13 @@ impl RootView {
                 .host_view_states
                 .borrow()
                 .group_nav
+                .hover_transitions
+                .borrow()
+                .any_animating(now)
+            || self
+                .host_view_states
+                .borrow()
+                .host_list_nav
                 .hover_transitions
                 .borrow()
                 .any_animating(now)
@@ -1939,6 +1954,8 @@ impl View for RootView {
 
             self.render_active_tab_body_with_side_panels(terminal_stack.finish(), app)
         };
+
+        let body = self.render_body_with_host_list(body);
 
         let main_layout = Flex::column()
             .with_main_axis_size(MainAxisSize::Max)
@@ -2635,6 +2652,10 @@ impl TypedActionView for RootView {
             // === 主机库（host_library_section）===
             TerminalGridAction::HostQuickConnect(host_id) => {
                 self.handle_host_quick_connect(host_id.clone(), ctx)
+            }
+            TerminalGridAction::HostListOpen(host_id) => self.handle_host_list_open(host_id, ctx),
+            TerminalGridAction::HostListToggleSection(key) => {
+                self.handle_host_list_toggle_section(key, ctx)
             }
             TerminalGridAction::HostToggleSelect(host_id) => {
                 self.handle_host_toggle_select(host_id.clone(), ctx)
@@ -3419,6 +3440,7 @@ impl RootView {
         save_ui_settings_to_disk(&UiSettings {
             sidebar_open: self.sidebar_open,
             overview_panel_open: self.overview_panel_open,
+            host_list_collapsed: self.host_list_collapsed.clone(),
             theme: self.current_theme,
             font_size: self.terminal_font_size,
             line_height_ratio: self.line_height_ratio,
