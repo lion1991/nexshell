@@ -6,3 +6,4 @@
 
 | 编号 | 要做什么 | 登记日期 |
 |---|---|---|
+| T-001 | 分屏后关掉原 pane（tab 级 ssh handle 属于第一个连接），确认文件面板和远程编辑还能不能用；不能用再定 handle 跟哪个 pane。代码位置：`src/root_view/terminal_section/split.rs` 的 `split_active_pane`。 | 2026-11-22 |

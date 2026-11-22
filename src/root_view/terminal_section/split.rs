@@ -148,8 +148,7 @@ impl RootView {
         let mut new_terminal = new_terminal;
         Self::attach_terminal_streams(&mut new_terminal, None, ctx);
         // Split pane: 新 PTY/SSH 是新 pane 上的，file_panel 当前按 tab 维度（per-tab）
-        // 关联 ssh_handle，多 pane 场景的 handle 选择策略后续再细化。
-        // 这里不接 ssh_handle_stream，receiver 自然 drop。
+        // 关联 ssh_handle，这里不接 ssh_handle_stream，receiver 自然 drop。TODO(T-001)
         let new_terminal = Arc::new(Mutex::new(new_terminal));
 
         let new_pane_id = NexPaneId::new();
