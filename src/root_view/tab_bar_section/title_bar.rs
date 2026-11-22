@@ -236,16 +236,6 @@ impl RootView {
         let mut w = self.tab_accent_bar_w.borrow_mut();
         if let Some((bar, tab)) = rects {
             let (tx, tw) = (tab.min_x() - bar.min_x(), tab.width());
-            // NEXSHELL_BAR_DEBUG=1 时打印弹簧轨迹（定位滑动异常用，临时观测件）。
-            if std::env::var_os("NEXSHELL_BAR_DEBUG").is_some() {
-                eprintln!(
-                    "[bar] active={active} bar_min_x={:.1} tab=({:.1},{:.1} w{:.1}) target_x={tx:.1} target_w={tw:.1}",
-                    bar.min_x(),
-                    tab.min_x(),
-                    tab.min_y(),
-                    tab.width(),
-                );
-            }
             self.tab_accent_bar_y.set(tab.max_y() - bar.min_y() - 2.0);
             if self.tab_accent_bar_init.get() {
                 x.set_target(tx);
@@ -261,11 +251,6 @@ impl RootView {
         }
         // 取整到整像素：2px 细条在小数坐标发虚，收敛尾部亚像素位移显成抖动。
         let (sx, sw) = (x.sample(now).round(), w.sample(now).round());
-        if std::env::var_os("NEXSHELL_BAR_DEBUG").is_some()
-            && (x.is_animating() || w.is_animating())
-        {
-            eprintln!("[bar] sample x={sx:.1} w={sw:.1}");
-        }
         Some((sx, self.tab_accent_bar_y.get(), sw))
     }
 

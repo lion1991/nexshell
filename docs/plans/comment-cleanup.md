@@ -273,7 +273,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 建议：保留
 - 风险：低：PBKDF2/AES 只跑几秒，期间点取消无反应；任务结束后回调会清状态（transfer.rs:209、:317 clear_host_password_state）。
 - 决定：保留
-- 完成：
+- 完成：2026-11-21（保留，不动）
 
 #### B-008 `src/root_view/settings_section.rs:112` `RootView`
 
@@ -299,7 +299,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：低：不影响功能，但「临时」已名不副实；每帧两次读环境变量 + 无文档的隐藏开关。确认异常已解决后删掉这两块 eprintln 与这句注释。
 - 决定：修代码
 - 拍板备注：删掉两处 eprintln 和这句注释。它要定位的底条滑动毛病，在引入它的同一个提交 1008863 里就修掉了，之后这段代码没再动过（见拍板记录）。
-- 完成：
+- 完成：2026-11-21
 
 #### B-010 `src/root_view/terminal_section/split.rs:150`–152 `RootView.split_active_pane`
 
