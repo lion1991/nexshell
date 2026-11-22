@@ -194,12 +194,21 @@ pub fn path_has_dotdot(path: &str) -> bool {
     path.split('/').any(|seg| seg == "..")
 }
 
-/// 原子覆盖用的同目录临时文件名：`.<name>.nexshell-tmp`。
-/// 必须同目录，rename 才在同一文件系统内，是真正的原子替换。
+/// 覆盖写用的同目录临时文件名：`.<name>.nexshell-tmp`。
+/// 必须同目录，rename 才在同一文件系统内。
 pub fn temp_sibling(path: &str) -> String {
+    hidden_sibling(path, "nexshell-tmp")
+}
+
+/// 远端覆盖时原文件让位用的同目录名：`.<name>.nexshell-bak`，换入成功后删掉。
+fn backup_sibling(path: &str) -> String {
+    hidden_sibling(path, "nexshell-bak")
+}
+
+fn hidden_sibling(path: &str, suffix: &str) -> String {
     match path.rfind('/') {
-        Some(idx) => format!("{}/.{}.nexshell-tmp", &path[..idx], &path[idx + 1..]),
-        None => format!(".{path}.nexshell-tmp"),
+        Some(idx) => format!("{}/.{}.{suffix}", &path[..idx], &path[idx + 1..]),
+        None => format!(".{path}.{suffix}"),
     }
 }
 
@@ -234,8 +243,10 @@ fn owner_only_attrs(uid: u32, gid: u32) -> russh_sftp::protocol::FileAttributes 
     }
 }
 
-/// 把临时文件原子改名成目标。russh-sftp 没有 posix-rename 扩展，
-/// 而 SFTP v3 的 rename 是否允许覆盖各服务端不一：先直接试，失败再删目标重试。
+/// 把临时文件改名成目标，任何一步失败原文件都还在。
+/// SFTP v3 的 rename 不许覆盖（OpenSSH 目标已存在就失败），russh-sftp 2.1 的 SftpSession
+/// 又发不了 posix-rename 扩展：先直接试，失败就把原文件改名让位到 `.<name>.nexshell-bak`，
+/// 换入新文件后再删它；换入失败则把原文件改回来。中途断线时原文件留在 `.nexshell-bak` 里。
 /// 目标已有的属主、权限位先搬到临时文件上，避免覆盖后属主变成登录用户、丢掉可执行位。
 /// 属主尽力而为（非 root 通常无权 chown，忽略失败）；先 chown 再 chmod，chown 会清 setuid/setgid。
 async fn rename_overwrite(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
@@ -250,10 +261,18 @@ async fn rename_overwrite(sftp: &SftpSession, from: &str, to: &str) -> Result<()
     if sftp.rename(from, to).await.is_ok() {
         return Ok(());
     }
-    let _ = sftp.remove_file(to).await;
-    sftp.rename(from, to)
+    let backup = backup_sibling(to);
+    // 目标还在，同名的 .nexshell-bak 只能是上次换入成功后没删掉的旧版本，清掉才能让位。
+    let _ = sftp.remove_file(&backup).await;
+    sftp.rename(to, &backup)
         .await
-        .map_err(|error| format!("rename({from} -> {to}) failed: {error}"))
+        .map_err(|error| format!("rename({to} -> {backup}) failed: {error}"))?;
+    if let Err(error) = sftp.rename(from, to).await {
+        let _ = sftp.rename(&backup, to).await;
+        return Err(format!("rename({from} -> {to}) failed: {error}"));
+    }
+    let _ = sftp.remove_file(&backup).await;
+    Ok(())
 }
 
 /// 广度优先递归远端目录；rel 为相对 root 的 POSIX 路径（不含前导斜杠）。
@@ -449,7 +468,7 @@ pub async fn put_file_stream(
         .await
         .map_err(|error| format!("open local {} failed: {error}", local.display()))?;
 
-    // 先写同目录临时文件，完整写完再 rename 覆盖：中断不会破坏原文件
+    // 先写同目录临时文件，完整写完再 rename 覆盖：中断不会破坏原文件（覆盖过程见 rename_overwrite）
     let tmp = temp_sibling(remote);
     let mut remote_file = sftp
         .open_with_flags(
@@ -643,7 +662,7 @@ pub async fn read_file_to_memory(
 }
 
 /// 把内存内容覆盖写回远端文件，供内置编辑器保存（ADR 0005）。
-/// 同目录临时文件写完再 rename 覆盖；中途失败只清理临时文件，原文件保持完整。
+/// 同目录临时文件写完再 rename 覆盖（见 rename_overwrite）；中途失败只清理临时文件，原文件保持完整。
 pub async fn write_file_from_memory(
     sftp: &SftpSession,
     path: &str,
@@ -716,6 +735,123 @@ pub async fn stat_file(sftp: &SftpSession, path: &str) -> Result<RemoteEntry, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 本机 OpenSSH 的 sftp-server 经 socketpair 接到 stdin/stdout，跑真实的 SFTP v3 语义；没装就返回 None。
+    #[cfg(unix)]
+    fn openssh_sftp() -> Option<(tokio::runtime::Runtime, SftpSession, std::process::Child)> {
+        use std::os::fd::OwnedFd;
+        use std::process::{Command, Stdio};
+        let server = [
+            "/usr/libexec/sftp-server",
+            "/usr/lib/openssh/sftp-server",
+            "/usr/libexec/openssh/sftp-server",
+        ]
+        .into_iter()
+        .find(|p| Path::new(p).exists())?;
+        let (ours, theirs) = std::os::unix::net::UnixStream::pair().ok()?;
+        let theirs_out = theirs.try_clone().ok()?;
+        let child = Command::new(server)
+            .stdin(Stdio::from(OwnedFd::from(theirs)))
+            .stdout(Stdio::from(OwnedFd::from(theirs_out)))
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        ours.set_nonblocking(true).ok()?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        let sftp = rt.block_on(async {
+            let stream = tokio::net::UnixStream::from_std(ours).ok()?;
+            SftpSession::new(stream).await.ok()
+        })?;
+        Some((rt, sftp, child))
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o7777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_overwrite_replaces_existing_file_on_openssh() {
+        use std::os::unix::fs::PermissionsExt;
+        let Some((rt, sftp, mut child)) = openssh_sftp() else {
+            eprintln!("skip: 本机没有 OpenSSH sftp-server");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("a.sh");
+        let target_s = target.to_str().unwrap().to_string();
+        let tmp_s = temp_sibling(&target_s);
+        std::fs::write(&target, "old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&tmp_s, "new").unwrap();
+        // 前提：OpenSSH 的 rename 不覆盖已存在的目标，所以覆盖一定走让位路径。
+        let other = dir.path().join("other");
+        std::fs::write(&other, "x").unwrap();
+        assert!(rt
+            .block_on(sftp.rename(other.to_str().unwrap(), tmp_s.as_str()))
+            .is_err());
+        std::fs::remove_file(&other).unwrap();
+
+        rt.block_on(rename_overwrite(&sftp, &tmp_s, &target_s))
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+        assert_eq!(mode_of(&target), 0o755);
+        assert!(!Path::new(&tmp_s).exists());
+        assert!(!Path::new(&backup_sibling(&target_s)).exists());
+        let _ = child.kill();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_overwrite_keeps_original_when_swap_in_fails() {
+        let Some((rt, sftp, mut child)) = openssh_sftp() else {
+            eprintln!("skip: 本机没有 OpenSSH sftp-server");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("a.txt");
+        let target_s = target.to_str().unwrap().to_string();
+        std::fs::write(&target, "old").unwrap();
+        // 临时文件不存在：换入那一步必然失败，原文件要被改回原名。
+        let missing = temp_sibling(&target_s);
+
+        assert!(rt
+            .block_on(rename_overwrite(&sftp, &missing, &target_s))
+            .is_err());
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old");
+        assert!(!Path::new(&backup_sibling(&target_s)).exists());
+        let _ = child.kill();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_overwrite_clears_stale_backup() {
+        let Some((rt, sftp, mut child)) = openssh_sftp() else {
+            eprintln!("skip: 本机没有 OpenSSH sftp-server");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("a.txt");
+        let target_s = target.to_str().unwrap().to_string();
+        let tmp_s = temp_sibling(&target_s);
+        std::fs::write(&target, "old").unwrap();
+        std::fs::write(backup_sibling(&target_s), "stale").unwrap();
+        std::fs::write(&tmp_s, "new").unwrap();
+
+        rt.block_on(rename_overwrite(&sftp, &tmp_s, &target_s))
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+        assert!(!Path::new(&backup_sibling(&target_s)).exists());
+        let _ = child.kill();
+    }
 
     #[test]
     fn safe_path_segment_rejects_windows_separators_and_drive_letters() {
