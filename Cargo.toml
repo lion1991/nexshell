@@ -11,7 +11,7 @@ voice_input = []
 integration_tests = []
 # 实际运行的应用 feature：拉入 warpui + warpui_core（皆 MIT），在 macOS 上
 # 同时把 warp 的整个平台层 (cocoa/metal/font-kit/objc) 间接拉入。
-warpui-app = ["dep:settings", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim", "dep:sum_tree", "dep:string-offset", "dep:vec1", "dep:arrayvec", "dep:smallvec", "dep:num-traits", "dep:itertools", "dep:instant", "dep:bounded-vec-deque", "dep:uuid", "dep:rayon", "dep:concat-idents", "dep:cfg-if", "dep:mime_guess", "dep:async-fs", "dep:futures", "dep:rangemap", "dep:similar", "dep:line-ending", "dep:syntax_tree", "dep:languages"]
+warpui-app = ["dep:settings", "dep:warp_editor", "dep:warpui", "dep:warpui_core", "dep:warpui_extras", "dep:warp_terminal", "dep:warp_util", "dep:pathfinder_color", "dep:pathfinder_geometry", "dep:warp_core", "dep:schemars", "dep:settings_value", "dep:vim", "dep:sum_tree", "dep:string-offset", "dep:vec1", "dep:arrayvec", "dep:smallvec", "dep:num-traits", "dep:itertools", "dep:instant", "dep:bounded-vec-deque", "dep:uuid", "dep:rayon", "dep:concat-idents", "dep:cfg-if", "dep:futures", "dep:rangemap", "dep:similar", "dep:line-ending", "dep:syntax_tree", "dep:languages"]
 
 [dependencies]
 alacritty_terminal = "0.25"
@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 encoding_rs = "0.8"
 # 用于判断 IME marked text 字符的列宽（CJK 占 2 cell），与 Warp
-# `grid_renderer.rs:653` 调 `width()` 的语义一致。
+# grid_renderer.rs 里 marked text 字符调 `width()` 的语义一致。
 unicode-width = "0.2"
 # PTY event loop 完全按 Warp 来：mio 接 master fd + signal_hook_mio 接 SIGCHLD
 # + parking_lot::FairMutex 让 PTY 写线程主动让锁、main 线程读 snapshot 不卡。
@@ -34,7 +34,7 @@ parking_lot = "0.12.1"
 async-channel = "2.3.1"
 futures-lite = "1.13.0"
 log = "0.4"
-# util::bindings 本地化所需：CustomAction derive(Sequence) + CUSTOM_TAG_TO_ACTION，版本对齐 warp。
+# util::bindings 本地化所需：CustomAction derive(Sequence) + CUSTOM_TAG_TO_ACTION。
 enum-iterator = "1.5"
 lazy_static = "1.5"
 rust-i18n = "4"
@@ -65,20 +65,19 @@ ironrdp-core = "0.2"
 ironrdp-async = "0.10"
 ironrdp-tokio = "0.10"
 ironrdp-tls = { version = "0.2", default-features = false, features = ["rustls"] }
-# CLIPRDR 剪贴板通道（见 docs/adr/0007 第⑤步）。0.6.0 依赖 pdu 0.8/svc 0.7/core 0.2，
-# 与树内 connector 0.9/session 0.10 完全一致。cliprdr-native 只有 windows 后端、macOS 仅 stub，
-# 故不引 native，自实现 CliprdrBackend + arboard 访问 Mac 剪贴板。
+# CLIPRDR 剪贴板通道（见 docs/adr/0016）。cliprdr-native 只有 windows 后端、macOS 仅 stub，
+# 故不引 native，自实现 CliprdrBackend；macOS 侧用 NSPasteboard，其他平台用 arboard。
 ironrdp-cliprdr = "0.7"
-# EGFX 图形管线（MS-RDPEGFX，见 docs/adr/0008）。dvc 0.7 承载动态虚拟通道，
-# egfx 0.2 是 EGFX DVC 处理器。不开 openh264 feature（解码走 VideoToolbox，第②步）。
+# EGFX 图形管线（MS-RDPEGFX，见 docs/adr/0008）。dvc 承载动态虚拟通道，
+# egfx 是 EGFX DVC 处理器。不开 openh264 feature（解码走 VideoToolbox）。
 ironrdp-dvc = "0.8"
 ironrdp-egfx = "0.3"
 ironrdp-svc = "0.8"
 # Display Control 动态通道（MS-RDPEDISP，见 docs/adr/0008）：窗口尺寸/全屏变化时
-# 实时重设远端分辨率，消除 letterbox 黑边。0.7.0 依赖 dvc 0.7/svc 0.7/pdu 0.8/core 0.2，与树内一致。
+# 实时重设远端分辨率，消除 letterbox 黑边。
 ironrdp-displaycontrol = "0.8"
-# RDPSND 音频重定向（仅输出方向）：rdpsnd 0.8 协议层 + rdpsnd-native 0.6 cpal 播放后端
-# （默认 feature 含 Opus 解码）。与树内 pdu 0.8/svc 0.7/core 0.2 一致。
+# RDPSND 音频重定向（仅输出方向）：rdpsnd 协议层 + rdpsnd-native 的 cpal 播放后端
+# （默认 feature 含 Opus 解码）。
 ironrdp-rdpsnd = "0.9"
 ironrdp-rdpsnd-native = "0.7"
 # RDPDR 设备重定向通道；驱动器重定向做文件互拷，音频开启时也用它满足 rdpsnd 依赖。
@@ -93,7 +92,7 @@ ironrdp-rdpemt = "0.1"
 # 只为在 RDP 连接前显式 install_default crypto provider（树内两 provider 共存，
 # 不指定 rustls builder 会 panic）。ring 已在树，零新增编译量。
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-# git 面板用：监听仓库 .git/ 与工作区变化触发自动刷新。Warp 同款思路，
+# git 面板 / 文件面板用：监听目录变化触发自动刷新。Warp 同款思路，
 # 用 upstream crates.io 版本即可，不引入 fork。
 notify-debouncer-full = "0.3"
 # text_editor 核心数据结构依赖（CRDT buffer / display_map，砍 ai/image/voice 后仍需要），版本对齐 Cargo.lock。
@@ -106,11 +105,9 @@ instant = { version = "0.1", features = ["wasm-bindgen"], optional = true }
 bounded-vec-deque = { version = "0.1", optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 rayon = { version = "1", optional = true }
-# editor 本地化补依赖：settings 宏裸用 concat_idents::；element/settings 用 cfg-if；mod.rs 用 mime_guess/async-fs。
+# editor 本地化补依赖：settings 宏裸用 concat_idents::；element 用 cfg-if。
 concat-idents = { version = "1.1.4", optional = true }
 cfg-if = { version = "1.0.0", optional = true }
-mime_guess = { version = "2.0", optional = true }
-async-fs = { version = "2.1.2", optional = true }
 # code_editor 本地化补依赖：diff/model 用 futures/rangemap/similar，行尾用 line-ending。
 futures = { version = "0.3", features = ["executor", "thread-pool"], optional = true }
 rangemap = { version = "1.3.0", optional = true }
@@ -152,7 +149,7 @@ signal-hook-mio = { version = "0.2.4", features = ["support-v1_0"] }
 
 [target.'cfg(any(unix, windows))'.dependencies]
 # Warp UI crates are consumed as path dependencies so the Warp workspace does
-# not need to include this spike as a member.
+# not need to include NexShell as a member.
 settings = { path = "../warp/crates/settings", optional = true }
 # schema_gen/settings_value：JsonSchema+SettingsValue derive（原靠 warp app 传播，删后须自启）。
 warpui = { path = "../warp/crates/warpui", features = ["schema_gen", "settings_value"], optional = true }
@@ -184,7 +181,7 @@ required-features = ["warpui-app"]
 
 [dev-dependencies]
 tempfile = "3"
-# rdp_probe 探针把 framebuffer 落盘成 PNG 验证（仅验证用，运行期喂 warpui RGBA）。
+# examples（rdp_probe / egfx_replay）把 framebuffer 落盘成 PNG 验证（仅验证用，运行期喂 warpui RGBA）。
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [build-dependencies]
@@ -192,8 +189,8 @@ cc = "1"
 embed-resource = "3"
 
 [patch.crates-io]
-# Keep Warp's patched CoreText/CoreGraphics stack active even though this
-# spike is intentionally outside the Warp workspace. Without this, font-kit
+# Keep Warp's patched CoreText/CoreGraphics stack active even though NexShell
+# is intentionally outside the Warp workspace. Without this, font-kit
 # sees CGFont from two core-graphics versions and fails with E0308.
 core-foundation = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }
 core-foundation-sys = { git = "https://github.com/servo/core-foundation-rs", rev = "6f844cf1a1a18e25b70fcdf1bcdc458555bd2eff" }

@@ -13,7 +13,7 @@ AGENTS.md
 .claude/
 docs/code-review-*.md
 
-# RDP/EGFX 调试产物（NEXSHELL_RDP_EGFX_DUMP 的 fork dump.rs 会把 env 值当目录写入 CWD）
+# RDP/EGFX 调试产物（NEXSHELL_RDP_EGFX_DUMP 设为相对目录时，decoder_vt 会把 `*_avc420_*B.bin` 写进 CWD）
 egfx*.log
 meta.jsonl
 *_progressive_s*_w*_h*_ctx*.bin
