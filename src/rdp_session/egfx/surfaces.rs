@@ -151,8 +151,6 @@ impl Compositor {
         self.surfaces.get(&surface_id).and_then(|s| s.mapped)
     }
 
-    // ---- 生命周期 ----
-
     /// 按远端宽高分配 surface；超单块尺寸或会话总预算则拒绝并报错（调用方断开会话）。
     pub fn create_surface(
         &mut self,
@@ -224,8 +222,6 @@ impl Compositor {
     pub fn dec_count(&self) -> u64 {
         self.dec_count
     }
-
-    // ---- 写入 ----
 
     /// 直接改 surface 像素（AVC444 合成写回用）。
     pub fn surface_mut(&mut self, surface_id: u16) -> Option<&mut Surface> {
@@ -382,8 +378,6 @@ impl Compositor {
         }
         (dirties, false)
     }
-
-    // ---- surface / cache 操作 ----
 
     pub fn solid_fill(&mut self, pdu: &SolidFillPdu) -> Vec<SurfaceRect> {
         let Some(surface) = self.surfaces.get_mut(&pdu.surface_id) else {
@@ -701,10 +695,6 @@ pub fn has_dark_vline(pixels: &[u8], w: u16, h: u16, min_run: usize) -> bool {
     false
 }
 
-// ============================================================================
-// 像素块自由函数（可单测）
-// ============================================================================
-
 /// RDPGFX_COLOR32（b,g,r,xa）→ RGBA（不透明）。
 fn color_to_rgba(c: &Color) -> [u8; 4] {
     [c.r, c.g, c.b, 0xFF]
@@ -724,7 +714,6 @@ fn blit(
 ) -> Option<(u16, u16, u16, u16)> {
     let (dst_w, dst_h) = (i32::from(dst_w), i32::from(dst_h));
     let (src_w, src_h) = (i32::from(src_w), i32::from(src_h));
-    // 目标可见范围。
     let x0 = dx.max(0);
     let y0 = dy.max(0);
     let x1 = (dx + src_w).min(dst_w);
