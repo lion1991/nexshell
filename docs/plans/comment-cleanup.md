@@ -94,7 +94,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：建议拆成两步：voice_input 在清理 text_editor 死分支后删 feature；integration_tests 因 warp 的 settings 宏展开而必须保留，注释可改成只讲这一条。
 - 决定：保留
 - 拍板备注：推翻「记待办」。`voice_input` 的 cfg 是 `src/text_editor/` 里的 Warp 上游原文（warp `app/src/editor/view/` 同样有），text_editor 已定为与上游保持一致、不清理，所以这两个空 feature 要一直留着，没有后续动作可记。
-- 完成：
+- 完成：2026-11-21（保留，不动）
 
 #### B-002 `Cargo.toml:205`–206 `(顶层)`
 
@@ -109,7 +109,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：待办已存在于 docs/plans/2026-11-21-upstream-catch-up-backlog.md 与 ADR 0017「后续」，注释无需改；此条是「是否排期升级」的提醒。
 - 决定：保留
 - 拍板备注：推翻「记待办」。升级 russh、撤 fork 已经记在 ADR 0017 和 `docs/plans/2026-11-21-upstream-catch-up-backlog.md`，注释自带 ADR 引用和退出条件，不在 `docs/todo.md` 再登记一份。
-- 完成：
+- 完成：2026-11-21（保留，不动）
 
 ### C 过期的「为什么」
 
