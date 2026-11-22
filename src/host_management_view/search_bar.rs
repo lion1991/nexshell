@@ -121,7 +121,6 @@ pub fn render_search_bar(
 
     row.add_child(Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish());
 
-    // 全选 + 选择操作只在选择态出现（移出常驻栏）
     if selected_count > 0 {
         row.add_child(render_select_all_button(
             &states.select_all_state,
@@ -423,14 +422,12 @@ fn render_view_mode_toggle(
             if states.view_mode_thumb_init.get() {
                 thumb.set_target(target_x);
             } else {
-                // 首帧直接落位，不从 0 滑过去。
                 thumb.snap(target_x);
                 states.view_mode_thumb_init.set(true);
             }
             // 取整到整像素，防止收敛尾部亚像素抖动发虚（同 tab 底条）。
             thumb.sample(Instant::now()).round()
         };
-        // thumb 底层，尺寸/圆角与按钮自画背景块同规格，margin_left 定位。
         stack.add_child(
             Container::new(
                 ConstrainedBox::new(warpui::elements::Empty::new().finish())
@@ -579,7 +576,6 @@ fn render_toolbar_actions(
         .finish()
 }
 
-// 工具栏竖向细分隔线，分区用。
 fn toolbar_divider(hc: &HostUiColors) -> Box<dyn Element> {
     Container::new(
         ConstrainedBox::new(
@@ -596,7 +592,6 @@ fn toolbar_divider(hc: &HostUiColors) -> Box<dyn Element> {
     .finish()
 }
 
-// 次级操作纯图标按钮（隐私/导入/导出/云同步），hover 出背景 + tooltip 显示名字。
 fn render_toolbar_action_button(
     state: &MouseStateHandle,
     icon_path: &'static str,

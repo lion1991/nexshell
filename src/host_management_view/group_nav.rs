@@ -113,7 +113,6 @@ pub fn render_group_nav(
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-    // 功能区（可扩展：未来在此追加更多功能菜单入口）
     col.add_child(render_function_item(
         "状态总览".to_string(),
         ICON_ACTIVITY,
@@ -289,7 +288,6 @@ fn render_group_item(
         } else {
             hc.text_primary
         };
-        // 计数选中态跟随 accent，其余次级色。
         let count_color = if is_selected {
             hc.text_accent
         } else {
@@ -348,7 +346,6 @@ fn render_group_item(
     .finish()
 }
 
-// 分组色标：所有主机用 accent 列表图标，普通分组用按 id 取色的 8×8 圆角色点。
 fn group_marker(is_all: bool, group_id: &str, hc: &HostUiColors) -> Box<dyn Element> {
     if is_all {
         return ConstrainedBox::new(Icon::new(ICON_LIST_VIEW, hc.text_accent).finish())
@@ -372,7 +369,6 @@ fn group_marker(is_all: bool, group_id: &str, hc: &HostUiColors) -> Box<dyn Elem
         .finish()
 }
 
-// 区块小标题，如"最近访问"（降级为 SMALL 字号、无分隔线）。
 fn render_section_title(
     label: &str,
     top_pad: f32,
@@ -390,7 +386,6 @@ fn render_section_title(
     .finish()
 }
 
-// 最近访问项单行：>_ 图标 + 主机名（可截断）+ 弹性空档 + 相对时间恒右，点击快连。
 fn render_recent_item(
     item: &RecentHostSnapshot,
     index: usize,
@@ -422,7 +417,6 @@ fn render_recent_item(
                         .with_cross_axis_alignment(CrossAxisAlignment::Center)
                         .with_child(
                             Container::new(
-                                // 24×24 协议色底 + 居中 14 图标（padding=(24-14)/2）。
                                 Container::new(
                                     ConstrainedBox::new(Icon::new(ICON_TERMINAL, icon_fg).finish())
                                         .with_width(14.0)
@@ -487,7 +481,6 @@ fn render_recent_item(
     .finish()
 }
 
-// Unix 秒 → 相对时间中文。
 fn relative_time(accessed_at: i64) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -644,7 +637,6 @@ fn render_function_item(
     let state = state.clone();
 
     let is_hovered = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
-    // 选中时背景恒为 hover 色（不随鼠标变），否则常规 hover 切换。
     let target = if is_selected || is_hovered {
         hc.card_bg_hover
     } else {

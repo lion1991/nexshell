@@ -37,7 +37,6 @@ impl DesignTokens {
     }
 }
 
-// ── chrome（旧 UiColors）：标题栏 / 标签 / tooltip / 下拉 chrome ──
 #[derive(Clone, Copy)]
 pub struct ChromeColors {
     pub title_bar_bg: ColorU,
@@ -95,7 +94,6 @@ impl ChromeColors {
     }
 }
 
-// ── overview（旧 HostOverviewColors）：主机概览面板 / 图表 ──
 #[derive(Clone, Copy)]
 pub struct OverviewColors {
     pub panel_bg: ColorU,
@@ -147,7 +145,6 @@ impl OverviewColors {
     }
 }
 
-// ── host（旧 HostUiColors）：主机管理列表页 ──
 #[derive(Clone, Copy)]
 pub struct HostColors {
     pub panel_bg: ColorU,

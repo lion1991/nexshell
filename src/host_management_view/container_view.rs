@@ -256,11 +256,9 @@ fn host_section_hidden(state: Option<&ContainerOverviewUiState>) -> bool {
     if !snap.has_collected_data() && snap.status != ContainerCollectStatus::Ready {
         return true;
     }
-    // 未装 docker
     if matches!(snap.error, Some(ContainerProbeError::NoDocker)) {
         return true;
     }
-    // 已就绪且无容器
     snap.containers.is_empty()
         && snap.error.is_none()
         && snap.status == ContainerCollectStatus::Ready

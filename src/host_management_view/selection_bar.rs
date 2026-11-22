@@ -193,7 +193,6 @@ pub fn render_reorder_bar(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
-    // Min：同选择条，胶囊收拢包住内容。
     let row = Flex::row()
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)

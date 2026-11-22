@@ -42,7 +42,6 @@ pub struct AppearancePageState {
     pub glass_quality_mouse_states: Vec<MouseStateHandle>,
     pub cursor_style_radio_state: RadioButtonStateHandle,
     pub cursor_style_mouse_states: Vec<MouseStateHandle>,
-    // Text 区块
     pub font_size_minus_state: MouseStateHandle,
     pub font_size_plus_state: MouseStateHandle,
     pub line_height_minus_state: MouseStateHandle,
@@ -50,7 +49,6 @@ pub struct AppearancePageState {
     pub line_height_reset_state: MouseStateHandle,
     pub view_all_fonts_checkbox_state: MouseStateHandle,
     pub view_all_fonts: bool,
-    // Language 区块
     pub language_radio_state: RadioButtonStateHandle,
     pub language_radio_mouse_states: Vec<MouseStateHandle>,
 }
@@ -141,7 +139,6 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- Window ---
     col.add_child(render_category_header(
         &rust_i18n::t!("appearance_window"),
         appearance,
@@ -233,7 +230,6 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- Cursor ---
     col.add_child(render_category_header(
         &rust_i18n::t!("appearance_cursor"),
         appearance,
@@ -275,7 +271,6 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- Language ---
     col.add_child(render_category_header(
         &rust_i18n::t!("appearance_language"),
         appearance,
@@ -326,7 +321,6 @@ pub fn render_appearance_page(
         appearance,
     ));
 
-    // --- 编辑器（文件面板「编辑」用）---
     col.add_child(render_category_header(
         &rust_i18n::t!("settings_editor_section"),
         appearance,

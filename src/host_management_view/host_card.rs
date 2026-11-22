@@ -55,7 +55,6 @@ impl HostCardStates {
     }
 }
 
-// 内联重命名：该卡处于重命名态时，name 处渲染单行输入框替代静态文本
 fn render_name_element(
     name: &str,
     is_renaming: bool,
@@ -119,7 +118,6 @@ pub fn render_host_card(
     let tags = host.tags.clone();
     let system = host.system;
 
-    // hover 颜色 eased 过渡；selected 边框保持瞬时 accent。
     let is_hovered_now = card_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
     let elevation = nexshell::design_tokens::Elevation::card();
     let (anim_bg, anim_border, anim_checkbox, anim_shadow_key, anim_shadow_ambient) = {
@@ -140,7 +138,6 @@ pub fn render_host_card(
         } else {
             hc.card_border
         };
-        // checkbox 仅 hover/选中时淡入；hover 抬升 = 双层阴影 alpha 渐入。
         let cb_target = if selected {
             hc.text_accent
         } else if is_hovered_now {
@@ -183,7 +180,6 @@ pub fn render_host_card(
             .with_main_axis_size(MainAxisSize::Min)
             .with_cross_axis_alignment(CrossAxisAlignment::Start);
 
-        // 顶部行：左侧系统图标（协议色底）+ 右侧多选 checkbox（hover/选中时淡入）
         let top_row = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
@@ -256,7 +252,6 @@ pub fn render_host_card(
             .finish(),
         );
 
-        // hover 抬升：双层阴影随 hover 淡入（alpha 由过渡驱动）。
         let shadow_key = {
             let mut s = elevation.key;
             s.color = anim_shadow_key;
@@ -336,7 +331,6 @@ fn render_select_checkbox(
     .finish()
 }
 
-// 协议标识色：badge 与系统图标底共用，SSH 蓝 / Serial 橙 / RDP 紫 / Telnet 青。
 pub(super) fn protocol_colors(protocol: &str, hc: &HostUiColors) -> (ColorU, ColorU) {
     match protocol {
         "Serial" => (hc.badge_serial_bg, hc.badge_serial_text),
@@ -406,7 +400,6 @@ fn render_tags_row(
     ui_font: fonts::FamilyId,
     hc: &HostUiColors,
 ) -> Box<dyn Element> {
-    // 无标签不渲染占位。
     if tags.is_empty() {
         return warpui::elements::Empty::new().finish();
     }
@@ -562,7 +555,6 @@ pub fn render_host_list_row(
     let tags = host.tags.clone();
     let group_name = host.group_id.clone().unwrap_or_default();
 
-    // 行 hover/选中背景 eased 过渡（选中并入目标色，一并平滑）。
     let is_hovered_now = card_state.lock().map(|s| s.is_hovered()).unwrap_or(false);
     let anim_bg = {
         let now = std::time::Instant::now();
@@ -703,7 +695,6 @@ pub fn render_host_list_row(
     .finish()
 }
 
-// 列表行的多选 checkbox：与卡片视图同语义
 fn render_list_select_checkbox(
     state: MouseStateHandle,
     host_id: String,

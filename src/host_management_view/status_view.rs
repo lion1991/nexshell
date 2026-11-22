@@ -131,14 +131,12 @@ fn render_status_card(
         .and_then(|s| s.memory.as_ref())
         .map(|m| m.percent);
     let mem_display = sample_gauge(states, format!("{host_id}:mem"), mem, now);
-    // Load 同心环数据（外→内 = 1/5/15 分钟）：load/核数 归一 + 档位色；无核数只画轨道。
     let loads = snapshot.as_ref().and_then(|s| s.load_average);
     let cores = snapshot
         .as_ref()
         .and_then(|s| s.cpu_cores)
         .filter(|c| *c > 0)
         .map(|c| c as f32);
-    // 弧走档位色动态变化：正常绿 / 中级橙 / 高负载红（每环按各自 ratio 定档）。
     let mut load_rings: [(Option<f32>, ColorU); 3] = [(None, hc.text_secondary); 3];
     let mut load_dot = hc.text_secondary;
     for (i, slot) in load_rings.iter_mut().enumerate() {
@@ -180,7 +178,6 @@ fn render_status_card(
         let uptime = snapshot.as_ref().and_then(|s| s.uptime_seconds);
         let (status_text, status_color) = status_indicator(snapshot.as_ref(), &hc);
 
-        // 顶部：主机名 + 连接状态 + 终端快连图标
         let header = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -209,7 +206,6 @@ fn render_status_card(
             .with_child(header)
             .with_child(spacer_v(14.0))
             .with_child(
-                // 参考卡四列：Load 同心环 / Mem 环 / 网络叠排 / 磁盘叠排。
                 Flex::row()
                     .with_main_axis_size(MainAxisSize::Max)
                     .with_cross_axis_alignment(CrossAxisAlignment::Center)

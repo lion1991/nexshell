@@ -3,7 +3,6 @@ use nexshell::design_tokens::scale;
 // HostUiColors 现为 design_tokens::HostColors 的门面，call-site（含 from_theme）零改动。
 pub use nexshell::design_tokens::HostColors as HostUiColors;
 
-// --- 图标路径 ---
 pub const ICON_SEARCH: &str = "icons/search.svg";
 pub const ICON_REFRESH: &str = "icons/refresh.svg";
 pub const ICON_GRID_VIEW: &str = "icons/grid-view.svg";
@@ -33,17 +32,13 @@ pub const ICON_TRASH: &str = "icons/trash.svg";
 pub const ICON_X_CIRCLE: &str = "icons/x-circle.svg";
 pub const ICON_PENCIL: &str = "icons/pencil.svg";
 
-// --- 面板布局 ---
 pub const SIDEBAR_WIDTH: f32 = 220.0;
-// 密钥页：左侧密钥列表固定宽，右侧详情 Expanded 填充。
 pub const KEY_LIST_WIDTH: f32 = 340.0;
 
-// --- 工具栏 ---
 #[allow(dead_code)]
 pub const TOOLBAR_HEIGHT: f32 = 48.0;
 pub const TOOLBAR_TITLE_SIZE: f32 = 15.0;
 
-// --- 搜索栏（顶部工具栏，液态玻璃通栏） ---
 pub const SEARCH_BAR_HORIZONTAL_PADDING: f32 = 24.0;
 pub const SEARCH_BAR_VERTICAL_PADDING: f32 = 10.0;
 /// 工具栏总高 = 纵向 padding×2(10×2) + BUTTON_HEIGHT(32) + 底边框(1)，body 顶部让位用此值。
@@ -53,7 +48,6 @@ pub const SEARCH_BAR_TOTAL_HEIGHT: f32 = 53.0;
 /// 悬浮条让位高度 = 外层纵向 margin×2(8×2) + 药丸纵向 padding×2(10×2) + 边框×2(1×2) + 内容行高(28)。
 pub const SELECTION_BAR_LET_ROOM: f32 = 66.0;
 
-// --- 卡片 ---
 #[allow(dead_code)]
 pub const CARD_MIN_WIDTH: f32 = 320.0;
 pub const CARD_PADDING: f32 = scale::SPACE_5;
@@ -61,10 +55,8 @@ pub const CARD_SPACING: f32 = scale::SPACE_4;
 pub const CARD_CORNER_RADIUS: f32 = scale::RADIUS_LG;
 pub const CARD_ICON_SIZE: f32 = 36.0;
 
-// --- 分组导航 ---
 pub const GROUP_ITEM_HEIGHT: f32 = 32.0;
 
-// --- 通用 UI ---
 pub const UI_FONT_SIZE: f32 = scale::FONT_MD;
 pub const UI_FONT_SIZE_SMALL: f32 = scale::FONT_SM;
 pub const ICON_SIZE_SM: f32 = 16.0;

@@ -82,7 +82,6 @@ fn spacer_h(width: f32) -> Box<dyn Element> {
         .finish()
 }
 
-// 列表行间细分隔线（横跨卡片内宽）。
 fn divider(hc: &HostUiColors) -> Box<dyn Element> {
     ConstrainedBox::new(
         Container::new(Empty::new().finish())
@@ -93,7 +92,6 @@ fn divider(hc: &HostUiColors) -> Box<dyn Element> {
     .finish()
 }
 
-// 左右两栏之间的竖向分隔线。
 fn vertical_divider(hc: &HostUiColors) -> Box<dyn Element> {
     ConstrainedBox::new(
         Container::new(Empty::new().finish())
@@ -145,7 +143,6 @@ pub fn render_key_manager_view(
         .finish()
 }
 
-// 左栏：整面板即拖入导入区；密钥行收在一个大圆角卡片里，行间分隔线。
 fn render_key_list_panel(
     keys: &[(SshKeyRecord, usize)],
     selected_key_id: Option<&str>,
@@ -294,7 +291,6 @@ fn render_key_row(
     .finish()
 }
 
-// 中性深色小标签（主机数 / 类型），区别于主色 tag。
 fn host_count_chip(count: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn Element> {
     Container::new(
         Flex::row()
@@ -329,7 +325,6 @@ fn type_chip(key_type: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box
     .finish()
 }
 
-// 右栏：未选中显示空态，选中显示详情（可滚动）。
 fn render_key_detail_panel(
     selected: Option<&(SshKeyRecord, usize)>,
     public_key: Option<&str>,
@@ -411,7 +406,6 @@ fn render_detail_content(
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
-    // 顶部「编辑」按钮（靠右），与编辑态的 Cancel/Save 位置呼应
     col.add_child(
         Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
@@ -431,7 +425,6 @@ fn render_detail_content(
     );
     col.add_child(spacer_v(14.0));
 
-    // 信息卡：名称 + 密码短语
     let passphrase = match key.passphrase.as_deref() {
         Some(p) if !p.is_empty() => "••••••••".to_string(),
         _ => "—".to_string(),
@@ -452,7 +445,6 @@ fn render_detail_content(
     );
     col.add_child(spacer_v(22.0));
 
-    // 复制公钥到服务器：生成 echo >> authorized_keys 命令，可选中复制去服务器执行
     if let Some(pubkey) = public_key {
         col.add_child(render_copy_to_server(
             pubkey,
@@ -464,14 +456,12 @@ fn render_detail_content(
         col.add_child(spacer_v(22.0));
     }
 
-    // 公钥
     col.add_child(section_title("公钥", ui_font, hc));
     col.add_child(spacer_v(8.0));
     let pub_text = public_key.unwrap_or("无法推导公钥（私钥已加密，需要口令）");
     col.add_child(code_block(pub_text, ui_font, hc));
     col.add_child(spacer_v(22.0));
 
-    // 私钥
     col.add_child(section_title("私钥", ui_font, hc));
     col.add_child(spacer_v(8.0));
     col.add_child(code_block(&key.content, ui_font, hc));
@@ -540,8 +530,6 @@ fn section_title(title: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Bo
     )
 }
 
-// 复制公钥到服务器卡：默认折叠成可点击入口；点击复制 echo >> authorized_keys 命令到
-// 剪贴板并展开命令（绿色等宽、可再次选中复制）。
 fn render_copy_to_server(
     public_key: &str,
     expanded: bool,
@@ -611,7 +599,6 @@ fn render_copy_to_server(
         .finish()
 }
 
-// 代码块：等宽小字号，soft-wrap 按宽度断行，可选中复制。
 fn code_block(text: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dyn Element> {
     Container::new(
         Text::new(text.to_string(), ui_font, UI_FONT_SIZE_SMALL)
@@ -628,7 +615,6 @@ fn code_block(text: &str, ui_font: fonts::FamilyId, hc: &HostUiColors) -> Box<dy
     .finish()
 }
 
-// 删除入口（点击进入二次确认）。
 fn render_delete_button(
     state: &MouseStateHandle,
     ui_font: fonts::FamilyId,
@@ -679,7 +665,6 @@ fn render_delete_button(
     .finish()
 }
 
-// 删除区：未确认显示入口；确认态显示提示 + 「确认删除」(红) / 「取消」。
 fn render_delete_section(
     confirming: bool,
     key_id: &str,
@@ -735,7 +720,6 @@ fn render_delete_section(
     col.finish()
 }
 
-// 编辑态：顶部 取消/保存，信息卡里名称/口令变可输入。
 fn render_detail_editing(
     name_editor: &ViewHandle<EditorView>,
     passphrase_editor: &ViewHandle<EditorView>,

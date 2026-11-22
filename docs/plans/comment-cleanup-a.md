@@ -72,6 +72,8 @@
 
 ## views-misc（93）
 
+已清理：2026-11-21（删 69 条，跳过 24 条：上游原文 19、实为「为什么」或出处 5；工具依赖 0 条）
+
 | 文件 | 行号 | 所在符号 | 注释原文 | 状态 |
 |---|---|---|---|---|
 | `src/design_tokens/mod.rs` | 40 | `ChromeColors` | // ── chrome（旧 UiColors）：标题栏 / 标签 / tooltip / 下拉 chrome ── |  |
@@ -125,11 +127,11 @@
 | `src/host_management_view/search_bar.rs` | 124 | `render_search_bar` | // 全选 + 选择操作只在选择态出现（移出常驻栏） |  |
 | `src/host_management_view/search_bar.rs` | 426 | `render_view_mode_toggle` | // 首帧直接落位，不从 0 滑过去。 |  |
 | `src/host_management_view/search_bar.rs` | 433 | `render_view_mode_toggle` | // thumb 底层，尺寸/圆角与按钮自画背景块同规格，margin_left 定位。 |  |
-| `src/host_management_view/search_bar.rs` | 488 | `render_view_mode_button` | // active 底色交给 thumb，这里只在非 active 时画 hover 底。 |  |
+| `src/host_management_view/search_bar.rs` | 488 | `render_view_mode_button` | // active 底色交给 thumb，这里只在非 active 时画 hover 底。 | 保留（实为「为什么」：active 底色由 thumb 画） |
 | `src/host_management_view/search_bar.rs` | 582 | `toolbar_divider` | // 工具栏竖向细分隔线，分区用。 |  |
 | `src/host_management_view/search_bar.rs` | 599 | `render_toolbar_action_button` | // 次级操作纯图标按钮（隐私/导入/导出/云同步），hover 出背景 + tooltip 显示名字。 |  |
 | `src/host_management_view/selection_bar.rs` | 196 | `render_reorder_bar` | // Min：同选择条，胶囊收拢包住内容。 |  |
-| `src/host_management_view/status_view.rs` | 68 | `render_status_view` | // 清理已删除主机的 sweep 过渡（key = "{host_id}:mem\|load0..2"）。 |  |
+| `src/host_management_view/status_view.rs` | 68 | `render_status_view` | // 清理已删除主机的 sweep 过渡（key = "{host_id}:mem\|load0..2"）。 | 保留（记 key 格式，下面的解析依赖它） |
 | `src/host_management_view/status_view.rs` | 134 | `render_status_card` | // Load 同心环数据（外→内 = 1/5/15 分钟）：load/核数 归一 + 档位色；无核数只画轨道。 |  |
 | `src/host_management_view/status_view.rs` | 141 | `render_status_card` | // 弧走档位色动态变化：正常绿 / 中级橙 / 高负载红（每环按各自 ratio 定档）。 |  |
 | `src/host_management_view/status_view.rs` | 183 | `render_status_card` | // 顶部：主机名 + 连接状态 + 终端快连图标 |  |
@@ -151,13 +153,13 @@
 | `src/ui_components/avatar.rs` | 62 | `Avatar.build` | // One third of the total avatar height/width should be padding. | 保留（上游原文） |
 | `src/ui_components/avatar.rs` | 76 | `Avatar.build` | // One third of the total avatar height/width should be padding. | 保留（上游原文） |
 | `src/util/bindings.rs` | 11 | `CustomAction` | // CustomActions are attached to menu items, and may be attached to Bindings. | 保留（上游原文） |
-| `src/util/bindings.rs` | 392 | `(顶层)` | // ── 键绑定查询/修改 (端口自 warp util::bindings) ───────────────────────── |  |
-| `src/util/extensions.rs` | 1 | `SliceExt` | // 切片扩展：二分查找插入位置（端口自 warp app/src/util/extensions.rs） |  |
+| `src/util/bindings.rs` | 392 | `(顶层)` | // ── 键绑定查询/修改 (端口自 warp util::bindings) ───────────────────────── | 保留（出处，对照上游用） |
+| `src/util/extensions.rs` | 1 | `SliceExt` | // 切片扩展：二分查找插入位置（端口自 warp app/src/util/extensions.rs） | 保留（出处，对照上游用） |
 | `src/util/grid.rs` | 28 | `grid_cell_dimensions` | // Get the font metrics that make up the total line height for the font. | 保留（上游原文） |
 | `src/util/grid.rs` | 32 | `grid_cell_dimensions` | // Using a ratio, compared to the default line height, to appropriately scale the cell's Height. | 保留（上游原文） |
 | `src/util/grid.rs` | 50 | `grid_cell_dimensions` | // Return a default advance width if we couldn't load the advance from the glyph. | 保留（上游原文） |
 | `src/util/grid.rs` | 67–68 | `calculate_grid_baseline_position` | // Leading is additional spacing between lines.<br>// Descent is the general guideline for how far the font will go below the baseline (for single spacing). | 保留（上游原文） |
-| `src/util/mod.rs` | 9 | `merge_ranges` | // 合并相邻/重叠区间（端口自 warp app/src/util/mod.rs） |  |
+| `src/util/mod.rs` | 9 | `merge_ranges` | // 合并相邻/重叠区间（端口自 warp app/src/util/mod.rs） | 保留（出处，对照上游用） |
 | `src/view_components/action_button.rs` | 488 | `ActionButton.set_keybinding` | // Remove any subscription from a previous keybinding. | 保留（上游原文） |
 | `src/view_components/action_button.rs` | 700 | `ActionButton.render` | // Set once an element has been added to the row, to simplify spacing with conditional elements. | 保留（上游原文） |
 | `src/view_components/action_button.rs` | 703 | `ActionButton.render` | // Helper closure to render the keybinding | 保留（上游原文） |

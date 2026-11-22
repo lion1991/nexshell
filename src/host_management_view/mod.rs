@@ -155,7 +155,6 @@ pub fn render_host_management_panel(
             .with_padding_top(SEARCH_BAR_TOTAL_HEIGHT)
             .finish()
     } else if state.view_mode == HostViewMode::Containers {
-        // 容器视图常驻搜索栏：落在滚动区外，不随列表滚动。
         let container_search = search_bar::render_search_input(
             &view_states.container_cards.search_input_state,
             container_search_editor,

@@ -115,7 +115,6 @@ pub fn render_settings_view(
     let appearance = Appearance::as_ref(app);
     let theme = appearance.theme();
 
-    // --- Sidebar ---
     let mut nav_col = Flex::column()
         .with_main_axis_size(MainAxisSize::Min)
         .with_cross_axis_alignment(CrossAxisAlignment::Stretch);
@@ -163,7 +162,6 @@ pub fn render_settings_view(
     .with_width(SIDEBAR_WIDTH)
     .finish();
 
-    // --- Content header (居中 "Settings" 标题) ---
     let settings_header = Container::new(
         Align::new(
             warpui::elements::Text::new_inline(
@@ -180,7 +178,6 @@ pub fn render_settings_view(
     .with_padding_top(HEADER_PADDING)
     .finish();
 
-    // --- Content ---
     let page = match state.current_page {
         NexSettingsSection::Appearance => render_appearance_page(
             &state.appearance_state,
@@ -230,7 +227,6 @@ pub fn render_settings_view(
         .with_child(Shrinkable::new(1.0, sidebar).finish())
         .with_child(Shrinkable::new(1.0, content_scrollable).finish());
 
-    // warp: theme_chooser 侧面板
     if state.theme_chooser_open {
         let panel = render_theme_chooser_panel(state, current_theme, monospace_font, appearance);
         main_row.add_child(panel);
@@ -331,7 +327,6 @@ fn render_theme_chooser_panel(
     )
     .finish();
 
-    // --- 面板容器 ---
     ConstrainedBox::new(
         Container::new(
             Flex::column()
