@@ -1,7 +1,7 @@
 //! RDPDR 设备重定向：驱动器共享（文件互拷）+ 满足 rdpsnd 的通道依赖。
 //! 抄 mstsc/FreeRDP：macOS/Linux 固定目录 `~/NexShell RDP` 在远端表现为
-//! \\tsclient\NexShell 网盘。后端用 fork 内建的 NixRdpdrBackend，见 docs/adr/0007。
-//! 其他平台仍提供 RDPDR 通道，但不广告当地共享盘。
+//! \\tsclient\NexShell 网盘。后端用 fork 内建的 NixRdpdrBackend，见 docs/adr/0011。
+//! 其他平台只在开了 audio 时挂 Noop rdpdr 满足 rdpsnd 依赖，不广告共享盘。
 
 use std::path::{Path, PathBuf};
 

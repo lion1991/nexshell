@@ -5,7 +5,7 @@ use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::{vec2f, Vector2F, Vector2I};
 
 /// letterbox 结果：远端桌面等比缩放后落在内容区里的目标矩形（相对内容区左上原点）
-/// 加缩放比。`scale` = 逻辑像素 / 远端像素，供第 ④ 步鼠标坐标反算用。
+/// 加缩放比。`scale` = 逻辑像素 / 远端像素，供鼠标坐标反算用。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RdpViewport {
     /// 画面绘制矩形（origin 相对内容区左上；调用方按需叠加绝对 origin）。

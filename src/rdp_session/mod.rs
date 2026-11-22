@@ -1,8 +1,6 @@
 //! RDP 协议层（IronRDP 纯 Rust，见 docs/adr/0007）。
 //! 线程模型照抄 SSH：每连接一个专用 OS 线程 + current-thread tokio，
 //! 事件循环 block_on 跑，帧解码成 RGBA framebuffer，脏矩形事件推回 UI。
-//! 本步只做：TCP → NLA(CredSSP) → 能力协商 → 收图形更新 → 合成 framebuffer。
-//! 输入/剪贴板留占位（RdpInputEvent + input_tx），后续步骤实现。
 
 mod audio_diag;
 mod clipboard;
@@ -73,8 +71,7 @@ pub struct RdpSessionConfig {
     pub password: String,
     pub width: u16,
     pub height: u16,
-    /// 开 EGFX 图形管线（MS-RDPEGFX，docs/adr/0008 第①步）。
-    /// 第①步临时用 NEXSHELL_RDP_EGFX 环境变量门控，出画面后（第②步）改默认开。
+    /// 开 EGFX 图形管线（MS-RDPEGFX，docs/adr/0008）。默认开，见 default_enable_egfx。
     pub enable_egfx: bool,
     /// RDPSND 音频重定向开关（仅输出方向，cpal 播放 + Opus 解码）。
     pub enable_audio: bool,
@@ -114,7 +111,7 @@ impl RdpSessionConfig {
     }
 }
 
-/// 脏矩形（左上原点，像素）。本步图形更新统一按整帧上报。
+/// 脏矩形（左上原点，像素）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirtyRect {
     pub x: u16,
@@ -315,7 +312,7 @@ pub struct RdpSessionHandle {
     pub frame_rx: async_channel::Receiver<RdpEvent>,
     /// 共享 framebuffer，UI 重绘时读快照。
     pub framebuffer: Arc<Mutex<RdpFramebuffer>>,
-    /// 输入通道占位（本步不消费）。
+    /// 输入通道：UI 发键鼠事件，会话线程消费编码成 FastPath。
     pub input_tx: async_channel::Sender<RdpInputEvent>,
     /// 分辨率重设请求通道（动态分辨率）。UI 防抖后发，会话侧只做去重。
     pub resize_tx: async_channel::Sender<RdpResizeRequest>,
@@ -472,7 +469,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         platform: ironrdp_pdu::rdp::capability_sets::MajorPlatformType::UNSPECIFIED,
         hardware_id: None,
         license_cache: None,
-        // 开启服务端光标：本地做「远端光标接管」。accelerated 模式（下一行 false）→
+        // 开启服务端光标：本地做「远端光标接管」。accelerated 模式（见下方 pointer_software_rendering: false）→
         // IronRDP 只发 PointerBitmap 事件、不把光标合成进 framebuffer（避免双光标）。
         enable_server_pointer: true,
         autologon: false,
@@ -490,7 +487,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
         // EGFX 早期能力标志（fork patch，docs/adr/0008）：只在门控开时广告，
         // 让服务端可协商 Microsoft::Windows::RDS::Graphics 通道。
         support_dyn_vc_gfx_protocol: config.enable_egfx,
-        // 自动探测（mstsc 默认）：服务端实测 RTT/带宽后调整画质与帧率，弱网不再按局域网画质硬推。
+        // 默认报 LAN；NEXSHELL_RDP_AUTODETECT=1 才报自动探测（理由见 docs/adr/0014 决策 1）。
         connection_type: connection_type_from_env(std::env::var_os("NEXSHELL_RDP_AUTODETECT")),
         // 其余取与旧行为等价的默认：不开标准 RDP 安全、无音频采集、无 RAIL。
         enable_standard_rdp_security: false,
@@ -502,7 +499,7 @@ fn build_connector_config(config: &RdpSessionConfig) -> Config {
 }
 
 /// rdpsnd 伴随规则：audio 或 drive 任一开都必须挂 rdpsnd。
-/// MS-RDPEFS（IronRDP rdpdr/src/lib.rs:29）——rdpdr 须与 rdpsnd 同时 advertise，
+/// MS-RDPEFS（IronRDP ironrdp-rdpdr 的 Rdpdr 类型文档）——rdpdr 须与 rdpsnd 同时 advertise，
 /// 否则服务端不回 rdpdr 响应，盘符静默失效。
 fn needs_rdpsnd(enable_audio: bool, enable_drive: bool) -> bool {
     enable_audio || enable_drive

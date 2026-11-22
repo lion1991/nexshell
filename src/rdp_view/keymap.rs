@@ -2,7 +2,7 @@
 // warpui 的 KeyDown 不带硬件 keycode，只给归一化字符串 key（见 mac/utils.rs unicode_char_to_key）
 // 与 key_without_modifiers（基础字符）；故普通键走「字符串→scancode」降级路径。
 // 修饰键走 ModifierKeyChanged 携带的物理 KeyCode，精确映射（左右可分）。
-// 决策：⌘→Windows 键(LWin/RWin, 扩展 0xE0 0x5B/0x5C)，但 ⌘C/X/V/A/Z 转 Ctrl（ADR 0016 决策 8）；
+// 决策：⌘→Windows 键(LWin/RWin, 扩展 0xE0 0x5B/0x5C)，但 ⌘C/X/V/A/Z 转 Ctrl（ADR 0016 决策 8 + docs/plans/2026-09-29-rdp-clipboard.md 第 5 步）；
 // ⌥→Alt、⌃→Ctrl、Shift→Shift。
 
 use warpui_core::platform::keyboard::KeyCode;

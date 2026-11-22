@@ -243,7 +243,7 @@ impl DvcProcessor for MouseCursorClient {
                             other => eprintln!("[rdp-ptr] dvc {other:?}"),
                         }
                     }
-                    // 发送失败（通道满）回滚去重键，下次同指针可重试。
+                    // 发送失败（接收端已关）回滚去重键，下次同指针可重试。
                     if self
                         .event_tx
                         .try_send(RdpEvent::PointerChanged(pointer))

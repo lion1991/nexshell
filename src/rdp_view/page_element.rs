@@ -32,7 +32,7 @@ pub struct RdpPageElement {
     background: ColorU,
     /// 回写当前 letterbox 几何（绝对坐标），供鼠标→远端坐标反算。
     viewport_out: Arc<Mutex<Option<RdpViewport>>>,
-    /// 键鼠事件出口（会话线程消费编码成 FastPath）。满/断开则丢弃。
+    /// 键鼠事件出口（会话线程消费编码成 FastPath）。断开则丢弃。
     input_tx: async_channel::Sender<RdpInputEvent>,
     /// 上次发出的鼠标远端坐标（跨帧共享；Element 每帧重建）。去重连续 MouseMove 用。
     last_mouse: Arc<Mutex<Option<(u16, u16)>>>,
@@ -69,7 +69,7 @@ impl RdpPageElement {
         }
     }
 
-    /// 发一个输入事件；满或断开则丢弃（丢新的），绝不阻塞 UI 线程。返回 try_send 是否成功。
+    /// 发一个输入事件；断开（会话已退出）则丢弃，绝不阻塞 UI 线程。返回 try_send 是否成功。
     fn send(&self, event: RdpInputEvent) -> bool {
         self.input_tx.try_send(event).is_ok()
     }

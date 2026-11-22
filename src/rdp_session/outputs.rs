@@ -106,7 +106,7 @@ pub(super) async fn drain_outputs<W: FramedWrite>(
                             pointer.width, pointer.height, pointer.hotspot_x, pointer.hotspot_y
                         );
                     }
-                    // 发送失败（通道满）回滚去重键，下次同指针可重试，否则光标永久丢失。
+                    // 发送失败（接收端已关）回滚去重键，下次同指针可重试，否则光标永久丢失。
                     if event_tx.try_send(RdpEvent::PointerChanged(p)).is_err() {
                         memo.last_pointer_key = None;
                     }
