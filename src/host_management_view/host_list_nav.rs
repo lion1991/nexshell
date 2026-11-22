@@ -440,14 +440,14 @@ fn render_host_row(
     })
     .finish();
 
+    if host.endpoint.is_empty() {
+        return row_element;
+    }
     let endpoint = if tooltip.privacy_mode {
         mask_endpoint(&host.endpoint)
     } else {
         host.endpoint.clone()
     };
-    if host.endpoint.is_empty() {
-        return row_element;
-    }
     let tooltip_name = host.name.clone();
     let menu_target = row.menu_target;
     Hoverable::new(states.tooltip, move |mouse| {

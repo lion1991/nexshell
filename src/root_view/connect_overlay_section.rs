@@ -10,8 +10,8 @@ use nexshell::ssh_connect_progress::{SshConnectProgress, SshConnectStage};
 use nexshell::terminal_runtime::TerminalPalette;
 use warpui::color::ColorU;
 use warpui::elements::{
-    Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Expanded, Flex, Icon,
-    MainAxisSize, ParentElement, Radius, Stack, Text,
+    Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Expanded, Flex,
+    Icon, MainAxisSize, ParentElement, Radius, Stack, Text,
 };
 use warpui::{fonts, Element};
 
@@ -197,7 +197,7 @@ impl RootView {
                     .with_main_axis_size(MainAxisSize::Max)
                     .with_child(
                         ConstrainedBox::new(
-                            Container::new(warpui::elements::Empty::new().finish())
+                            Container::new(Empty::new().finish())
                                 .with_background_color(accent)
                                 .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
                                     BAR_HEIGHT / 2.0,
@@ -208,9 +208,7 @@ impl RootView {
                         .with_height(BAR_HEIGHT)
                         .finish(),
                     )
-                    .with_child(
-                        Expanded::new(1.0, warpui::elements::Empty::new().finish()).finish(),
-                    )
+                    .with_child(Expanded::new(1.0, Empty::new().finish()).finish())
                     .finish(),
             )
             .with_background_color(faded(track, opacity))

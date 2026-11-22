@@ -367,114 +367,68 @@ impl RootView {
     /// 文件面板开关按钮（settings 左侧）。
     /// active 态判定来自当前 tab 的 file_panel_open，跟 host_overview sidebar 一致。
     fn render_file_panel_button(&self) -> Box<dyn Element> {
-        let state = self.file_panel_button_state.clone();
         let is_open = self
             .file_panel_tab()
             .map(|tab| tab.file_panel_open)
             .unwrap_or(false);
-        let uc = self.ui_colors();
-        let icon_active = uc.icon_color_active;
-        let icon_inactive = uc.icon_color_inactive;
-        let hover_bg = uc.icon_button_hover_bg;
-        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
-        let btn_bg = self.titlebar_btn_bg(
+        let button = self.render_panel_toggle_button(
+            self.file_panel_button_state.clone(),
             BTN_FILE,
-            is_hovered_now || is_open,
-            hover_bg,
-            uc.title_bar_bg,
+            ICON_PATH_FOLDER,
+            is_open,
+            TerminalGridAction::ToggleFilePanel,
         );
-
-        let button = Hoverable::new(state, move |_mouse| {
-            let icon_color = if is_open { icon_active } else { icon_inactive };
-            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_FOLDER, icon_color).finish())
-                .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
-                .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
-                .finish();
-            Container::new(
-                ConstrainedBox::new(Align::new(icon).finish())
-                    .with_width(ICON_BUTTON_SIZE)
-                    .with_height(ICON_BUTTON_SIZE)
-                    .finish(),
-            )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
-            .with_background_color(btn_bg)
-            .finish()
-        })
-        .with_cursor(warpui::platform::Cursor::PointingHand)
-        .on_hover(|_, ctx, _, _| {
-            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
-        })
-        .on_click(|ctx, _, _| {
-            ctx.dispatch_typed_action(TerminalGridAction::ToggleFilePanel);
-        })
-        .finish();
-
-        SavePosition::new(Align::new(button).finish(), FILE_PANEL_BUTTON_POSITION_ID).finish()
+        SavePosition::new(button, FILE_PANEL_BUTTON_POSITION_ID).finish()
     }
 
     /// git 面板开关按钮（settings 左侧、file_panel 右侧）。active 态来自 ShellModel 共用开关。
     fn render_git_panel_button(&self) -> Box<dyn Element> {
-        let state = self.git_panel_button_state.clone();
-        let is_open = self.active_git_panel_open();
-        let uc = self.ui_colors();
-        let icon_active = uc.icon_color_active;
-        let icon_inactive = uc.icon_color_inactive;
-        let hover_bg = uc.icon_button_hover_bg;
-        let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
-        let btn_bg = self.titlebar_btn_bg(
+        let button = self.render_panel_toggle_button(
+            self.git_panel_button_state.clone(),
             BTN_GIT,
-            is_hovered_now || is_open,
-            hover_bg,
-            uc.title_bar_bg,
+            ICON_PATH_GIT_BRANCH,
+            self.active_git_panel_open(),
+            TerminalGridAction::ToggleGitPanel,
         );
-
-        let button = Hoverable::new(state, move |_mouse| {
-            let icon_color = if is_open { icon_active } else { icon_inactive };
-            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_GIT_BRANCH, icon_color).finish())
-                .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
-                .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
-                .finish();
-            Container::new(
-                ConstrainedBox::new(Align::new(icon).finish())
-                    .with_width(ICON_BUTTON_SIZE)
-                    .with_height(ICON_BUTTON_SIZE)
-                    .finish(),
-            )
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
-            .with_background_color(btn_bg)
-            .finish()
-        })
-        .with_cursor(warpui::platform::Cursor::PointingHand)
-        .on_hover(|_, ctx, _, _| {
-            ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
-        })
-        .on_click(|ctx, _, _| {
-            ctx.dispatch_typed_action(TerminalGridAction::ToggleGitPanel);
-        })
-        .finish();
-
-        SavePosition::new(Align::new(button).finish(), GIT_PANEL_BUTTON_POSITION_ID).finish()
+        SavePosition::new(button, GIT_PANEL_BUTTON_POSITION_ID).finish()
     }
 
     /// 主机概览面板开关按钮（git 按钮位置，两者互斥）。
     fn render_overview_panel_button(&self) -> Box<dyn Element> {
-        let state = self.overview_button_state.clone();
-        let is_open = self.overview_panel_open;
+        self.render_panel_toggle_button(
+            self.overview_button_state.clone(),
+            BTN_OVERVIEW,
+            ICON_PATH_ACTIVITY,
+            self.overview_panel_open,
+            TerminalGridAction::ToggleOverviewPanel,
+        )
+    }
+
+    /// 文件 / git / 概览三个面板开关共用的图标按钮：打开时常亮背景，点击发 `action`。
+    fn render_panel_toggle_button(
+        &self,
+        state: MouseStateHandle,
+        btn: usize,
+        icon_path: &'static str,
+        is_open: bool,
+        action: TerminalGridAction,
+    ) -> Box<dyn Element> {
         let uc = self.ui_colors();
-        let icon_active = uc.icon_color_active;
-        let icon_inactive = uc.icon_color_inactive;
-        let hover_bg = uc.icon_button_hover_bg;
+        let icon_color = if is_open {
+            uc.icon_color_active
+        } else {
+            uc.icon_color_inactive
+        };
         let is_hovered_now = state.lock().map(|s| s.is_hovered()).unwrap_or(false);
         let btn_bg = self.titlebar_btn_bg(
-            BTN_OVERVIEW,
+            btn,
             is_hovered_now || is_open,
-            hover_bg,
+            uc.icon_button_hover_bg,
             uc.title_bar_bg,
         );
 
         let button = Hoverable::new(state, move |_mouse| {
-            let icon_color = if is_open { icon_active } else { icon_inactive };
-            let icon = ConstrainedBox::new(Icon::new(ICON_PATH_ACTIVITY, icon_color).finish())
+            let icon = ConstrainedBox::new(Icon::new(icon_path, icon_color).finish())
                 .with_width(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .with_height(ICON_BUTTON_SIZE - ICON_BUTTON_PADDING * 2.0)
                 .finish();
@@ -492,8 +446,8 @@ impl RootView {
         .on_hover(|_, ctx, _, _| {
             ctx.dispatch_typed_action(TerminalGridAction::WakeUiAnim);
         })
-        .on_click(|ctx, _, _| {
-            ctx.dispatch_typed_action(TerminalGridAction::ToggleOverviewPanel);
+        .on_click(move |ctx, _, _| {
+            ctx.dispatch_typed_action(action.clone());
         })
         .finish();
 
