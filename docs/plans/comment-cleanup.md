@@ -153,7 +153,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：修法：TerminalRuntimeState 暴露 parser.sync_timeout().sync_timeout() 剩余时间作为 poll 超时，超时后调 parser.stop_sync(&amp;mut term)。同时参见 0478、0481。
 - 决定：修代码
 - 拍板备注：确认是 bug，走单独的 bug 修复，不在 views-misc 批次里做（见拍板记录）。vte 0.15 的 `pending_timeout()` 只看有没有设过超时，不会自己到期，nexshell 又从不调 `stop_sync`：收到 `?2026h` 后没等到 `?2026l`，后续输出（包括按键回显）全被缓冲，攒满 2 MiB 才放出来。修复要同时覆盖本地 PTY 事件循环和远程（SSH / 串口 / Telnet）读循环。回归用例：喂 BSU 不喂 ESU，超时后画面应刷出。修完这条注释按实际实现重写，完成栏随修复提交填。
-- 完成：
+- 完成：2026-11-21（随同步输出超时修复提交）
 
 #### B-004 `src/pty_event_loop/mod.rs:376`–379 `EventLoop.pty_read`
 
@@ -170,7 +170,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：与 0437 一起改（要把 sync_bytes_count 经 PtySink 暴露出来）。
 - 决定：保留
 - 拍板备注：推翻「修代码」。只是同步缓冲期间多唤醒一次 UI，画面不会错，属效率类，不动代码。注释的前提是错的（vte 0.15 有 `sync_bytes_count()`），改成如实描述：缓冲期间也照常唤醒 UI，Warp 按缓冲长度跳过、这里没跳。B-003 修复时如果顺带对齐了 Warp 的判断，这条注释直接删。
-- 完成：
+- 完成：2026-11-21（随 B-003 修复如实改写，代码不动）
 
 #### B-005 `src/pty_event_loop/mod.rs:470`–472 `EventLoop.run`
 
@@ -185,7 +185,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 风险：中：同 0437，BSU 后无 ESU 时画面停住。
 - 决定：修代码
 - 拍板备注：同 B-003，一起修。
-- 完成：
+- 完成：2026-11-21（随 B-003 一起修）
 
 #### B-006 `src/pty_event_loop/mod.rs:636`–637 `spawn_event_loop`
 
@@ -1122,7 +1122,7 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 - 备注：同时影响 core-2#0416 / 0439 / 0448 的「原子 / 不破坏原文件」说法
 - 决定：修代码
 - 拍板备注：确认是 bug，走单独的 bug 修复、先做，不在 core-2 批次里做（见拍板记录）。要求：覆盖过程任何一步失败，都不能让原文件丢掉。修法由实现者定（可选：`posix-rename@openssh.com` 扩展；服务端不支持时先把原文件改名让位、换入成功后再删）。修完在真机验证：OpenSSH，外加一台不支持该扩展的设备。本条注释和 C-166 / C-167 / C-168 按修复后的实际行为一起改，完成栏随修复提交填。
-- 完成：
+- 完成：2026-11-21（随 SFTP 覆盖修复提交；已对本机 OpenSSH sftp-server 测试，真机待 Matt 验证）
 
 ### C 过期的「为什么」
 
@@ -1146,9 +1146,9 @@ Status: 盘点 commit：`f4dd308a33ef7a3aa5f1d5eabe6c9f7d79c4e358`，日期 2026
 | C-163 | `src/main.rs:1143` | `main` | 点 X → 只关窗口，有进程则弹确认 | main.rs:1145-1150：macOS 主窗口的 X 只隐藏 App、保留会话并直接返回 Cancel（ADR 0022），不会走后面的弹窗；该描述现在只适用于非 macOS 以及 macOS 的辅助窗口。 | 非 macOS（及 macOS 非主窗口）点 X → 只关窗口，有进程则弹确认；macOS 主窗口见下 | 按建议改 |  |<!-- entry {"no": "C-163", "cls": "C", "file": "src/main.rs", "key": "// 点 X → 只关窗口，有进程则弹确认（与 Warp/iTerm 一致）", "decision": "", "done": ""} -->
 | C-164 | `src/main.rs:1280`–1281 | `main` | 对齐 warp（lib.rs:1037） | warp app/src/lib.rs:1275 现为 app_builder.set_app_user_model_id(ChannelState::app_id())，lib.rs:1037 已无关。warp 源文件行号已漂移（../warp HEAD 5bf047181 比引用时多出 454 个上游提交）；数值本身仍成立 | 对齐 warp app/src/lib.rs 的 set_app_user_model_id（去掉行号） | 按建议改 |  |<!-- entry {"no": "C-164", "cls": "C", "file": "src/main.rs", "key": "// 对齐 warp（lib.rs:1037）：设 AppUserModelID（用 nexshell 自己的 bundle id）， // Windows 任务栏据此正确分组窗口 / 取应用图标 / 归集跳转列表与通知。", "decision": "", "done": ""} -->
 | C-165 | `src/sftp_ops.rs:80`–81 | `(顶层) const CHUNK_SIZE` | SFTP 协议单包最大 32768 字节，再大会被服务端拒 | SFTP 草案（draft-ietf-secsh-filexfer-02 §3，凭记忆引用，未重新取证）只要求服务端至少支持约 34000 字节的包，32 KiB 是互通的安全下限，不是协议上限；OpenSSH 等实现接受更大的读写块，russh-sftp 2.1.1 另有 limits@openssh.com 查询（extensions.rs:3）。32 KiB 作为保守块大小本身没问题。 | 分块大小：32 KiB。这是各 SFTP 服务端都应支持的保守包长，更大块在个别服务端上可能被拒。 | 按建议改 |  |<!-- entry {"no": "C-165", "cls": "C", "file": "src/sftp_ops.rs", "key": "/// 分块大小：32 KiB。SFTP 协议单包最大 32768 字节，再大会被服务端拒。", "decision": "", "done": ""} -->
-| C-166 | `src/sftp_ops.rs:198`–199 | `(顶层)` | 是真正的原子替换 | 远端路径下 rename_overwrite（sftp_ops.rs:241-258）在 rename 因目标存在失败时回退为「删除目标再 rename」，不是原子替换；只有本地路径（fs::rename）才是。见 core-2#0421。 | 必须同目录，rename 才在同一文件系统内（远端受 SFTP v3 rename 不覆盖所限，会回退为删后重命名，见 rename_overwrite）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改（建议里「会回退为删后重命名」到时已不成立） |  |<!-- entry {"no": "C-166", "cls": "C", "file": "src/sftp_ops.rs", "key": "/// 必须同目录，rename 才在同一文件系统内，是真正的原子替换。", "decision": "", "done": ""} -->
-| C-167 | `src/sftp_ops.rs:452` | `put_file_stream` | 完整写完再 rename 覆盖：中断不会破坏原文件 | 写入阶段中断确实不破坏原文件；但 rename_overwrite 回退路径（sftp_ops.rs:250-256）会先删原文件，此后失败则原文件丢失（并且 sftp_ops.rs:502 会再删临时文件）。见 core-2#0421。 | 先写同目录临时文件，写完再 rename 覆盖：写入阶段中断不会破坏原文件（rename 回退为删后重命名时除外）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改 |  |<!-- entry {"no": "C-167", "cls": "C", "file": "src/sftp_ops.rs", "key": "// 先写同目录临时文件，完整写完再 rename 覆盖：中断不会破坏原文件", "decision": "", "done": ""} -->
-| C-168 | `src/sftp_ops.rs:646`–647 | `(顶层)` | 中途失败只清理临时文件，原文件保持完整 | 同 core-2#0439：write_file_from_memory 也走 rename_overwrite，回退路径下原文件可能已被删。 | 同目录临时文件写完再 rename 覆盖；写入阶段失败只清理临时文件，原文件保持完整（rename 回退为删后重命名时除外）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改 |  |<!-- entry {"no": "C-168", "cls": "C", "file": "src/sftp_ops.rs", "key": "/// 同目录临时文件写完再 rename 覆盖；中途失败只清理临时文件，原文件保持完整。", "decision": "", "done": ""} -->
+| C-166 | `src/sftp_ops.rs:198`–199 | `(顶层)` | 是真正的原子替换 | 远端路径下 rename_overwrite（sftp_ops.rs:241-258）在 rename 因目标存在失败时回退为「删除目标再 rename」，不是原子替换；只有本地路径（fs::rename）才是。见 core-2#0421。 | 必须同目录，rename 才在同一文件系统内（远端受 SFTP v3 rename 不覆盖所限，会回退为删后重命名，见 rename_overwrite）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改（建议里「会回退为删后重命名」到时已不成立） | 2026-11-21（随 B-063 修复按实际行为改写） |<!-- entry {"no": "C-166", "cls": "C", "file": "src/sftp_ops.rs", "key": "/// 必须同目录，rename 才在同一文件系统内，是真正的原子替换。", "decision": "", "done": ""} -->
+| C-167 | `src/sftp_ops.rs:452` | `put_file_stream` | 完整写完再 rename 覆盖：中断不会破坏原文件 | 写入阶段中断确实不破坏原文件；但 rename_overwrite 回退路径（sftp_ops.rs:250-256）会先删原文件，此后失败则原文件丢失（并且 sftp_ops.rs:502 会再删临时文件）。见 core-2#0421。 | 先写同目录临时文件，写完再 rename 覆盖：写入阶段中断不会破坏原文件（rename 回退为删后重命名时除外）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改 | 2026-11-21（随 B-063 修复按实际行为改写） |<!-- entry {"no": "C-167", "cls": "C", "file": "src/sftp_ops.rs", "key": "// 先写同目录临时文件，完整写完再 rename 覆盖：中断不会破坏原文件", "decision": "", "done": ""} -->
+| C-168 | `src/sftp_ops.rs:646`–647 | `(顶层)` | 中途失败只清理临时文件，原文件保持完整 | 同 core-2#0439：write_file_from_memory 也走 rename_overwrite，回退路径下原文件可能已被删。 | 同目录临时文件写完再 rename 覆盖；写入阶段失败只清理临时文件，原文件保持完整（rename 回退为删后重命名时除外）。 | 不改：等 B-063 单独修复后，按修复后的实际行为改 | 2026-11-21（随 B-063 修复按实际行为改写） |<!-- entry {"no": "C-168", "cls": "C", "file": "src/sftp_ops.rs", "key": "/// 同目录临时文件写完再 rename 覆盖；中途失败只清理临时文件，原文件保持完整。", "decision": "", "done": ""} -->
 | C-169 | `src/ssh_key_store.rs:238` | `derive_public_key` | 后续 copy-to-server 用 | copy-to-server 已实现：host_management_view/key_manager_view.rs:457,545 render_copy_to_server，其公钥来自 root_view/host_library_section/actions.rs:426 对 derive_public_key 的缓存调用。 | 推导 openssh 公钥（详情页展示 / 复制到服务器用）；加密无口令则 None。 | 按建议改 |  |<!-- entry {"no": "C-169", "cls": "C", "file": "src/ssh_key_store.rs", "key": "// 推导 openssh 公钥（详情页展示 / 后续 copy-to-server 用）；加密无口令则 None。", "decision": "", "done": ""} -->
 
 ### D 待办
