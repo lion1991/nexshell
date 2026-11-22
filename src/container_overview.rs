@@ -228,7 +228,7 @@ impl ContainerOverviewUiState {
     }
 }
 
-/// 一次性操作（start/stop/restart）。执行走 host_overview::spawn_remote_exec，本步只造命令。
+/// 一次性操作（start/stop/restart）。执行走 host_overview::spawn_remote_exec，本模块只负责生成命令（container_action_command）。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContainerAction {
     Start,

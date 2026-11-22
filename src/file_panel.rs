@@ -128,7 +128,7 @@ pub enum TransferStatus {
 /// UI → worker 的请求。
 #[derive(Debug)]
 pub enum SftpRequest {
-    /// 列出 path 目录；worker 会先 canonicalize 再 read_dir。
+    /// 列出 path 目录；远程 worker 会先 canonicalize 再 read_dir，本地 worker 直接列逻辑路径。
     List(String),
     /// 列出树状面板的子目录，不改变 worker 的刷新基准目录。
     ListTreeChild(String),

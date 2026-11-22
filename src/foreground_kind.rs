@@ -7,11 +7,11 @@
 /// herdr client 的 `proc_bsdinfo.pbi_comm`。
 pub const HERDR_PROCESS_NAME: &str = "herdr";
 
-/// PTY 前台进程分类。`Shell` 的判定与改动前的 `query_shell_foreground` 完全一致。
+/// PTY 前台进程分类。`Shell` 覆盖常见 shell 进程名（见 classify）。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ForegroundKind {
     /// 也是查询失败（tcgetpgrp / proc_pidinfo 返回错误）时的默认值：
-    /// 保持改动前「查不到就当 shell 在前台」的行为。
+    /// 保持「查不到就当 shell 在前台」的行为。
     #[default]
     Shell,
     /// herdr（终端多路复用器）client。
@@ -49,7 +49,7 @@ impl ForegroundKind {
         }
     }
 
-    /// 与改动前 `query_shell_foreground` 的返回值同义。
+    /// `Shell` 即 true：当 shell 在前台。
     pub fn is_shell(self) -> bool {
         matches!(self, Self::Shell)
     }
@@ -97,7 +97,7 @@ mod tests {
     }
 
     /// tcgetpgrp / proc_pidinfo 失败时 `query_foreground_kind` 返回默认值，
-    /// 必须等价于改动前的 `return true`（当 shell 在前台）。
+    /// 必须落到 Shell（即当 shell 在前台）。
     #[test]
     fn query_failure_default_is_shell_and_not_herdr() {
         let fallback = ForegroundKind::default();

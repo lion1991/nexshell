@@ -111,16 +111,16 @@ pub(crate) fn file_panel_reconnect_message(
         .finish()
 }
 
+/// 面板外层 1px 左边框会被 Container 计入布局尺寸：槽位真实外宽 = 内容宽 + 此值。
+/// 占位子、滑出目标、邻居跟随量都必须按外宽算，否则模式切换/落闸时整行横跳 1px。
+pub(crate) const PANEL_BORDER_W: f32 = 1.0;
+
 /// 面板滑动包装：定宽透明占位子撑住槽位（布局零影响、不抢跑露底板），
 /// 面板作为 Stack overlay 按 offset 平移（正=右移滑入/滑出，负=从左侧回位）。
 /// 注意 overlay 层全局压顶：force_overlay 用于让静止的右邻也进 overlay
 /// （压栈序在后 = 画在上层），左邻动画时从它底下钻过而不是骑到它脸上。
 /// constrain_absolute_children 让面板拿到槽位的紧高度约束（内部 Stretch 正常撑满）。
 /// offset≈0 且未强制时原样返回。
-/// 面板外层 1px 左边框会被 Container 计入布局尺寸：槽位真实外宽 = 内容宽 + 此值。
-/// 占位子、滑出目标、邻居跟随量都必须按外宽算，否则模式切换/落闸时整行横跳 1px。
-pub(crate) const PANEL_BORDER_W: f32 = 1.0;
-
 pub(crate) fn panel_slide_in_from_right(
     panel: Box<dyn Element>,
     width: f32,
@@ -290,7 +290,7 @@ pub(crate) fn local_file_panel_context_menu_items(
                 })
                 .into_item(),
         );
-        // 内置只读查看器（ADR 0002）：二进制 / 超大由 handler 回退「打开」。
+        // 内置代码查看器 / 编辑器（ADR 0002、0003）：二进制 / 超大由 handler 回退「打开」。
         items.push(
             MenuItemFields::new(rust_i18n::t!("file_panel_ctx_open_with_viewer"))
                 .with_on_select_action(TerminalGridAction::FilePanelOpenInCodeViewer {

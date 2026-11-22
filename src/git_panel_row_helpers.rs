@@ -34,7 +34,7 @@ use warpui::Element;
 /// UniformList 要求所有行等高；每行外层钉死这个高度。
 pub(crate) const GIT_PANEL_ROW_HEIGHT: f32 = 22.0;
 
-/// 四个分组固定顺序：staged → unstaged → untracked → unmerged，与旧实现一致。
+/// 四个分组固定顺序：staged → unstaged → untracked → unmerged。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GitPanelSectionKind {
     Staged,

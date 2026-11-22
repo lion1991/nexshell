@@ -1,5 +1,5 @@
 //! git 子进程包装。所有命令同步阻塞调用，调用方应在独立 worker 线程里跑。
-//! env / arg 配置参考 warp/app/src/util/git.rs:14 `run_git_command`：
+//! env / arg 配置参考 warp crates/warp_util/src/git.rs 的 `run_git_command`：
 //! `-c diff.autoRefreshIndex=false` 避免改 index、`GIT_OPTIONAL_LOCKS=0`
 //! 防止与用户操作竞争锁。
 
@@ -13,8 +13,8 @@ use std::{
 
 use crate::platform::background_command;
 
-/// 通用 git 调用：成功 = stdout trim 后的字符串；失败 = stderr + stdout 合并的错误。
-/// `git diff` 单独有一类"退出码 1 = 有差异"，调用方按需放宽（本模块仅对 diff 命令做）。
+/// 通用 git 调用：成功 = stdout 原文（lossy UTF-8，不 trim）；失败 = stderr + stdout 合并的错误。
+/// `git diff` 的「退出码 1 = 有差异」由 run_git_diff 单独处理，本函数一律按非 0 退出码报错。
 pub fn run_git(repo: &Path, args: &[&str]) -> Result<String, String> {
     run_git_configured(repo, args, |_| {})
 }
@@ -405,7 +405,7 @@ pub fn repo_root(path: &Path) -> Result<PathBuf, String> {
 }
 
 /// 当前分支名（detached HEAD 时返回字面量 "HEAD"）。
-/// warp util/git.rs:116 同款回落策略。
+/// 同 warp app/src/util/git.rs 的 detect_current_branch 回落策略。
 pub fn detect_current_branch(repo: &Path) -> Result<String, String> {
     match run_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]) {
         Ok(out) => Ok(out.trim().to_owned()),
@@ -414,7 +414,7 @@ pub fn detect_current_branch(repo: &Path) -> Result<String, String> {
 }
 
 /// 展示用分支名：detached HEAD 时返回短 SHA 而非字面量 "HEAD"。
-/// warp util/git.rs:133。
+/// 同 warp app/src/util/git.rs 的 detect_current_branch_display。
 pub fn detect_current_branch_display(repo: &Path) -> Result<String, String> {
     let branch = detect_current_branch(repo)?;
     if branch == "HEAD" {
@@ -424,7 +424,7 @@ pub fn detect_current_branch_display(repo: &Path) -> Result<String, String> {
     }
 }
 
-/// 主分支检测：origin/HEAD → 回落候选列表。warp util/git.rs:157。
+/// 主分支检测：origin/HEAD → 回落候选列表。同 warp app/src/util/git.rs 的 detect_main_branch。
 pub fn detect_main_branch(repo: &Path) -> Option<String> {
     if let Ok(out) = run_git(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
         if let Some(name) = out.trim().strip_prefix("refs/remotes/") {

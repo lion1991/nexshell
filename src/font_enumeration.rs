@@ -1,4 +1,4 @@
-//! 系统字体枚举与候选优先级（Warp appearance_page.rs:2010-2025 同等思路）。
+//! 系统字体枚举与候选优先级（参考 warp appearance_page.rs 的 all_system_fonts 调用）。
 
 use warpui::fonts;
 
@@ -49,7 +49,7 @@ pub(crate) fn enumerate_monospace_fonts() -> Vec<String> {
         .collect()
 }
 
-// warp: appearance_page.rs:2010-2025 — 枚举所有系统字体
+// 参考 warp appearance_page.rs 的 all_system_fonts 调用：枚举所有系统字体
 #[cfg(target_os = "macos")]
 pub(crate) fn enumerate_all_system_fonts() -> Vec<String> {
     use core_text::font_collection::create_for_all_families;

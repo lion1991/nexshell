@@ -9,7 +9,7 @@ use warpui::elements::{
 };
 use warpui::{fonts, Element};
 
-/// 侧栏固定 248px，左右各 10px 内边距后的内容宽度。
+/// 右侧概览面板内容宽 248px（OVERVIEW_PANEL_WIDTH），减左右各 10px 内边距后的内容宽度。
 pub(crate) const OVERVIEW_CONTENT_WIDTH: f32 = 228.0;
 
 pub(crate) fn format_usage_metric(metric: &UsageMetric) -> String {

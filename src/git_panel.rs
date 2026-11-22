@@ -3,8 +3,8 @@
 //! 请求走 mpsc，事件走 async_channel。git 调用本身全同步阻塞，因此 worker 内
 //! 也只是顺序跑 [`git_ops`] 里的函数。
 //!
-//! 数据语义参考 warp/app/src/code_review/git_status_update.rs 的简化版：
-//! 我们没有 fs watcher（P4 才上），刷新触发点是 cwd 变化 / 手动按钮 / 操作完成。
+//! 数据语义参考 warp/app/src/code_review/git_repo_model/local.rs 的简化版：
+//! 刷新触发点是 cwd 变化 / 手动按钮 / 操作完成 / fs watcher（debounce 2s）。
 
 use std::{
     collections::BTreeSet,
@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 
 use crate::git_ops::{self, CommitRow, GitDiffSelection, GitFileDiff, GitStatusSnapshot};
 
-/// fs watcher debounce 时长。Warp git_status_update.rs:204 用 5s throttle，
+/// fs watcher debounce 时长。Warp git_repo_model/local.rs 用 5s throttle，
 /// 我们用 2s 来兼顾响应度——nexshell 不像 Warp 还要做 AI/diff，开销小。
 const WATCHER_DEBOUNCE: Duration = Duration::from_secs(2);
 pub const GIT_HISTORY_PAGE_SIZE: usize = 20;
@@ -534,7 +534,7 @@ async fn run_worker(
                 };
 
                 // index.lock 抑制：用户正在跑 commit / merge 等，
-                // 读到的 HEAD / index 是中间态。Warp git_status_update.rs:367 同款。
+                // 读到的 HEAD / index 是中间态。Warp git_repo_model/local.rs 同款。
                 if index_lock_present(&root) {
                     continue;
                 }
