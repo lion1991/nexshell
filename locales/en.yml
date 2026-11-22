@@ -386,6 +386,8 @@ host_search_placeholder: "Search hosts..."
 host_group_all: All hosts
 host_group_nav: Groups
 host_list_ungrouped: Ungrouped
+host_list_ctx_new_session: New Session
+host_list_search_no_match: No matching hosts
 host_tag_filter: Tag filtering
 host_manage_groups_tags: Manage groups and tags
 host_protocol_all: All protocols

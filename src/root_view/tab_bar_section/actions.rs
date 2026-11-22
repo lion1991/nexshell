@@ -26,6 +26,9 @@ impl RootView {
     // === Chrome / 窗口控制 ===
     pub(in crate::root_view) fn handle_toggle_sidebar(&mut self, ctx: &mut ViewContext<Self>) {
         self.sidebar_open = !self.sidebar_open;
+        if !self.sidebar_open {
+            self.release_host_list_search_focus(ctx);
+        }
         self.save_ui_settings();
         ctx.notify();
     }

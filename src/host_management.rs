@@ -506,6 +506,19 @@ pub struct HostManagementState {
     pub key_delete_confirming: bool,
 }
 
+/// 主机是否匹配搜索词（名称 / 地址 / 描述 / 标签，不分大小写）。`query` 须已 trim 并转小写；空串都匹配。
+/// 主页卡片筛选和终端页左侧主机列表共用。
+pub fn host_matches_query(host: &HostCardSnapshot, query: &str) -> bool {
+    query.is_empty()
+        || host.name.to_lowercase().contains(query)
+        || host.endpoint.to_lowercase().contains(query)
+        || host.description.to_lowercase().contains(query)
+        || host
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(query))
+}
+
 impl HostManagementState {
     pub fn new(snapshot: HostManagementSnapshot) -> Self {
         Self {
@@ -548,19 +561,7 @@ impl HostManagementState {
                     || host.tags.iter().any(|tag| self.selected_tags.contains(tag))
             })
             .filter(|host| self.protocol_filter.matches(host))
-            .filter(|host| {
-                if query.is_empty() {
-                    return true;
-                }
-
-                host.name.to_lowercase().contains(&query)
-                    || host.endpoint.to_lowercase().contains(&query)
-                    || host.description.to_lowercase().contains(&query)
-                    || host
-                        .tags
-                        .iter()
-                        .any(|tag| tag.to_lowercase().contains(&query))
-            })
+            .filter(|host| host_matches_query(host, &query))
             .cloned()
             .collect()
     }

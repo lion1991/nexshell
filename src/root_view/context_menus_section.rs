@@ -19,7 +19,7 @@ use crate::terminal_grid_element::TerminalGridAction;
 use crate::terminal_view_helpers::{
     terminal_shortcut_label, terminal_shortcut_menu_label, TerminalShortcut,
 };
-use crate::{RootView, TerminalSessionKind};
+use crate::{AppPage, RootView, TerminalSessionKind};
 use nexshell::file_panel::{
     apply_file_panel_selection, apply_file_panel_tree_selection, FilePanelSelectMode,
 };
@@ -256,9 +256,7 @@ impl RootView {
         );
         items.push(
             MenuItemFields::new(rust_i18n::t!("ctx_split_down"))
-                .with_key_shortcut_label(Some(terminal_shortcut_label(
-                    TerminalShortcut::SplitDown,
-                )))
+                .with_key_shortcut_label(Some(terminal_shortcut_label(TerminalShortcut::SplitDown)))
                 .with_on_select_action(TerminalGridAction::SplitDown)
                 .into_item(),
         );
@@ -418,7 +416,11 @@ impl RootView {
     ) {
         // 右键目标高亮：独立状态，不进 selected_host_ids（不触发底部选择栏）
         self.host_state.context_menu_target = Some(host_id.clone());
-        let items = self.host_card_context_menu_items(&host_id, position);
+        let items = if self.app_page == AppPage::Terminal {
+            self.host_list_context_menu_items(&host_id)
+        } else {
+            self.host_card_context_menu_items(&host_id, position)
+        };
         if items.is_empty() {
             return;
         }

@@ -210,6 +210,9 @@ pub(crate) struct RootView {
     host_list_slide: SlotReveal,
     /// 主机列表里折叠的分组 key（持久化）。
     host_list_collapsed: BTreeSet<String>,
+    /// 主机列表搜索框；和主页的 host_search_editor 分开，两边的搜索词互不影响。
+    host_list_search_editor: warpui::ViewHandle<EditorView>,
+    host_list_query: String,
     host_tab_state: MouseStateHandle,
     new_tab_combo_state: MouseStateHandle,
     new_tab_plus_state: MouseStateHandle,
@@ -446,6 +449,13 @@ impl RootView {
                 me.handle_container_search_editor_event(event, ctx);
             },
         );
+        let host_list_search_editor = Self::create_host_search_editor(ctx);
+        ctx.subscribe_to_view(
+            &host_list_search_editor,
+            |me, _, event: &EditorEvent, ctx| {
+                me.handle_host_list_search_event(event, ctx);
+            },
+        );
         let tab_rename_editor = Self::create_tab_rename_editor(ctx);
         let file_panel_input_editor = Self::create_file_panel_input_editor(ctx);
         let host_rename_editor = Self::create_host_rename_editor(ctx);
@@ -602,6 +612,8 @@ impl RootView {
             overview_button_state: Arc::new(Mutex::new(MouseState::default())),
             host_list_slide: SlotReveal::new(),
             host_list_collapsed: ui_settings.host_list_collapsed,
+            host_list_search_editor,
+            host_list_query: String::new(),
             host_tab_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_combo_state: Arc::new(Mutex::new(MouseState::default())),
             new_tab_plus_state: Arc::new(Mutex::new(MouseState::default())),
@@ -735,6 +747,8 @@ impl RootView {
                         if me.show_host_group_picker_menu.is_none() {
                             me.host_state.context_menu_target = None;
                         }
+                        // 右键高亮靠过渡淡出；菜单关掉时鼠标多半不在行上，没有悬停来唤醒 tick。
+                        me.wake_ui_anim(ctx);
                         me.refocus_root_after_menu_close(&menu, ctx);
                         ctx.notify();
                     }
@@ -1368,6 +1382,7 @@ impl RootView {
             self.release_rdp_held_input(self.active_tab_index);
             // 面板弹簧只在渲染时推进，离开终端页不落定的话关门永不收敛，16ms tick 会一直空转。
             self.settle_panel_slides();
+            self.release_host_list_search_focus(ctx);
         }
         self.app_page = page;
         self.sync_host_fleets(ctx);
@@ -1955,7 +1970,7 @@ impl View for RootView {
             self.render_active_tab_body_with_side_panels(terminal_stack.finish(), app)
         };
 
-        let body = self.render_body_with_host_list(body);
+        let body = self.render_body_with_host_list(body, app);
 
         let main_layout = Flex::column()
             .with_main_axis_size(MainAxisSize::Max)

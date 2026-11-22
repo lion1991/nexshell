@@ -495,6 +495,7 @@ impl RootView {
     fn overlay_editor_focused(&self, app: &AppContext) -> bool {
         self.find_editor.is_focused(app)
             || self.tab_rename_editor.is_focused(app)
+            || self.host_list_search_editor.is_focused(app)
             || self
                 .host_password_editor
                 .as_ref()

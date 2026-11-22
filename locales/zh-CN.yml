@@ -386,6 +386,8 @@ host_search_placeholder: 搜索主机...
 host_group_all: 所有主机
 host_group_nav: 分组
 host_list_ungrouped: 未分组
+host_list_ctx_new_session: 新开连接
+host_list_search_no_match: 无匹配的主机
 host_tag_filter: 标签筛选
 host_manage_groups_tags: 管理分组与标签
 host_protocol_all: 所有协议

@@ -765,11 +765,12 @@ fn render_system_icon_small(
     .finish()
 }
 
-fn mask_endpoint(endpoint: &str) -> String {
+pub(super) fn mask_endpoint(endpoint: &str) -> String {
     if let Some((user_host, port)) = endpoint.rsplit_once(':') {
         if let Some((user, host)) = user_host.split_once('@') {
-            let masked_host = if host.len() > 4 {
-                format!("{}****", &host[..4])
+            // 按字符截，非 ASCII 主机名按字节切会 panic。
+            let masked_host = if host.chars().count() > 4 {
+                format!("{}****", host.chars().take(4).collect::<String>())
             } else {
                 "****".to_string()
             };
@@ -777,4 +778,18 @@ fn mask_endpoint(endpoint: &str) -> String {
         }
     }
     "****".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mask_endpoint;
+
+    #[test]
+    fn mask_endpoint_keeps_user_port_and_four_host_chars() {
+        assert_eq!(mask_endpoint("root@10.0.0.5:22"), "root@10.0****:22");
+        assert_eq!(mask_endpoint("root@abc:22"), "root@****:22");
+        assert_eq!(mask_endpoint("COM3"), "****");
+        // 非 ASCII 主机名不能在字节中间切。
+        assert_eq!(mask_endpoint("me@测试服务器一号:22"), "me@测试服务****:22");
+    }
 }

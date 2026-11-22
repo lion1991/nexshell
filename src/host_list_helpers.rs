@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use nexshell::host_management::{HostCardSnapshot, HostGroupSnapshot};
+use nexshell::host_management::{host_matches_query, HostCardSnapshot, HostGroupSnapshot};
 
 use crate::TerminalSessionKind;
 
@@ -55,6 +55,26 @@ pub(crate) fn host_list_sections<'a>(
         });
     }
     sections
+}
+
+/// 按搜索词过滤分区：只留匹配的主机，删掉过滤后为空的分区。搜索词空白时原样返回。
+pub(crate) fn filter_host_list_sections<'a>(
+    sections: Vec<HostListSection<'a>>,
+    query: &str,
+) -> Vec<HostListSection<'a>> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return sections;
+    }
+    sections
+        .into_iter()
+        .filter_map(|mut section| {
+            section
+                .hosts
+                .retain(|host| host_matches_query(host, &query));
+            (!section.hosts.is_empty()).then_some(section)
+        })
+        .collect()
 }
 
 /// 标签里与主机相关的那部分信息。
@@ -233,6 +253,21 @@ mod tests {
         let sections = host_list_sections(&groups, &hosts);
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].key, UNGROUPED_SECTION_KEY);
+    }
+
+    #[test]
+    fn search_keeps_matching_hosts_and_drops_empty_sections() {
+        let groups = vec![group("g1", "生产"), group("g2", "测试")];
+        let mut web = host("web-01", Some("g1"));
+        web.endpoint = "root@10.0.0.5:22".to_string();
+        let hosts = vec![web, host("db-01", Some("g1")), host("dev", Some("g2"))];
+        let sections = filter_host_list_sections(host_list_sections(&groups, &hosts), " WEB ");
+        assert_eq!(sections.len(), 1);
+        assert_eq!(ids(&sections[0]), vec!["web-01"]);
+        let by_address = filter_host_list_sections(host_list_sections(&groups, &hosts), "10.0.0");
+        assert_eq!(ids(&by_address[0]), vec!["web-01"]);
+        let all = filter_host_list_sections(host_list_sections(&groups, &hosts), "  ");
+        assert_eq!(all.len(), 2);
     }
 
     #[test]
