@@ -4598,7 +4598,6 @@ Inter-|   Receive                                                |  Transmit
         // an underline, and CJK wide chars consume two cells (the second is
         // a wide-char spacer).
         let mut grid = terminal_runtime::TerminalGridCore::new(20, 2, 100);
-        // Put cursor at column 0 of row 0 (default after construction).
         let marked = terminal_runtime::MarkedText {
             text: "你好zi".to_string(),
             selected_range_utf16: 0..2,
@@ -4709,7 +4708,6 @@ Inter-|   Receive                                                |  Transmit
 
     #[test]
     fn terminal_runtime_bell_pulse_advances_when_grid_emits_bell_event() {
-        // Build a grid, feed a BEL byte, drain events, observe pulse increment.
         let mut grid = terminal_runtime::TerminalGridCore::new(8, 1, 100);
         grid.process_output(b"\x07");
         let events = grid.drain_events();
@@ -4721,7 +4719,6 @@ Inter-|   Receive                                                |  Transmit
     #[test]
     fn terminal_grid_core_scrollback_lets_user_view_history_then_jump_back_to_bottom() {
         let mut grid = terminal_runtime::TerminalGridCore::new(8, 2, 100);
-        // Generate enough output to push prior lines into scrollback.
         for line in 0..6 {
             grid.process_output(format!("line{line}\r\n").as_bytes());
         }

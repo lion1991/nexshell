@@ -115,10 +115,6 @@ trait FindPaneByDirection {
     ) -> FindPaneByDirectionResult;
 }
 
-// ---------------------------------------------------------------------------
-// PaneData
-// ---------------------------------------------------------------------------
-
 impl PaneData {
     pub fn new(pane_id: NexPaneId) -> Self {
         Self {
@@ -237,10 +233,6 @@ fn are_rects_overlapping(rect1: &RectF, rect2: &RectF, axis: SplitDirection) -> 
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// PaneNode
-// ---------------------------------------------------------------------------
 
 impl PaneNode {
     fn split(&mut self, old_id: NexPaneId, new_id: NexPaneId, direction: Direction) -> bool {
@@ -392,10 +384,6 @@ impl FindPaneByDirection for PaneNode {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// PaneBranch
-// ---------------------------------------------------------------------------
 
 impl PaneBranch {
     fn new(old_pane: PaneNode, new_pane: PaneNode, direction: Direction) -> Self {
@@ -729,10 +717,6 @@ where
     .with_propagate_drag()
     .finish()
 }
-
-// ---------------------------------------------------------------------------
-// Debug impls
-// ---------------------------------------------------------------------------
 
 impl fmt::Debug for PaneData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

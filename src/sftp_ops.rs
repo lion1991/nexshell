@@ -126,7 +126,6 @@ pub async fn ensure_remote_dir(sftp: &SftpSession, path: &str) -> Result<(), Str
             "ensure_remote_dir: {path} exists and is not a directory"
         ));
     }
-    // 父目录递归
     if let Some(idx) = path.trim_end_matches('/').rfind('/') {
         let parent = if idx == 0 { "/" } else { &path[..idx] };
         if parent != path {

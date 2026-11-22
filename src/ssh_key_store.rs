@@ -70,7 +70,6 @@ fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<SshKeyRecord> {
 
 const SELECT_COLS: &str = "id, name, content, passphrase, key_type, created_at, updated_at";
 
-// 列表 + 各密钥被多少主机引用（一钥多机价值的可视化）。
 pub fn list_ssh_keys_with_usage(db_path: &Path) -> Result<Vec<(SshKeyRecord, usize)>, String> {
     let conn = open_rw(db_path)?;
     let sql = format!(

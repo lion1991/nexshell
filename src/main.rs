@@ -88,7 +88,7 @@ mod root_view;
 mod terminal_grid_element;
 // RootView 定义已于 step 11 迁入 root_view/mod.rs；重导出以保持全库 `crate::RootView` 路径不变。
 pub(crate) use root_view::RootView;
-// main.rs 残留只剩启动装配与伴生类型，下列为这部分仍需的少量符号。
+
 use font_enumeration::{
     default_monospace_font_family_name, load_nexshell_monospace_font, load_nexshell_ui_font,
 };
