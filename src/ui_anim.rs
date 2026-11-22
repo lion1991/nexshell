@@ -117,8 +117,6 @@ impl<K: Hash + Eq> Default for TransitionMap<K> {
     }
 }
 
-// ── 数值过渡（环弧 sweep 等）────────────────────────────────────
-
 /// 数值过渡时长（毫秒）：比色过渡长，让弧线爬升可感。
 pub const FLOAT_TRANSITION_MS: f32 = 350.0;
 
@@ -207,8 +205,6 @@ impl<K: Hash + Eq> Default for FloatTransitionMap<K> {
         Self::new()
     }
 }
-
-// ── 一维弹簧（位移/宽度动画）────────────────────────────────────
 
 /// 刚度与阻尼：微过阻尼（ζ≈1.05），~200ms 内视觉收敛；比临界略高以杀掉
 /// 离散积分的亚像素微过冲（收敛尾部左右抖动的根源之一）。
@@ -330,8 +326,6 @@ impl SlotReveal {
         self.spring.borrow().is_animating()
     }
 }
-
-// ── 提示条时间线 ───────────────────────────────────────────────
 
 const TOAST_FADE_IN: f32 = 0.16;
 const TOAST_FADE_OUT: f32 = 0.22;

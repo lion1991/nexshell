@@ -469,7 +469,6 @@ pub fn terminal_snapshot_with_input_editor(
     let rows = projected.rows.max(1);
     let start_cursor_index = projected.cursor_row * cols + projected.cursor_col;
 
-    // 注册 ghost text style（灰色前景）
     let ghost_style_id = projected.styles.len() as u16;
     projected.styles.push(TerminalCellStyleSnapshot {
         fg: TerminalColorSnapshot::Rgb {
@@ -513,7 +512,6 @@ pub fn terminal_snapshot_with_input_editor(
         rows,
     );
 
-    // ghost text：将 suggestion 中超出 buffer 的后缀以灰色投射
     let ghost_end = if let Some(suggestion) = editor.suggestion() {
         if let Some(suffix) = suggestion.strip_prefix(editor.buffer()) {
             project_ghost_text(
@@ -531,7 +529,6 @@ pub fn terminal_snapshot_with_input_editor(
         end_index
     };
 
-    // 清除投射区域之后到行尾的残留内容
     let clear_from = ghost_end;
     let clear_row = clear_from / cols;
     let clear_col = clear_from % cols;
@@ -2588,7 +2585,6 @@ impl TerminalRuntimeState {
         }
         let mut combined = std::mem::take(&mut self.osc7_scan_buf);
         combined.extend_from_slice(bytes);
-        // 处理所有完整 sequence，得到剩余 tail。
         let tail = consume_osc7_sequences(&combined, |path| {
             if let Some(cwd) = parse_osc7_payload(path, crate::osc7::local_hostname()) {
                 self.local_cwd = Some(cwd);
@@ -2605,7 +2601,6 @@ impl TerminalRuntimeState {
         }
         let marker = crate::shell_integration::BOOTSTRAP_MARKER;
         let buf = &mut self.bootstrap_scan_buf;
-        // 拼前一次尾部 + 本次输入，扫子串
         let mut combined = std::mem::take(buf);
         combined.extend_from_slice(bytes);
         if combined.windows(marker.len()).any(|w| w == marker) {
@@ -3294,7 +3289,7 @@ impl LocalTerminalRuntime {
         let killer = child.clone_killer();
 
         #[cfg(unix)]
-        let pty_fd = pair.master.as_raw_fd(); // Option<RawFd>
+        let pty_fd = pair.master.as_raw_fd();
         #[cfg(windows)]
         let pty_fd = None;
 
@@ -3774,7 +3769,6 @@ impl LocalTerminalRuntime {
                 grid.mark_all_dirty();
             }
 
-            // Scroll the focused match into view so the user sees the first hit.
             if let (Some(grid), Some(idx)) = (state.grid.as_mut(), state.find_current) {
                 if let Some(range) = state.find_matches.get(idx) {
                     scroll_grid_to_match(grid, range);
@@ -4370,7 +4364,6 @@ async fn run_remote_ssh_event_loop(
         return;
     };
 
-    // 连接成功: 撤掉过渡层，清屏 + 清 scrollback + 恢复光标
     state.lock().finish_connect_overlay();
     remote_process_output(&state, &wakeup_tx, b"\x1b[2J\x1b[3J\x1b[H\x1b[?25h");
     remote_update_status(&state, &wakeup_tx, format!("connected SSH: {target}"));
@@ -5096,7 +5089,6 @@ impl TerminalPalette {
             | (u32::from(cursor_color.g) << 8)
             | u32::from(cursor_color.b);
 
-        // selection = accent with reduced opacity, blended on background
         let sel_r = ((accent.r as u32 * 80 + bg.r as u32 * 176) / 256) as u8;
         let sel_g = ((accent.g as u32 * 80 + bg.g as u32 * 176) / 256) as u8;
         let sel_b = ((accent.b as u32 * 80 + bg.b as u32 * 176) / 256) as u8;
@@ -5864,7 +5856,6 @@ mod tests {
         let mut hits = Vec::new();
         let tail = consume_osc7_sequences(chunk1, |p| hits.push(p.to_vec()));
         assert!(hits.is_empty(), "未完成时不该触发");
-        // 第二轮拼上 tail
         let mut combined = tail;
         combined.extend_from_slice(chunk2);
         let tail2 = consume_osc7_sequences(&combined, |p| hits.push(p.to_vec()));
@@ -5891,7 +5882,6 @@ mod tests {
         assert!(state.local_cwd.is_none());
         state.scan_osc7(b"prefix\x1b]7;file:///tmp/x\x07tail");
         assert_eq!(state.local_cwd, Some(PathBuf::from("/tmp/x")));
-        // 第二次 cwd 变更
         state.scan_osc7(b"\x1b]7;file:///var\x07");
         assert_eq!(state.local_cwd, Some(PathBuf::from("/var")));
     }

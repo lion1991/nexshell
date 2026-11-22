@@ -838,7 +838,6 @@ pub enum TerminalGridAction {
         position: Vector2F,
         has_selection: bool,
     },
-    // --- 主机管理面板 actions ---
     HostShowContextMenu {
         host_id: String,
         position: Vector2F,
@@ -902,7 +901,6 @@ pub enum TerminalGridAction {
     HostKeyEditCancel,
     HostDeleteKeyPrompt,
     HostDeleteKeyCancel,
-    // --- 容器管理 actions ---
     ContainerShowMenu {
         host_id: String,
         container_id: String,
@@ -940,7 +938,6 @@ pub enum TerminalGridAction {
         pid: u32,
         label: String,
     },
-    // --- 分屏 actions ---
     SplitRight,
     SplitDown,
     SplitLeft,
@@ -955,7 +952,6 @@ pub enum TerminalGridAction {
     PaneResizeMove(Vector2F),
     EndPaneResizing,
     ToggleMaximizePane,
-    // --- 文件面板 actions ---
     ToggleFilePanel,
     FilePanelRefresh,
     FilePanelGoUp,
@@ -1029,7 +1025,6 @@ pub enum TerminalGridAction {
     FilePanelResizeStart(f32),
     FilePanelResizeMove(f32),
     FilePanelResizeEnd,
-    // --- git 面板 actions ---
     ToggleGitPanel,
     GitPanelRefresh,
     GitPanelSelectEntry {
@@ -1099,9 +1094,7 @@ pub enum TerminalGridAction {
     // commit footer：inline 输入框 + 提交按钮（VS Code Source Control 同款）
     GitCommitConfirm,
     GitPushConfirm,
-    // --- 设置菜单 actions ---
     ToggleSettingsMenu,
-    // --- 设置页面 actions ---
     ShowSettings,
     ShowSettingsKeybindings,
     CloseSettingsTab,
@@ -2797,7 +2790,6 @@ impl Element for TerminalGridElement {
             .map(|v| *v as f32)
             .unwrap_or(0.0);
 
-        // Grid 内容偏移：左边距 + 上边距 + 平滑滚动亚行偏移。
         let content_origin = origin + grid_content_offset() + Vector2F::new(0.0, sub_offset);
         let device_scale = ctx.scene.scale_factor();
 
@@ -2951,7 +2943,7 @@ impl Element for TerminalGridElement {
             }
         }
 
-        ctx.scene.stop_layer(); // 结束 grid content clip
+        ctx.scene.stop_layer();
 
         let child_hovered = self
             .cursor_over_terminal
@@ -3284,7 +3276,6 @@ impl Element for TerminalGridElement {
                 true
             }
 
-            // ── 鼠标选区 ────────────────────────────────────────────────
             Event::LeftMouseDown {
                 position,
                 modifiers,
@@ -3439,7 +3430,6 @@ impl Element for TerminalGridElement {
                 false
             }
 
-            // ── 滚轮（像素级平滑滚动）─────────────────────────────
             Event::ScrollWheel {
                 position,
                 delta,
@@ -3474,7 +3464,6 @@ impl Element for TerminalGridElement {
 
                 let grid = self.grid();
 
-                // mouse-app 模式：逐行发 wheel report，清除亚行余量。
                 if self.live_mouse_app_active() && !modifiers.shift {
                     if whole_lines == 0 {
                         if let Ok(mut acc) = self.smooth_scroll_px.lock() {
@@ -3505,7 +3494,6 @@ impl Element for TerminalGridElement {
                     return true;
                 }
 
-                // alt-screen 模式：发 escape 序列，清除亚行余量。
                 if !modifiers.shift && whole_lines != 0 {
                     if let Some(bytes) =
                         terminal_alt_scroll_bytes(whole_lines, self.snapshot.grid.input_modes)
@@ -3533,7 +3521,6 @@ impl Element for TerminalGridElement {
                     let hs = grid.history_size();
                     let scrolled_up = whole_lines > 0;
                     let scrolled_down = whole_lines < 0;
-                    // 预估 scroll 后 display_offset 是否撞顶/触底
                     let at_top = if scrolled_up {
                         off.saturating_add(whole_lines as usize) >= hs
                     } else {
