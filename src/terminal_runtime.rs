@@ -98,7 +98,7 @@ pub struct MouseReportModifiers {
 
 /// Build an SGR-format mouse report (`CSI < b ; col ; row M|m`). The button
 /// codes / drag offset / modifier offsets follow the same xterm convention
-/// Warp encodes in `crates/warp_terminal/src/model/escape_sequences.rs:255`.
+/// Warp encodes in `escape_sequences.rs` (`impl ToEscapeSequence for MouseState`).
 pub fn encode_sgr_mouse_report(
     button: MouseReportButton,
     action: MouseReportAction,
@@ -2034,7 +2034,7 @@ impl TerminalGridCore {
     }
 
     /// 与 `snapshot` 等价；额外接受 IME marked text，并按 Warp 的写法
-    /// (`app/src/terminal/grid_renderer.rs:639-695`) 把 marked 字符从光标
+    /// （`grid_renderer.rs` 里处理 marked_text 的部分）把 marked 字符从光标
     /// 起逐 cell 覆盖到 grid 上：每个被覆盖的 cell 加 underline，CJK 宽字符
     /// 占两个 cell（紧邻的下一个 cell 标 wide_spacer 并跳过）。
     pub fn snapshot_with_marked_text(
@@ -2390,7 +2390,7 @@ struct TerminalRuntimeState {
     local_cwd: Option<PathBuf>,
     /// 前台进程是 herdr 时，herdr server 焦点 pane 的 cwd；否则 None。
     herdr_cwd: Option<PathBuf>,
-    /// OSC 7 扫描跨 chunk 拼接缓冲；上限 OSC7_BUF_CAP，超出丢弃旧字节。
+    /// OSC 7 扫描跨 chunk 拼接缓冲；只保留未完成序列的尾巴，单条超过 OSC7_MAX_LEN 的序列整段丢弃。
     osc7_scan_buf: Vec<u8>,
     /// 录制中为 Some；process_output 旁路 raw bytes 进去。
     recorder: Option<TerminalRecorder>,
@@ -2690,7 +2690,7 @@ fn apply_term_event(state: &mut TerminalRuntimeState, event: Event) {
                 .clipboard_load_requests
                 .push_back(TerminalClipboardLoadRequest { formatter });
         }
-        // MouseCursorDirty / Wakeup / etc. don't surface in this spike yet.
+        // 其余事件（MouseCursorDirty / Wakeup 等）不处理。
         _ => {}
     }
 }
@@ -3337,8 +3337,7 @@ impl LocalTerminalRuntime {
     /// Hand the wakeup channel to the UI thread. Wakeups land in a
     /// `bounded(1)` channel — successive PTY bursts coalesce into one
     /// pending wakeup. The UI is expected to wrap the receiver in a
-    /// 60 Hz throttle (Warp's `WAKEUP_THROTTLE_PERIOD`,
-    /// `view.rs:644`).
+    /// 60 Hz throttle (Warp's `WAKEUP_THROTTLE_PERIOD` in `view.rs`).
     pub fn take_wakeup_rx(&mut self) -> Option<async_channel::Receiver<()>> {
         self.wakeup_rx.take()
     }
@@ -3896,9 +3895,8 @@ impl LocalTerminalRuntime {
     }
 }
 
-// EventLoopHandle::Drop sends Message::Shutdown, kills the child, and joins
-// the PTY thread, so LocalTerminalRuntime needs no extra Drop impl —
-// dropping `event_loop: Option<EventLoopHandle>` is enough.
+// EventLoopHandle 的 Drop 发 Shutdown 并 join；子进程还活着时由事件循环线程退出前 kill
+// （unix，EventLoop::run 末尾），所以 LocalTerminalRuntime 不需要额外的 Drop impl。
 
 /// resize 请求与上次完全一致（含 cell 像素宽高）则判重复；否则记录并放行。
 fn resize_request_is_duplicate(
@@ -4814,7 +4812,7 @@ fn pty_size(cols: u16, rows: u16, cell_width: u16, cell_height: u16) -> PtySize 
     }
 }
 
-/// Warp: `app/src/terminal/local_tty/unix.rs:261` build_host_shell_command
+/// Warp: `crates/warp_terminal/src/local_tty/unix.rs` build_host_shell_command
 fn configure_command_environment(command: &mut CommandBuilder) {
     if let Some(user) = env_var("USER").or_else(|| env_var("USERNAME")) {
         command.env("LOGNAME", &user);
@@ -4908,7 +4906,7 @@ fn default_shell() -> String {
         })
 }
 
-/// Warp: `app/src/terminal/local_tty/shell.rs:555` arguments_for_session_spawning_command
+/// Warp: `crates/warp_terminal/src/local_tty/shell.rs` arguments_for_session_spawning_command
 /// 通过 `exec -a -<shell>` 设置 argv[0] 为 "-<shell>"，使 shell 以 login shell 启动。
 fn build_login_shell_command(shell: &str) -> CommandBuilder {
     let basename = std::path::Path::new(shell)
@@ -4980,7 +4978,7 @@ fn build_shell_command_with_integration(shell: &str, display: &str) -> CommandBu
     build_login_shell_command(shell)
 }
 
-/// Warp: `app/src/terminal/local_tty/unix.rs:126` get_pw_entry
+/// 对照 Warp `crates/warp_terminal/src/local_tty/unix.rs` 的 getpwuid_r 用户查询。
 #[cfg(unix)]
 fn get_pw_home(buf: &mut [i8; 1024]) -> Option<String> {
     use std::ffi::CStr;
@@ -5091,7 +5089,7 @@ impl TerminalPalette {
         let sel_b = ((accent.b as u32 * 80 + bg.b as u32 * 176) / 256) as u8;
         let selection = (u32::from(sel_r) << 16) | (u32::from(sel_g) << 8) | u32::from(sel_b);
 
-        // warp: workspace/view.rs:22856 — 有背景图时终端背景半透明
+        // warp: workspace/view.rs 里按 theme.background_image() 处理终端背景透明
         let background_alpha = theme
             .background_image()
             .map(|img| ((100u16.saturating_sub(img.opacity as u16)) * 255 / 100) as u8)
@@ -5973,8 +5971,7 @@ mod tests {
     }
 }
 
-/// Kitty 键盘协议下 Option 修饰的编辑键编码（openspec `terminal-kitty-modifier-keys`，
-/// 上游 warp af2f7c61d）。协议未激活时保持 legacy 序列不变。
+/// Kitty 键盘协议下 Option 修饰的编辑键编码（上游 warp af2f7c61d）。协议未激活时保持 legacy 序列不变。
 #[cfg(all(test, feature = "warpui-app"))]
 mod kitty_modifier_tests {
     use super::*;

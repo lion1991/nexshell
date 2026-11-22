@@ -86,9 +86,8 @@ impl TerminalImeLayout {
     }
 }
 
-// PTY 异步输出的 redraw 通路改由 RootView 端的后台轮询负责（见 main.rs
-// `schedule_poll`），用 `ViewContext::spawn` + `Timer::after` 自重排，
-// revision 变了才 `ctx.notify()`。dispatch_event 只在自己处理事件后立刻
+// PTY 输出的重绘由 root_view::attach_terminal_streams 订阅节流后的 wakeup 流触发
+// （见 handle_terminal_wakeup）；dispatch_event 只在自己处理事件后立刻
 // `ctx.notify()`，确保用户输入立即上屏。
 
 /// 下划线样式（SGR 4:x）：None/Single/Double 是直线矩形，Curl/Dotted/Dashed
@@ -555,7 +554,7 @@ pub struct CellMetrics {
 }
 
 impl CellMetrics {
-    /// warp: grid_size_util.rs:15-57 grid_cell_dimensions + :61-81 calculate_grid_baseline_position
+    /// warp: grid_size_util.rs grid_cell_dimensions + calculate_grid_baseline_position
     pub fn from_font_cache(
         font_cache: &FontCache,
         font_family: FamilyId,
@@ -2088,7 +2087,7 @@ fn terminal_scrollbar_thumb_fill(
     }
 }
 
-// warp view.rs:750-756 PADDING_LEFT = 16 (LessHorizontalTerminalPadding)。
+// warp view.rs PADDING_LEFT = 16（LessHorizontalTerminalPadding）。
 const GRID_PADDING_LEFT: f32 = 16.0;
 const GRID_PADDING_TOP: f32 = 4.0;
 // ScrollbarWidth::Auto = 8px + 4px 间距。
@@ -2129,7 +2128,7 @@ fn split_pane_terminal_body_size(available: Vector2F, header_height: f32) -> Vec
 }
 
 /// 像素级平滑滚动：trackpad 直接用 pixel delta，discrete wheel 按
-/// Warp scrollable.rs:44 的 `NUM_PIXELS_PER_LINE = 40` 放大。
+/// Warp `warpui_core/src/elements/gui/scrollable.rs` 的 `NUM_PIXELS_PER_LINE = 40` 放大。
 const DISCRETE_SCROLL_LINES_PER_NOTCH: f64 = 3.0;
 const TRACKPAD_SCROLL_MULTIPLIER: f64 = 2.0;
 
@@ -2823,7 +2822,7 @@ impl Element for TerminalGridElement {
 
         let default_bg = u32_to_color(self.palette.background);
         for rect in terminal_background_rects(&grid, self.cell_metrics) {
-            // warp: workspace/util.rs:364-386 — 有背景图时默认 bg 单元格也要半透明
+            // warp: workspace/util.rs get_terminal_background_opacity — 有背景图时默认 bg 单元格也要半透明
             let color = if self.palette.background_alpha < 255
                 && rect.color.r == default_bg.r
                 && rect.color.g == default_bg.g

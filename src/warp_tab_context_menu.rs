@@ -2,10 +2,10 @@
 //!
 //! This mirrors the structure of `warp/app/src/tab.rs`:
 //! `menu_items_with_pane_name_target` builds menu sections in order, inserting
-//! separators only between non-empty sections. The native spike currently has
-//! local terminal tabs only, so the Warp sections that depend on product state
-//! we do not carry yet (shared sessions and saved tab configs) are kept as
-//! empty sections rather than re-shaped into a custom menu.
+//! separators only between non-empty sections.
+//!
+//! NexShell 的标签有本地 / SSH / RDP / 串口 / Telnet 等多种，Warp 里依赖产品状态而我们
+//! 没有的分区（共享会话、保存的标签配置）保持为空分区，不改造成自定义菜单。
 
 use crate::menu::{MenuItem, MenuItemFields};
 use pathfinder_geometry::vector::Vector2F;

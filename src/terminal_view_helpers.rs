@@ -147,7 +147,7 @@ pub(crate) fn optional_text(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-// Close button(× icon),hover 时背景提亮 ── 对照 warp tab.rs:984-1062 / icon_button。
+// Close button(× icon),hover 时背景提亮 ── 对照 warp tab.rs 的 render_close_button_or_pin_icon / icon_button。
 pub(crate) fn close_button_element(
     state: MouseStateHandle,
     tab_index: usize,

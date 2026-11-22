@@ -1,8 +1,6 @@
-//! Stream throttle adapter, vendored verbatim from
-//! `warp/app/src/throttle.rs`. Used to cap PTY wakeup notifications at
-//! 60 Hz on the UI thread (Warp's `view.rs:644` `WAKEUP_THROTTLE_PERIOD
-//! = 1s / 60`). The exact same implementation drives the wakeup pipeline
-//! over there; we keep it bit-for-bit identical so behaviour matches.
+//! Stream throttle adapter，取自 `warp/app/src/throttle.rs`，逻辑一致。
+//! 用来把 PTY wakeup 通知限到 UI 线程 60 Hz（Warp 的 `WAKEUP_THROTTLE_PERIOD
+//! = 1s / 60`）。Warp 的 wakeup 管线用的是同一份实现，逻辑与上游保持一致。
 
 use std::{pin, task, time::Duration};
 
